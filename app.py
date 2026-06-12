@@ -5,7 +5,7 @@ import datetime
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Contagem de Estoque Físico", layout="wide")
 
-# --- ESTILIZAÇÃO PERSONALIZADA (Identificação com o novo design do print) ---
+# --- ESTILIZAÇÃO PERSONALIZADA (Identificação com o design do print) ---
 st.markdown("""
     <style>
     /* Botões laranjas largos de confirmação */
@@ -70,7 +70,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- BANCO DE DADOS EM MEMÓRIA DA SESSÃO ---
+# --- BANCO DE DADOS EM MEMÓRIA - GARANTIA DE PERSISTÊNCIA ANTIQUEDA ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'base_sistema' not in st.session_state:
@@ -127,7 +127,6 @@ else:
             id_inventario_atual = None
             inventario_selecionado_obj = None
         else:
-            # Lista apenas inventários para seleção
             lista_inv = [f"{i['id']} – {i['nome']} ({i['status']})" for i in st.session_state.inventarios]
             inventario_selected = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
             id_inventario_atual = inventario_selected.split(" – ")[0]
@@ -146,11 +145,10 @@ else:
                     st.toast(f"Inventário {novo_id} Criado!")
                     st.rerun()
 
-        # Botão Fechar Inventário Atual (Conforme Print)
+        # Botão Fechar Inventário Atual
         if inventario_selecionado_obj and inventario_selecionado_obj['status'] == "Aberto":
             if st.button("🔒 Fechar inventário atual", use_container_width=True):
                 inventario_selecionado_obj['status'] = "Fechado"
-                # Contabiliza no histórico da equipe
                 nome_op = st.session_state.operador if st.session_state.operador else "admin"
                 df_eq = st.session_state.historico_equipe
                 if nome_op in df_eq['Operador'].values:
@@ -192,7 +190,6 @@ else:
     st.title("📦 Painel Geral de Auditoria")
     st.caption("Tel Telecomunicações · Painel de Auditoria Ativa")
     
-    # Abas principais ajustadas com os nomes idênticos aos prints
     aba_contar, aba_atual, aba_historico, aba_base, aba_graficos = st.tabs([
         "🔍 Contar Item", 
         "📊 Contagem Atual", 
@@ -209,7 +206,6 @@ else:
         contagens_mutaveis = st.session_state.contagens_por_inventario.get(id_inventario_atual, {})
         df_exemplo = st.session_state.base_sistema
         
-        # --- MAPEAMENTO DA PLANILHA PELOS CÓDIGOS CORRETOS ---
         colunas_reais = list(df_exemplo.columns)
         
         def encontrar_coluna(opcoes, default_idx):
@@ -228,7 +224,7 @@ else:
         # --- ABA 1: CONTAR ITEM ---
         with aba_contar:
             if inventario_selecionado_obj and inventario_selecionado_obj['status'] == "Fechado":
-                st.error("🔒 Este inventário está Fechado. Selecione ou crie um inventário Aberto para realizar contagens.")
+                st.error("🔒 Este inventário está Fechado. Selecione ou crie um inventário Aberto na barra lateral para realizar novas contagens.")
             else:
                 c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
                 with c_busca:
@@ -242,7 +238,6 @@ else:
                         st.rerun()
                 
                 if codigo_input:
-                    # CORREÇÃO DO ATTRIBUTEERROR: Conversão robusta em string antes das operações textuais
                     serie_codigos = df_exemplo[col_cod].astype(str).str.upper().str.strip()
                     item = df_exemplo[serie_codigos == str(codigo_input).upper().strip()]
                     
@@ -259,7 +254,6 @@ else:
                         except:
                             qtd_sis = 0
                         
-                        # Renderização dos 4 Cards Superiores
                         b1, b2, b3, b4 = st.columns(4)
                         with b1:
                             st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
@@ -298,86 +292,15 @@ else:
             if not contagens_mutaveis:
                 st.info("Nenhum item foi auditado neste inventário corrente.")
             else:
+                # Botão para Excluir item individual da contagem atual
+                st.write("### Itens Auditados e Divergências")
                 df_contado = pd.DataFrame.from_dict(contagens_mutaveis, orient='index').reset_index()
                 df_contado.columns = ['Cód. Produto', 'Estoque Físico', 'Qtd Estoque', 'Desc. Produto', 'Observação']
                 df_contado['Divergência'] = df_contado['Estoque Físico'] - df_contado['Qtd Estoque']
-                
-                st.write("### Itens Auditados e Divergências")
                 st.dataframe(df_contado, use_container_width=True)
-
-        # --- ABA 3: HISTÓRICO DE INVENTÁRIOS (NOVO - IGUAL AO PRINT) ---
-        with aba_historico:
-            st.write("### 📁 Histórico de Inventários")
-            st.caption("None")
-            
-            for inv in st.session_state.inventarios:
-                cor_bola = "🟢" if inv['status'] == "Aberto" else "🔴"
-                qtd_contada_inv = len(st.session_state.contagens_por_inventario.get(inv['id'], {}))
                 
-                with st.expander(f"{cor_bola} {inv['id']} – {inv['nome']} | {inv['data']} | {qtd_contada_inv} itens"):
-                    detalhes_contagem = st.session_state.contagens_por_inventario.get(inv['id'], {})
-                    if not detalhes_contagem:
-                        st.caption("Nenhum item contabilizado neste registro.")
-                    else:
-                        df_hist_inv = pd.DataFrame.from_dict(detalhes_contagem, orient='index').reset_index()
-                        df_hist_inv.columns = ['Cód. Produto', 'Físico', 'Sistema', 'Descrição', 'Observação']
-                        st.dataframe(df_hist_inv, use_container_width=True)
-
-        # --- ABA 4: BASE DE ESTOQUE ---
-        with aba_base:
-            df_visualizacao = st.session_state.base_sistema.copy()
-            
-            filtro_estoque = st.selectbox("Filtrar por Estoque Físico", ["Todos", "Apenas Pendentes", "Apenas Contados"], key="filtro_base_tab")
-            pesquisa = st.text_input("🔍 Pesquisar (código ou descrição)", placeholder="Filtre por trechos de dados...", key="pesquisa_base_tab")
-            
-            df_visualizacao['Status'] = df_visualizacao[col_cod].apply(
-                lambda x: "✅ Contado" if str(x).upper().strip() in contagens_mutaveis else "⏳ Pendente"
-            )
-            
-            if filtro_estoque == "Apenas Pendentes":
-                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "⏳ Pendente"]
-            elif filtro_estoque == "Apenas Contados":
-                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "✅ Contado"]
-                
-            if pesquisa:
-                df_visualizacao = df_visualizacao[
-                    df_visualizacao[col_cod].astype(str).str.contains(pesquisa, case=False) | 
-                    df_visualizacao[col_desc].astype(str).str.contains(pesquisa, case=False)
-                ]
-            
-            cols = ['Status'] + [c for c in df_visualizacao.columns if c != 'Status']
-            df_visualizacao = df_visualizacao[cols]
-            
-            st.markdown("---")
-            col_inf, col_sli = st.columns([2, 2])
-            with col_inf:
-                st.caption(f"{len(df_visualizacao)} itens encontrados | Arquivo: {st.session_state.nome_arquivo_excel}")
-            with col_sli:
-                itens_por_pagina = st.slider("Itens por página", min_value=10, max_value=100, value=50, step=10, key="slider_pag")
-            
-            total_linhas = len(df_visualizacao)
-            total_paginas = max(1, (total_linhas + itens_por_pagina - 1) // itens_por_pagina)
-            
-            col_ant, col_pag, col_prox = st.columns([1, 2, 1])
-            with col_ant:
-                if st.button("◀ Anterior", use_container_width=True, key="btn_ant") and st.session_state.pagina_atual > 1:
-                    st.session_state.pagina_atual -= 1
-                    st.rerun()
-            with col_pag:
-                st.markdown(f"<p style='text-align: center; font-weight: bold;'>Página {st.session_state.pagina_atual} de {total_paginas}</p>", unsafe_allow_html=True)
-            with col_prox:
-                if st.button("Próxima ▶", use_container_width=True, key="btn_prox") and st.session_state.pagina_atual < total_paginas:
-                    st.session_state.pagina_atual += 1
-                    st.rerun()
-            
-            inicio = (st.session_state.pagina_atual - 1) * itens_por_pagina
-            fim = inicio + itens_por_pagina
-            
-            st.dataframe(df_visualizacao.iloc[inicio:fim], use_container_width=True)
-
-        # --- ABA 5: GRÁFICO DA EQUIPE ---
-        with aba_graficos:
-            st.write("### 🏆 Ranking de Inventários por Operador")
-            df_equipe = st.session_state.historico_equipe.copy()
-            df_equipe = df_equipe.sort_values(by='Inventários Feitos', ascending=False)
-            st.bar_chart(data=df_equipe, x='Operador', y='Inventários Feitos', color="#d35400")
+                item_para_remover = st.selectbox("Selecione um código para remover/excluir a contagem (se necessário):", [""] + list(contagens_mutaveis.keys()))
+                if item_para_remover and st.button("🗑️ Excluir contagem do item selecionado", type="secondary"):
+                    del contagens_mutaveis[item_para_remover]
+                    st.session_state.contagens_por_inventario[id_inventario_atual] = contagens_mutaveis
+                    st.toast
