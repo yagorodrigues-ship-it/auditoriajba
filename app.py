@@ -234,14 +234,11 @@ else:
                     st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == str(c_row['cod_produto']).upper().strip()
                 ]
                 if not match_base.empty:
-                    # Varre todas as ocorrências possíveis daquele código no saldo para cruzar ativos corretos
                     ativos_validos_da_base = [str(x).upper().strip() for x in match_base[col_ativo_base].tolist() if col_ativo_base in match_base.columns]
-                    
-                    # Filtra apenas registros com ativos reais (ignora flags genéricas)
                     ativos_validos_da_base = [x for x in ativos_validos_da_base if x not in ["NAN", "SIM", "", "0", "0.0"]]
                     
-                    if ativos_validos_da_base:
-                        if str(c_row['ativo']).upper().strip() in ativos_validos_da_base:
+                    if map_ativos_base_lista := ativos_validos_da_base:
+                        if str(c_row['ativo']).upper().strip() in map_ativos_base_lista:
                             contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
                     else:
                         contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
@@ -315,7 +312,6 @@ else:
                         except:
                             qtd_sis = 0
                         
-                        # Lista todos os ativos válidos desse mesmo código na base
                         ativos_da_base_lista = [str(x).upper().strip() for x in item[col_ativo_base].tolist() if col_ativo_base in item.columns]
                         ativos_da_base_lista = [x for x in list(set(ativos_da_base_lista)) if x not in ["NAN", "SIM", "", "0", "0.0"]]
 
@@ -351,39 +347,49 @@ else:
                             if btn_confirmar:
                                 ativo_digitado_limpo = ativo_input.strip().upper()
                                 
-                                if高度_da_base_lista = ativos_da_base_lista # alias
-                                if ativos_da_base_lista and not ativo_digitado_limpo:
-                                    st.error("❌ Erro: O preenchimento do número de Ativo é obrigatório para este item!")
-                                else:
-                                    agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                    lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
-                                    
-                                    # --- CORREÇÃO CIRÚRGICA DE VALIDAÇÃO ISOLADA ---
-                                    qtd_sistema_calculada = qtd_sis
-                                    
-                                    if高度_da_base_lista: # se o item exige controle estrito por ativos
+                                if高度_da_base_lista := ativos_da_base_lista:
+                                    if not ativo_digitado_limpo:
+                                        st.error("❌ Erro: O preenchimento do número de Ativo é obrigatório para este item!")
+                                    else:
+                                        agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                        lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
+                                        
+                                        qtd_sistema_calculada = qtd_sis
                                         if ativo_digitado_limpo in高度_da_base_lista:
-                                            # Se o patrimônio bate perfeitamente, valida contra a linha correspondente dele
                                             linha_especifica = item[item[col_ativo_base].astype(str).str.upper().str.strip() == ativo_digitado_limpo]
                                             try:
                                                 qtd_sistema_calculada = int(pd.to_numeric(linha_especifica.iloc[0][col_qtd], errors='coerce'))
                                             except:
                                                 qtd_sistema_calculada = 1
                                         else:
-                                            # CORREÇÃO DO PROBLEMA DO USUÁRIO: Se o ativo for inválido/errado de propósito, 
-                                            # ele gera 0 no sistema de forma ISOLADA para aquela linha, gerando divergência só nele!
                                             qtd_sistema_calculada = 0
                                             
-                                    dif_calculada = qtd_fisica - qtd_sistema_calculada
+                                        dif_calculada = qtd_fisica - qtd_sistema_calculada
+                                        
+                                        cursor = conn.cursor()
+                                        cursor.execute("""
+                                            INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                        """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
+                                        conn.commit()
+                                        
+                                        st.toast(f"Lançamento processado e armazenado de forma isolada!")
+                                        st.session_state.reset_bip = True
+                                        st.rerun()
+                                else:
+                                    # Se a base não possui ativos configurados, o campo vira puramente opcional
+                                    agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
+                                    dif_calculada = qtd_fisica - qtd_sis
                                     
                                     cursor = conn.cursor()
                                     cursor.execute("""
                                         INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
+                                    """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sis, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
                                     conn.commit()
                                     
-                                    st.toast(f"Lançamento processado e armazenado de forma isolada!")
+                                    st.toast(f"Lançamento opcional processado!")
                                     st.session_state.reset_bip = True
                                     st.rerun()
                     else:
@@ -436,7 +442,6 @@ else:
                     
                     if df_hist_inv.empty:
                         st.info("Nenhum item contado neste inventário.")
-                        # TRAVA DE SEGURANÇA: Só o admin (criador) pode apagar inventários vazios
                         if st.session_state.operador == "admin":
                             if st.button("🗑️ Excluir inventário vazio", key=f"del_vazio_{inv['id']}_{idx}"):
                                 cursor = conn.cursor()
@@ -460,14 +465,13 @@ else:
                                 key=f"dl_excel_{inv['id']}"
                             )
                         with c_del_full:
-                            # SOLICITAÇÃO ATENDIDA: Só permite exclusão se o usuário logado for o criador ('admin')
                             if st.session_state.operador == "admin":
                                 if st.button("❌ Excluir Inventário Arquivado", key=f"del_full_{inv['id']}_{idx}", use_container_width=True):
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
                                     cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
                                     conn.commit()
-                                    st.toast(f"Inventário {inv['id']} excluído permanentemente pelo administrador.")
+                                    st.toast(f"Inventário {inv['id']} excluído permanentemente.")
                                     st.rerun()
 
         # --- ABA 4: BASE DE ESTOQUE ---
