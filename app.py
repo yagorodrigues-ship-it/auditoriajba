@@ -218,7 +218,7 @@ else:
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
             col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo', 'id_estoque'], -1)
 
-        # --- CÁLCULO DE PROGRESSO (CORRIGIDO SEM NAMEERROR) ---
+        # --- CÁLCULO DE PROGRESSO DINÂMICO E SEGURO ---
         total_itens_base = 0
         total_contados = 0
         total_pendentes = 0
@@ -234,16 +234,16 @@ else:
                     st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == str(c_row['cod_produto']).upper().strip()
                 ]
                 if not match_base.empty:
-                    raw_ativo = str(match_base.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in match_base.columns else ""
+                    # Varre todas as ocorrências possíveis daquele código no saldo para cruzar ativos corretos
+                    ativos_validos_da_base = [str(x).upper().strip() for x in match_base[col_ativo_base].tolist() if col_ativo_base in match_base.columns]
                     
-                    # Identifica se o item realmente exige controle por número de patrimônio/ativo estrito
-                    tem_ativo_estrico = raw_ativo and raw_ativo not in ["NAN", "SIM", "", "0", "0.0"]
+                    # Filtra apenas registros com ativos reais (ignora flags genéricas)
+                    ativos_validos_da_base = [x for x in ativos_validos_da_base if x not in ["NAN", "SIM", "", "0", "0.0"]]
                     
-                    if tem_ativo_estrico:
-                        if str(c_row['ativo']).upper().strip() == raw_ativo:
+                    if ativos_validos_da_base:
+                        if str(c_row['ativo']).upper().strip() in ativos_validos_da_base:
                             contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
                     else:
-                        # Se na base está zerado/sem ativo cadastrado, valida apenas se as quantidades batem
                         contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
             
             total_contados = len(df_contagens_atuais)
@@ -315,9 +315,9 @@ else:
                         except:
                             qtd_sis = 0
                         
-                        ativo_original_base = str(item.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in item.columns else ""
-                        if ativo_original_base in ["NAN", "SIM", "", "0", "0.0"]:
-                            ativo_original_base = ""
+                        # Lista todos os ativos válidos desse mesmo código na base
+                        ativos_da_base_lista = [str(x).upper().strip() for x in item[col_ativo_base].tolist() if col_ativo_base in item.columns]
+                        ativos_da_base_lista = [x for x in list(set(ativos_da_base_lista)) if x not in ["NAN", "SIM", "", "0", "0.0"]]
 
                         b1, b2, b3, b4 = st.columns(4)
                         with b1:
@@ -332,18 +332,18 @@ else:
                         st.markdown(f"**Descrição:** {desc_val}")
                         st.markdown(f"**Local:** {local_val}")
                         
-                        if ativo_original_base:
-                            st.info(f"📋 **Nota de Sistema:** Este produto exige cruzamento estruturado com o Ativo Nº **{ativo_original_base}**.")
+                        if ativos_da_base_lista:
+                            st.info(f"📋 **Nota de Sistema:** Este item possui ativos mapeados no saldo. Ativos válidos: {', '.join(ativos_da_base_lista)}")
                         else:
-                            st.caption("ℹ️ **Nota:** Produto com linha de ativo zerada/ausente no Excel (Campo Opcional).")
+                            st.caption("ℹ️ **Nota:** Linhas de ativo zeradas ou ausentes para este item no Excel (Campo Opcional).")
                         
                         st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                         
                         with st.form("confirmar_contagem_form", clear_on_submit=True):
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=1)
                             
-                            rotulo_ativo = "🔢 Número do Ativo / Patrimônio (Obrigatório)" if ativo_original_base else "🔢 Número do Ativo / Patrimônio (Opcional - Linha Zerada)"
-                            ativo_input = st.text_input(rotulo_ativo, placeholder="Insira o número se houver...")
+                            rotulo_ativo = "🔢 Número do Ativo / Patrimônio (Obrigatório)" if ativos_da_base_lista else "🔢 Número do Ativo / Patrimônio (Opcional - Linha Zerada)"
+                            ativo_input = st.text_input(rotulo_ativo, placeholder="Insira o número de identificação do ativo...")
                             
                             observacao = st.text_input("📝 Observação (opcional)")
                             btn_confirmar = st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True)
@@ -351,18 +351,29 @@ else:
                             if btn_confirmar:
                                 ativo_digitado_limpo = ativo_input.strip().upper()
                                 
-                                # VALIDAÇÃO FLEXÍVEL: Só obriga se o ativo existir e for válido na planilha base
-                                if ativo_original_base and not ativo_digitado_limpo:
+                                if高度_da_base_lista = ativos_da_base_lista # alias
+                                if ativos_da_base_lista and not ativo_digitado_limpo:
                                     st.error("❌ Erro: O preenchimento do número de Ativo é obrigatório para este item!")
                                 else:
                                     agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
                                     
-                                    # Lógica de cálculo do saldo sistêmico
+                                    # --- CORREÇÃO CIRÚRGICA DE VALIDAÇÃO ISOLADA ---
                                     qtd_sistema_calculada = qtd_sis
-                                    if ativo_original_base and ativo_digitado_limpo != ativo_original_base:
-                                        qtd_sistema_calculada = 0
-                                        
+                                    
+                                    if高度_da_base_lista: # se o item exige controle estrito por ativos
+                                        if ativo_digitado_limpo in高度_da_base_lista:
+                                            # Se o patrimônio bate perfeitamente, valida contra a linha correspondente dele
+                                            linha_especifica = item[item[col_ativo_base].astype(str).str.upper().str.strip() == ativo_digitado_limpo]
+                                            try:
+                                                qtd_sistema_calculada = int(pd.to_numeric(linha_especifica.iloc[0][col_qtd], errors='coerce'))
+                                            except:
+                                                qtd_sistema_calculada = 1
+                                        else:
+                                            # CORREÇÃO DO PROBLEMA DO USUÁRIO: Se o ativo for inválido/errado de propósito, 
+                                            # ele gera 0 no sistema de forma ISOLADA para aquela linha, gerando divergência só nele!
+                                            qtd_sistema_calculada = 0
+                                            
                                     dif_calculada = qtd_fisica - qtd_sistema_calculada
                                     
                                     cursor = conn.cursor()
@@ -372,7 +383,7 @@ else:
                                     """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
                                     conn.commit()
                                     
-                                    st.toast(f"Lançamento processado com sucesso!")
+                                    st.toast(f"Lançamento processado e armazenado de forma isolada!")
                                     st.session_state.reset_bip = True
                                     st.rerun()
                     else:
@@ -425,26 +436,39 @@ else:
                     
                     if df_hist_inv.empty:
                         st.info("Nenhum item contado neste inventário.")
-                        if st.button("🗑️ Excluir inventário vazio", key=f"del_vazio_{inv['id']}_{idx}"):
-                            cursor = conn.cursor()
-                            cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
-                            conn.commit()
-                            st.toast("Inventário excluído!")
-                            st.rerun()
+                        # TRAVA DE SEGURANÇA: Só o admin (criador) pode apagar inventários vazios
+                        if st.session_state.operador == "admin":
+                            if st.button("🗑️ Excluir inventário vazio", key=f"del_vazio_{inv['id']}_{idx}"):
+                                cursor = conn.cursor()
+                                cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
+                                conn.commit()
+                                st.toast("Inventário vazio excluído do histórico!")
+                                st.rerun()
                     else:
                         ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora', 'lote']
                         st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
                         
-                        buffer = io.BytesIO()
-                        df_hist_inv[ordem_colunas_print].to_excel(buffer, index=False, engine='openpyxl')
-                        
-                        st.download_button(
-                            label="📥 Exportar este Inventário para Excel (.xlsx)",
-                            data=buffer.getvalue(),
-                            file_name=f"Inventario_{inv['id']}_{inv['nome']}.xlsx",
-                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                            key=f"dl_excel_{inv['id']}"
-                        )
+                        c_dl, c_del_full = st.columns([4, 2])
+                        with c_dl:
+                            buffer = io.BytesIO()
+                            df_hist_inv[ordem_colunas_print].to_excel(buffer, index=False, engine='openpyxl')
+                            st.download_button(
+                                label="📥 Exportar este Inventário para Excel (.xlsx)",
+                                data=buffer.getvalue(),
+                                file_name=f"Inventario_{inv['id']}_{inv['nome']}.xlsx",
+                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                key=f"dl_excel_{inv['id']}"
+                            )
+                        with c_del_full:
+                            # SOLICITAÇÃO ATENDIDA: Só permite exclusão se o usuário logado for o criador ('admin')
+                            if st.session_state.operador == "admin":
+                                if st.button("❌ Excluir Inventário Arquivado", key=f"del_full_{inv['id']}_{idx}", use_container_width=True):
+                                    cursor = conn.cursor()
+                                    cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
+                                    cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
+                                    conn.commit()
+                                    st.toast(f"Inventário {inv['id']} excluído permanentemente pelo administrador.")
+                                    st.rerun()
 
         # --- ABA 4: BASE DE ESTOQUE ---
         with aba_base:
@@ -457,9 +481,10 @@ else:
                 for idx, r_cont in df_contagens_mutaveis.iterrows():
                     match_base = df_visualizacao[df_visualizacao[col_cod].astype(str).str.upper().str.strip() == str(r_cont['cod_produto']).upper().strip()]
                     if not match_base.empty:
-                        at_esp = str(match_base.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in match_base.columns else ""
-                        if at_esp and at_esp not in ["NAN", "SIM", "", "0", "0.0"]:
-                            if str(r_cont['ativo']).upper().strip() == at_esp:
+                        at_esp = [str(x).upper().strip() for x in match_base[col_ativo_base].tolist() if col_ativo_base in match_base.columns]
+                        at_esp = [x for x in at_esp if x not in ["NAN", "SIM", "", "0", "0.0"]]
+                        if at_esp:
+                            if str(r_cont['ativo']).upper().strip() in at_esp:
                                 codigos_contados_set.add(str(r_cont['cod_produto']).upper().strip())
                         else:
                             codigos_contados_set.add(str(r_cont['cod_produto']).upper().strip())
