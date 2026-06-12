@@ -240,7 +240,6 @@ else:
             else:
                 c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
                 with c_busca:
-                    # Mecanismo seguro de limpeza de estado do campo
                     valor_padrao = ""
                     if st.session_state.reset_bip:
                         st.session_state.reset_bip = False
@@ -272,12 +271,12 @@ else:
                         except:
                             qtd_sis = 0
                         
-                        # Renderização dos Cards Superiores
+                        # Renderização dos Cards Informativos Superiores
                         b1, b2, b3, b4 = st.columns(4)
                         with b1:
                             st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
                         with b2:
-                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor">{local_val}</div></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
                         with b3:
                             st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
                         with b4:
@@ -290,49 +289,55 @@ else:
                         
                         with st.form("confirmar_contagem_form", clear_on_submit=True):
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=0)
+                            
+                            # Campo obrigatório para inserção do Ativo (Identificador Único)
+                            ativo_input = st.text_input("🔢 Número do Ativo / Patrimônio (Obrigatório)", placeholder="Digite o número do ativo único gravado neste item físico...")
+                            
                             observacao = st.text_input("📝 Observação (opcional)", placeholder="Notas adicionais sobre o produto...")
                             btn_confirmar = st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True)
                             
                             if btn_confirmar:
-                                st.session_state.id_counter += 1
-                                agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                
-                                # Coleta e tratamento do lote caso exista na planilha original
-                                lote_val = ""
-                                if 'lote' in item.columns:
-                                    lote_val = str(item.iloc[0]['lote'])
-                                elif 'Lote' in item.columns:
-                                    lote_val = str(item.iloc[0]['Lote'])
-                                
-                                novo_registro = {
-                                    "id": st.session_state.id_counter,
-                                    "inventario_id": int(id_inventario_atual.replace("#", "")),
-                                    "id_estoque": 1118,
-                                    "desc_estoque": local_val,
-                                    "cod_produto": codigo_input.upper().strip(),
-                                    "desc_produto": desc_val,
-                                    "unid_medida": unid_val,
-                                    "qtd_sistema": qtd_sis,
-                                    "qtd_contada": qtd_fisica,
-                                    "diferenca": qtd_fisica - qtd_sis,
-                                    "ativo": "Sim",
-                                    "observacao": observacao,
-                                    "operador": st.session_state.operador if st.session_state.operador else "admin",
-                                    "data_hora": agora,
-                                    "lote": lote_val
-                                }
-                                
-                                lista_contagens_mutaveis.insert(0, novo_registro)
-                                st.session_state.contagens_por_inventario[id_inventario_atual] = lista_contagens_mutaveis
-                                st.toast(f"Lançamento de {codigo_input.upper()} computado!")
-                                
-                                # ATUALIZAÇÃO REATIVA CORRIGIDA (Sem conflito de Session State)
-                                st.session_state.reset_bip = True
-                                st.rerun()
+                                if not ativo_input.strip():
+                                    st.error("❌ Erro: A inclusão do número de Ativo é obrigatória para este lançamento!")
+                                else:
+                                    st.session_state.id_counter += 1
+                                    agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    
+                                    lote_val = ""
+                                    if 'lote' in item.columns:
+                                        lote_val = str(item.iloc[0]['lote'])
+                                    elif 'Lote' in item.columns:
+                                        lote_val = str(item.iloc[0]['Lote'])
+                                    
+                                    # GERAÇÃO DA LINHA DISCRIMINADA EXCLUSIVA (Evita agrupar ou somar linhas iguais)
+                                    novo_registro = {
+                                        "id": st.session_state.id_counter,
+                                        "inventario_id": int(id_inventario_atual.replace("#", "")),
+                                        "id_estoque": 1118,
+                                        "desc_estoque": local_val,
+                                        "cod_produto": codigo_input.upper().strip(),
+                                        "desc_produto": desc_val,
+                                        "unid_medida": unid_val,
+                                        "qtd_sistema": qtd_sis,
+                                        "qtd_contada": qtd_fisica,
+                                        "diferenca": qtd_fisica - qtd_sis,
+                                        "ativo": ativo_input.strip().upper(), 
+                                        "observacao": observacao,
+                                        "operador": st.session_state.operador if st.session_state.operador else "admin",
+                                        "data_hora": agora,
+                                        "lote": lote_val
+                                    }
+                                    
+                                    lista_contagens_mutaveis.insert(0, novo_registro)
+                                    st.session_state.contagens_por_inventario[id_inventario_atual] = lista_contagens_mutaveis
+                                    st.toast(f"Lançamento do Ativo {ativo_input.upper()} computado isoladamente!")
+                                    
+                                    st.session_state.reset_bip = True
+                                    st.rerun()
                     else:
                         st.error("Código do produto não localizado na base de dados (Saldo).")
 
-        # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO) ---
+        # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO DISCRIMINADO) ---
         with aba_atual:
             st.subheader(f"Inventário: {id_inventario_atual} – {inventario_selecionado_obj['nome']} ({inventario_selecionado_obj['data']})")
             
@@ -348,7 +353,6 @@ else:
                 diferenca_acumulada = int(df_relatorio['diferenca'].sum())
                 porcentagem_divergencia = (itens_divergentes / total_auditado) * 100 if total_auditado > 0 else 0
                 
-                # Renderização dos 4 Cards Superiores
                 r1, r2, r3, r4 = st.columns(4)
                 with r1:
                     st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">📦 ITENS CONTADOS</div><div class="bloco-valor">{total_auditado}</div></div>', unsafe_allow_html=True)
@@ -359,10 +363,9 @@ else:
                 with r4:
                     st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">🗄️ QTD TOTAL SISTEMA</div><div class="bloco-valor">{soma_sistema}</div><div style="font-size:12px; color:#e74c3c; font-weight:bold;">↓ {diferenca_acumulada}</div></div>', unsafe_allow_html=True)
                 
-                # Banner informativo
                 st.markdown(f"""
                     <div class="alerta-divergencia">
-                        <strong>⚠️ {itens_divergentes} item com divergência ({porcentagem_divergencia:.0f}% do total)</strong><br>
+                        <strong>⚠️ {itens_divergentes} item(ns) com divergência ({porcentagem_divergencia:.0f}% do total)</strong><br>
                         <span style="color:#7f8c8d; font-size:13px;">Diferença acumulada: {diferenca_acumulada} unidades</span>
                     </div>
                 """, unsafe_allow_html=True)
@@ -377,13 +380,13 @@ else:
                 ]
                 st.dataframe(df_relatorio[ordem_colunas_print], use_container_width=True, hide_index=True)
                 
-                # Opção de exclusão individual
-                codigos_para_remover = [str(x) for x in df_relatorio['cod_produto'].tolist()]
-                item_para_remover = st.selectbox("Selecione um código para remover/excluir a contagem (se necessário):", [""] + codigos_para_remover)
-                if item_para_remover and st.button("🗑️ Excluir contagem do item", type="secondary"):
-                    lista_contagens_mutaveis = [x for x in lista_contagens_mutaveis if x['cod_produto'] != item_para_remover]
+                # Exclusão individual usando o ID único gerado por linha (Permite apagar patrimônios específicos sem afetar outros do mesmo código)
+                ids_para_remover = [int(x) for x in df_relatorio['id'].tolist()]
+                id_para_remover = st.selectbox("Selecione um ID de linha para remover/excluir da contagem (se necessário):", [""] + ids_para_remover)
+                if id_para_remover and st.button("🗑️ Excluir linha selecionada", type="secondary"):
+                    lista_contagens_mutaveis = [x for x in lista_contagens_mutaveis if x['id'] != int(id_para_remover)]
                     st.session_state.contagens_por_inventario[id_inventario_atual] = lista_contagens_mutaveis
-                    st.toast(f"Contagem do item {item_para_remover} removida!")
+                    st.toast(f"Registro ID {id_para_remover} removido!")
                     st.rerun()
 
         # --- ABA 3: HISTÓRICO DE INVENTÁRIOS ---
