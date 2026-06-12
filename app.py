@@ -185,15 +185,13 @@ else:
         st.warning("⚠️ Passo 2 pendente: Crie um Novo Inventário na barra lateral para vincular as contagens à base.")
     else:
         contagens_mutaveis = st.session_state.contagens_por_inventario[id_inventario_atual]
-        
-        # Mapeamento dinâmico das colunas da planilha carregada
         df_exemplo = st.session_state.base_sistema
+        
+        # Definição estrita das colunas baseadas na sua tabela
         col_cod = 'Cód. Produto' if 'Cód. Produto' in df_exemplo.columns else df_exemplo.columns[0]
-        col_id_prod = 'Id. Produto' if 'Id. Produto' in df_exemplo.columns else (df_exemplo.columns[1] if len(df_exemplo.columns) > 1 else df_exemplo.columns[0])
-        col_id_estoque_fisico = 'Id. Estoq. Físico' if 'Id. Estoq. Físico' in df_exemplo.columns else df_exemplo.columns[2]
+        col_desc = 'Desc. Produto' if 'Desc. Produto' in df_exemplo.columns else (df_exemplo.columns[1] if len(df_exemplo.columns) > 1 else df_exemplo.columns[0])
+        col_local = 'Desc. Estoque Físico' if 'Desc. Estoque Físico' in df_exemplo.columns else (df_exemplo.columns[2] if len(df_exemplo.columns) > 2 else 'Geral')
         col_unidade = 'Unid. Medida' if 'Unid. Medida' in df_exemplo.columns else 'UN'
-        col_desc = 'Desc. Produto' if 'Desc. Produto' in df_exemplo.columns else df_exemplo.columns[1]
-        col_local = 'Desc. Estoque Físico' if 'Desc. Estoque Físico' in df_exemplo.columns else 'JBA - CLASSE D'
         col_qtd = 'Qtd Estoque' if 'Qtd Estoque' in df_exemplo.columns else df_exemplo.columns[-1]
         
         # --- ABA 1: CONTAR ITEM ---
@@ -206,37 +204,43 @@ else:
             with c_limpar:
                 st.write("") 
                 if st.button("🗑️ Limpar", use_container_width=True, key="clear_btn"):
+                    st.session_state.input_bip_chave = ""
                     st.rerun()
             
             if codigo_input:
                 item = df_exemplo[df_exemplo[col_cod].astype(str).str.upper() == codigo_input.upper()]
                 
                 if not item.empty:
-                    id_produto_val = item.iloc[0][col_id_prod]
-                    id_est_fisico_val = item.iloc[0][col_id_estoque_fisico] if col_id_estoque_fisico in item.columns else "1077"
                     unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
                     desc_val = item.iloc[0][col_desc]
-                    local_val = item.iloc[0][col_local] if col_local in item.columns else "JBA - CLASSE D"
-                    qtd_sis = item.iloc[0][col_qtd]
+                    local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
                     
-                    # Layout dos 4 Blocos Superiores
+                    # Tratamento seguro contra células em branco/nulas (NaN)
+                    raw_qtd_sis = item.iloc[0][col_qtd]
+                    try:
+                        qtd_sis = int(pd.to_numeric(raw_qtd_sis, errors='coerce'))
+                        if pd.isna(qtd_sis):
+                            qtd_sis = 0
+                    except:
+                        qtd_sis = 0
+                    
+                    # Renderização dos Cards Superiores
                     b1, b2, b3, b4 = st.columns(4)
                     with b1:
                         st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
                     with b2:
-                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor">{id_est_fisico_val}</div></div>', unsafe_allow_html=True)
+                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor">{local_val}</div></div>', unsafe_allow_html=True)
                     with b3:
                         st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
                     with b4:
                         st.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS</div><div class="bloco-valor" style="color:#2ecc71;">● Ativo</div></div>', unsafe_allow_html=True)
                     
+                    # Organização das informações textuais e do formulário de envio
                     st.markdown(f"**Descrição:** {desc_val}")
                     st.markdown(f"**Local:** {local_val}")
                     
-                    # Card largo inferior de saldo sistêmico
-                    st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{int(qtd_sis)}</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                     
-                    # Área de inserção de valores da contagem física protegido por formulário
                     with st.form("confirmar_contagem_form", clear_on_submit=True):
                         qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=0)
                         observacao = st.text_input("📝 Observação (opcional)", placeholder="Notas adicionais sobre o produto...")
@@ -245,14 +249,14 @@ else:
                         if btn_confirmar:
                             contagens_mutaveis[codigo_input.upper()] = {
                                 "Físico": qtd_fisica,
-                                "Sistema": int(qtd_sis),
+                                "Sistema": qtd_sis,
                                 "Descrição": desc_val,
                                 "Observação": observacao
                             }
                             st.toast(f"Contagem do item {codigo_input.upper()} adicionada!")
                             st.rerun()
                 else:
-                    st.error("Código não localizado na base de dados (Saldo).")
+                    st.error("Código do produto não localizado na base de dados (Saldo).")
 
         # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO) ---
         with aba_atual:
