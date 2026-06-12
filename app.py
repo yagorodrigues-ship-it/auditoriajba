@@ -218,7 +218,7 @@ else:
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
             col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo', 'id_estoque'], -1)
 
-        # --- CÁLCULO DE PROGRESSO COM VALIDAÇÃO UNIFICADA DE ATIVO + CÓDIGO ---
+        # --- CÁLCULO DE PROGRESSO COM VALIDAÇÃO TRATADA CONTRA FALSA DIVERGÊNCIA ---
         total_itens_base = 0
         total_contados = 0
         total_pendentes = 0
@@ -234,11 +234,17 @@ else:
                     st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == str(c_row['cod_produto']).upper().strip()
                 ]
                 if not match_base.empty:
-                    ativo_esperado = str(match_base.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in match_base.columns else ""
-                    if ativo_esperado and ativo_esperado not in ["NAN", "SIM", ""]:
-                        if str(c_row['ativo']).upper().strip() == ativo_esperado:
+                    raw_ativo = str(match_base.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in match_base.columns else ""
+                    
+                    # Normaliza se o ativo original está ausente, nulo ou zerado
+                    tem_ativo_estrito = raw_ativo and raw_ativo not in ["NAN", "SIM", "", "0", "0.0"]
+                    
+                    if tem_ativo_estrict:
+                        # Se possui ativo obrigatório mapeado, valida se bate
+                        if str(c_row['ativo']).upper().strip() == raw_ativo:
                             contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
                     else:
+                        # Se na base está zerado/vazio, valida apenas se foi lançado
                         contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
             
             total_contados = len(df_contagens_atuais)
@@ -310,8 +316,9 @@ else:
                         except:
                             qtd_sis = 0
                         
+                        # Tratamento completo do Ativo esperado do saldo original
                         ativo_original_base = str(item.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in item.columns else ""
-                        if ativo_original_base in ["NAN", "SIM", ""]:
+                        if ativo_original_base in ["NAN", "SIM", "", "0", "0.0"]:
                             ativo_original_base = ""
 
                         b1, b2, b3, b4 = st.columns(4)
@@ -326,29 +333,41 @@ else:
                         
                         st.markdown(f"**Descrição:** {desc_val}")
                         st.markdown(f"**Local:** {local_val}")
+                        
                         if ativo_original_base:
-                            st.info(f"📋 **Nota de Sistema:** Este produto aguarda o cruzamento com o Ativo Nº **{ativo_original_base}**.")
+                            st.info(f"📋 **Nota de Sistema:** Este produto exige cruzamento estruturado com o Ativo Nº **{ativo_original_base}**.")
+                        else:
+                            st.caption("ℹ️ **Nota:** Produto sem Ativo controlado mapeado no saldo (Campo Opcional).")
                         
                         st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                         
                         with st.form("confirmar_contagem_form", clear_on_submit=True):
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=1)
-                            ativo_input = st.text_input("🔢 Número do Ativo / Patrimônio (Obrigatório)", placeholder="Insira o número gravado no equipamento...")
+                            
+                            # Rótulo dinâmico informando se é obrigatório ou opcional
+                            rotulo_ativo = "🔢 Número do Ativo / Patrimônio (Obrigatório)" if ativo_original_base else "🔢 Número do Ativo / Patrimônio (Opcional - Linha Zerada na base)"
+                            ativo_input = st.text_input(rotulo_ativo, placeholder="Insira o número se houver...")
+                            
                             observacao = st.text_input("📝 Observação (opcional)")
                             btn_confirmar = st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True)
                             
                             if btn_confirmar:
                                 ativo_digitado_limpo = ativo_input.strip().upper()
-                                if not ativo_digitado_limpo:
-                                    st.error("❌ Erro: O preenchimento do número de Ativo é obrigatório!")
+                                
+                                # SOLICITAÇÃO ATENDIDA: Só barra se possuir ativo configurado no saldo
+                                if ativo_original_base and not ativo_digitado_limpo:
+                                    st.error("❌ Erro: Este item exige a identificação do número de Ativo para validação!")
                                 else:
                                     agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
                                     
+                                    # Validação Inteligente da Divergência:
                                     qtd_sistema_calculada = qtd_sis
-                                    if ativo_original_base and ativo_digitado_limpo != ativo_original_base:
-                                        qtd_sistema_calculada = 0 
                                     
+                                    # Se a base tem um ativo e o digitado for incorreto, força a divergência (Zera a expectativa do sistema para esse ativo errado)
+                                    if ativo_original_base and ativo_digitado_limpo != ativo_original_base:
+                                        qtd_sistema_calculada = 0
+                                        
                                     dif_calculada = qtd_fisica - qtd_sistema_calculada
                                     
                                     cursor = conn.cursor()
@@ -358,7 +377,7 @@ else:
                                     """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
                                     conn.commit()
                                     
-                                    st.toast(f"Lançamento processado! Tela atualizada.")
+                                    st.toast(f"Lançamento processado com sucesso!")
                                     st.session_state.reset_bip = True
                                     st.rerun()
                     else:
@@ -384,7 +403,7 @@ else:
                 r3.metric("🔢 QTD TOTAL CONTADA", soma_contada)
                 r4.metric("🗄️ QTD TOTAL SISTEMA", f"{soma_sistema} (Diferença: {diferenca_acumulada})")
                 
-                st.markdown(f'<div class="alerta-divergencia"><strong>⚠️ {itens_divergentes} item(ns) apresentando divergência ou inconformidade de Ativo ({porcentagem_divergencia:.0f}%)</strong></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="alerta-divergencia"><strong>⚠️ {itens_divergentes} item(ns) apresentando divergência ou inconformidade de Ativo/Quantidade ({porcentagem_divergencia:.0f}%)</strong></div>', unsafe_allow_html=True)
                 
                 ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora', 'lote']
                 st.dataframe(df_contagens_mutaveis[ordem_colunas_print], use_container_width=True, hide_index=True)
@@ -444,20 +463,20 @@ else:
                     match_base = df_visualizacao[df_visualizacao[col_cod].astype(str).str.upper().str.strip() == str(r_cont['cod_produto']).upper().strip()]
                     if not match_base.empty:
                         at_esp = str(match_base.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in match_base.columns else ""
-                        if at_esp and at_esp not in ["NAN", "SIM", ""]:
+                        if at_esp and at_esp not in ["NAN", "SIM", "", "0", "0.0"]:
                             if str(r_cont['ativo']).upper().strip() == at_esp:
                                 codigos_contados_set.add(str(r_cont['cod_produto']).upper().strip())
                         else:
                             codigos_contados_set.add(str(r_cont['cod_produto']).upper().strip())
 
             df_visualizacao['Status'] = df_visualizacao[col_cod].apply(
-                lambda x: "✅ Contado Corretamente" if str(x).upper().strip() in codigos_contados_set else "⏳ Pendente/Divergente"
+                lambda x: "✅ Contado" if str(x).upper().strip() in codigos_contados_set else "⏳ Pendente"
             )
             
             if filtro_estoque == "Apenas Pendentes":
-                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "⏳ Pendente/Divergente"]
+                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "⏳ Pendente"]
             elif filtro_estoque == "Apenas Contados":
-                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "✅ Contado Corretamente"]
+                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "✅ Contado"]
                 
             if pesquisa:
                 df_visualizacao = df_visualizacao[
@@ -494,10 +513,9 @@ else:
             fim = inicio + itens_por_pagina
             st.dataframe(df_visualizacao.iloc[inicio:fim], use_container_width=True)
 
-        # --- ABA 5: DESEMPENHO DA EQUIPE (CORREÇÃO DE ASPAS APLICADA) ---
+        # --- ABA 5: DESEMPENHO DA EQUIPE ---
         with aba_graficos:
             st.write("### 🏆 Ranking de Inventários por Operador")
-            # Correção cirúrgica na string SQL das aspas soltas do print
             df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(DISTINCT inventario_id) as [Inventários Feitos] FROM contagens WHERE operador IS NOT NULL AND operador != '' GROUP BY operador", conn)
             if df_ops.empty:
                 st.info("Aguardando lançamentos para processar dados de operadores.")
