@@ -187,12 +187,22 @@ else:
         contagens_mutaveis = st.session_state.contagens_por_inventario[id_inventario_atual]
         df_exemplo = st.session_state.base_sistema
         
-        # --- CONFIGURAÇÃO EXCLUSIVA DE COLUNAS TRAVADAS POR NOME ---
-        col_cod = 'Cód. Produto'
-        col_desc = 'Desc. Produto'
-        col_local = 'Desc. Estoque Físico'
-        col_unidade = 'Unid. Medida'
-        col_qtd = 'Qtd Estoque'
+        # --- LÓGICA DE MAPEAMENTO INTELIGENTE E FLEXÍVEL DE COLUNAS ---
+        # Analisa os cabeçalhos reais da planilha para evitar quebras por acentos ou espaços extras
+        colunas_reais = list(df_exemplo.columns)
+        
+        def encontrar_coluna(opcoes, default_idx):
+            for opcao in opcoes:
+                for col in colunas_reais:
+                    if opcao.lower().replace(" ", "").replace(".", "") in col.lower().replace(" ", "").replace(".", ""):
+                        return col
+            return colunas_reais[default_idx] if default_idx < len(colunas_reais) else colunas_reais[0]
+
+        col_cod = encontrar_coluna(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
+        col_desc = encontrar_coluna(['descproduto', 'descricao', 'desc'], 1)
+        col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
+        col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
+        col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
         
         # --- ABA 1: CONTAR ITEM ---
         with aba_contar:
@@ -208,64 +218,54 @@ else:
                     st.rerun()
             
             if codigo_input:
-                # Verificação se as colunas obrigatórias existem na planilha antes da busca
-                colunas_obrigatorias = [col_cod, col_desc, col_local, col_unidade, col_qtd]
-                colunas_faltantes = [c for c in colunas_obrigatorias if c not in df_exemplo.columns]
+                item = df_exemplo[df_exemplo[col_cod].astype(str).str.upper().strip() == codigo_input.upper().strip()]
                 
-                if colunas_faltantes:
-                    st.error(f"⚠️ Erro de estrutura! O arquivo Excel precisa conter exatamente as colunas: {', '.join(colunas_obrigatorias)}. Faltando: {', '.join(colunas_faltantes)}")
-                else:
-                    # Filtragem e busca travadas 100% pelos nomes estritos das colunas
-                    item = df_exemplo[df_exemplo[col_cod].astype(str).str.upper() == codigo_input.upper()]
+                if not item.empty:
+                    unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
+                    desc_val = item.iloc[0][col_desc]
+                    local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
                     
-                    if not item.empty:
-                        unid_val = item.iloc[0][col_unidade]
-                        desc_val = item.iloc[0][col_desc]
-                        local_val = item.iloc[0][col_local]
-                        
-                        # Captura e tratamento numérico seguro do saldo da coluna 'Qtd Estoque'
-                        raw_qtd_sis = item.iloc[0][col_qtd]
-                        try:
-                            qtd_sis = int(pd.to_numeric(raw_qtd_sis, errors='coerce'))
-                            if pd.isna(qtd_sis):
-                                qtd_sis = 0
-                        except:
+                    # Captura e tratamento numérico seguro contra NaN
+                    raw_qtd_sis = item.iloc[0][col_qtd]
+                    try:
+                        qtd_sis = int(pd.to_numeric(raw_qtd_sis, errors='coerce'))
+                        if pd.isna(qtd_sis):
                             qtd_sis = 0
+                    except:
+                        qtd_sis = 0
+                    
+                    # Renderização dos 4 Cards Superiores
+                    b1, b2, b3, b4 = st.columns(4)
+                    with b1:
+                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
+                    with b2:
+                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor">{local_val}</div></div>', unsafe_allow_html=True)
+                    with b3:
+                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
+                    with b4:
+                        st.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS</div><div class="bloco-valor" style="color:#2ecc71;">● Ativo</div></div>', unsafe_allow_html=True)
+                    
+                    st.markdown(f"**Descrição:** {desc_val}")
+                    st.markdown(f"**Local:** {local_val}")
+                    
+                    st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
+                    
+                    with st.form("confirmar_contagem_form", clear_on_submit=True):
+                        qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=0)
+                        observacao = st.text_input("📝 Observação (opcional)", placeholder="Notas ou observações adicionais sobre o produto...")
+                        btn_confirmar = st.form_submit_button("✅ Confirmar Contagem", type="primary", use_container_width=True)
                         
-                        # Renderização dos 4 Cards Superiores Dinâmicos
-                        b1, b2, b3, b4 = st.columns(4)
-                        with b1:
-                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
-                        with b2:
-                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor">{local_val}</div></div>', unsafe_allow_html=True)
-                        with b3:
-                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
-                        with b4:
-                            st.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS</div><div class="bloco-valor" style="color:#2ecc71;">● Ativo</div></div>', unsafe_allow_html=True)
-                        
-                        st.markdown(f"**Descrição:** {desc_val}")
-                        st.markdown(f"**Local:** {local_val}")
-                        
-                        # Card largo de saldo do sistema
-                        st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
-                        
-                        # Área de inserção física integrada e visível logo abaixo do card principal
-                        with st.form("confirmar_contagem_form", clear_on_submit=True):
-                            qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=0)
-                            observacao = st.text_input("📝 Observação (opcional)", placeholder="Notas ou observações adicionais sobre o produto...")
-                            btn_confirmar = st.form_submit_button("✅ Confirmar Contagem", type="primary", use_container_width=True)
-                            
-                            if btn_confirmar:
-                                contagens_mutaveis[codigo_input.upper()] = {
-                                    "Físico": qtd_fisica,
-                                    "Sistema": qtd_sis,
-                                    "Descrição": desc_val,
-                                    "Observação": observacao
-                                }
-                                st.toast(f"Contagem do item {codigo_input.upper()} adicionada!")
-                                st.rerun()
-                    else:
-                        st.error("Código do produto não localizado na base de dados (Saldo).")
+                        if btn_confirmar:
+                            contagens_mutaveis[codigo_input.upper().strip()] = {
+                                "Físico": qtd_fisica,
+                                "Sistema": qtd_sis,
+                                "Descrição": desc_val,
+                                "Observação": observacao
+                            }
+                            st.toast(f"Contagem do item {codigo_input.upper()} adicionada!")
+                            st.rerun()
+                else:
+                    st.error("Código do produto não localizado na base de dados (Saldo).")
 
         # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO) ---
         with aba_atual:
@@ -279,15 +279,16 @@ else:
                 st.write("### Itens Auditados e Divergências")
                 st.dataframe(df_contado, use_container_width=True)
 
-        # --- ABA 3: BASE DE ESTOQUE ---
+        # --- ABA 3: BASE DE ESTOQUE (CORRIGIDA E PROTEGIDA CONTRA KEYERROR) ---
         with aba_base:
             df_visualizacao = st.session_state.base_sistema.copy()
             
             filtro_estoque = st.selectbox("Filtrar por Estoque Físico", ["Todos", "Apenas Pendentes", "Apenas Contados"], key="filtro_base_tab")
             pesquisa = st.text_input("🔍 Pesquisar (código ou descrição)", placeholder="Filtre por trechos de dados...", key="pesquisa_base_tab")
             
+            # Validação dinâmica do status baseada no mapeamento inteligente
             df_visualizacao['Status'] = df_visualizacao[col_cod].apply(
-                lambda x: "✅ Contado" if str(x).upper() in contagens_mutaveis else "⏳ Pendente"
+                lambda x: "✅ Contado" if str(x).upper().strip() in contagens_mutaveis else "⏳ Pendente"
             )
             
             if filtro_estoque == "Apenas Pendentes":
