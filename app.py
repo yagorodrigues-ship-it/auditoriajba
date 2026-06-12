@@ -96,7 +96,9 @@ if 'pagina_atual' not in st.session_state:
 if 'operador' not in st.session_state:
     st.session_state.operador = ""
 if 'id_counter' not in st.session_state:
-    st.session_state.id_counter = 804 # Inicializador fictício baseado no print
+    st.session_state.id_counter = 804
+if 'reset_bip' not in st.session_state:
+    st.session_state.reset_bip = False
 if 'historico_equipe' not in st.session_state:
     st.session_state.historico_equipe = pd.DataFrame({
         'Operador': ['Junior', 'Tiago', 'Ana', 'Carlos'],
@@ -238,14 +240,19 @@ else:
             else:
                 c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
                 with c_busca:
-                    # Campo de busca reativo por digitação ou bipagem direta
-                    codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", placeholder="Ex: 1234-5678 ou etiqueta — Enter para buscar", key="input_bip_chave")
+                    # Mecanismo seguro de limpeza de estado do campo
+                    valor_padrao = ""
+                    if st.session_state.reset_bip:
+                        st.session_state.reset_bip = False
+                        st.rerun()
+                        
+                    codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", value=valor_padrao, placeholder="Ex: 1234-5678 ou etiqueta — Enter para buscar", key="input_bip_chave")
                 with c_filtro:
                     st.selectbox("📍 Estoque Físico", ["Todos"], key="sel_est_fisico")
                 with c_limpar:
                     st.write("") 
                     if st.button("🗑️ Limpar", use_container_width=True, key="clear_btn"):
-                        st.session_state.input_bip_chave = ""
+                        st.session_state.reset_bip = True
                         st.rerun()
                 
                 if codigo_input:
@@ -265,7 +272,7 @@ else:
                         except:
                             qtd_sis = 0
                         
-                        # Renderização dos Cards Informativos Superiores
+                        # Renderização dos Cards Superiores
                         b1, b2, b3, b4 = st.columns(4)
                         with b1:
                             st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
@@ -279,10 +286,8 @@ else:
                         st.markdown(f"**Descrição:** {desc_val}")
                         st.markdown(f"**Local:** {local_val}")
                         
-                        # Bloco informativo largo de quantidade do sistema
                         st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                         
-                        # Formulário de entrada para coleta física
                         with st.form("confirmar_contagem_form", clear_on_submit=True):
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=0)
                             observacao = st.text_input("📝 Observação (opcional)", placeholder="Notas adicionais sobre o produto...")
@@ -292,11 +297,17 @@ else:
                                 st.session_state.id_counter += 1
                                 agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                 
-                                # Cria o registro completo com o mapeamento idêntico à imagem 3
+                                # Coleta e tratamento do lote caso exista na planilha original
+                                lote_val = ""
+                                if 'lote' in item.columns:
+                                    lote_val = str(item.iloc[0]['lote'])
+                                elif 'Lote' in item.columns:
+                                    lote_val = str(item.iloc[0]['Lote'])
+                                
                                 novo_registro = {
                                     "id": st.session_state.id_counter,
                                     "inventario_id": int(id_inventario_atual.replace("#", "")),
-                                    "id_estoque": 1118, # Fixo simulado conforme imagem
+                                    "id_estoque": 1118,
                                     "desc_estoque": local_val,
                                     "cod_produto": codigo_input.upper().strip(),
                                     "desc_produto": desc_val,
@@ -308,20 +319,20 @@ else:
                                     "observacao": observacao,
                                     "operador": st.session_state.operador if st.session_state.operador else "admin",
                                     "data_hora": agora,
-                                    "lote": ""
+                                    "lote": lote_val
                                 }
                                 
                                 lista_contagens_mutaveis.insert(0, novo_registro)
                                 st.session_state.contagens_por_inventario[id_inventario_atual] = lista_contagens_mutaveis
                                 st.toast(f"Lançamento de {codigo_input.upper()} computado!")
                                 
-                                # ATUALIZAÇÃO AUTOMÁTICA REATIVA: Reseta a busca limpando o campo e dando certeza da inserção
-                                st.session_state.input_bip_chave = ""
+                                # ATUALIZAÇÃO REATIVA CORRIGIDA (Sem conflito de Session State)
+                                st.session_state.reset_bip = True
                                 st.rerun()
                     else:
                         st.error("Código do produto não localizado na base de dados (Saldo).")
 
-        # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO DE DETALHES IDÊNTICO À IMAGE_68AD9E.PNG) ---
+        # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO) ---
         with aba_atual:
             st.subheader(f"Inventário: {id_inventario_atual} – {inventario_selecionado_obj['nome']} ({inventario_selecionado_obj['data']})")
             
@@ -330,7 +341,6 @@ else:
             else:
                 df_relatorio = pd.DataFrame(lista_contagens_mutaveis)
                 
-                # Cálculos de Métricas para os Blocos Informados
                 total_auditado = len(df_relatorio)
                 itens_divergentes = len(df_relatorio[df_relatorio['diferenca'] != 0])
                 soma_contada = int(df_relatorio['qtd_contada'].sum())
@@ -338,7 +348,7 @@ else:
                 diferenca_acumulada = int(df_relatorio['diferenca'].sum())
                 porcentagem_divergencia = (itens_divergentes / total_auditado) * 100 if total_auditado > 0 else 0
                 
-                # Renderização dos 4 Cards Superiores Conforme Imagem 3
+                # Renderização dos 4 Cards Superiores
                 r1, r2, r3, r4 = st.columns(4)
                 with r1:
                     st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">📦 ITENS CONTADOS</div><div class="bloco-valor">{total_auditado}</div></div>', unsafe_allow_html=True)
@@ -349,7 +359,7 @@ else:
                 with r4:
                     st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">🗄️ QTD TOTAL SISTEMA</div><div class="bloco-valor">{soma_sistema}</div><div style="font-size:12px; color:#e74c3c; font-weight:bold;">↓ {diferenca_acumulada}</div></div>', unsafe_allow_html=True)
                 
-                # Banner de aviso laranja igual ao print
+                # Banner informativo
                 st.markdown(f"""
                     <div class="alerta-divergencia">
                         <strong>⚠️ {itens_divergentes} item com divergência ({porcentagem_divergencia:.0f}% do total)</strong><br>
@@ -360,7 +370,6 @@ else:
                 st.write("Filtrar estoque")
                 st.selectbox("Filtro", ["Todos"], label_visibility="collapsed", key="filtro_rel_drop")
                 
-                # Apresentação do Dataframe estruturado com a ordem exata das colunas coletadas
                 ordem_colunas_print = [
                     'id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 
                     'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 
@@ -368,7 +377,7 @@ else:
                 ]
                 st.dataframe(df_relatorio[ordem_colunas_print], use_container_width=True, hide_index=True)
                 
-                # Opção de exclusão se necessário
+                # Opção de exclusão individual
                 codigos_para_remover = [str(x) for x in df_relatorio['cod_produto'].tolist()]
                 item_para_remover = st.selectbox("Selecione um código para remover/excluir a contagem (se necessário):", [""] + codigos_para_remover)
                 if item_para_remover and st.button("🗑️ Excluir contagem do item", type="secondary"):
