@@ -5,7 +5,7 @@ import datetime
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Contagem de Estoque Físico", layout="wide")
 
-# --- ESTILIZAÇÃO PERSONALIZADA (Identificação Visual com os Prints) ---
+# --- ESTILIZAÇÃO PERSONALIZADA (Idêntica aos Prints) ---
 st.markdown("""
     <style>
     /* Botões primários laranjas */
@@ -19,12 +19,12 @@ st.markdown("""
         border-color: #ef6c00;
         color: white;
     }
-    /* Estilização da barra de pesquisa com borda laranja ao focar */
+    /* Barra de pesquisa com foco em laranja */
     .stTextInput input:focus {
         border-color: #e65100 !important;
         box-shadow: 0 0 0 1px #e65100 !important;
     }
-    /* Cards customizados para a barra lateral */
+    /* Cards escuros da barra lateral */
     .card-lateral {
         background-color: #1a233a;
         padding: 12px;
@@ -50,16 +50,16 @@ st.markdown("""
 # --- BANCO DE DADOS EM MEMÓRIA DA SESSÃO ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
-if 'inventarios' not in st.session_state:
-    st.session_state.inventarios = [{"id": "#39", "nome": "TEste JBA", "data": "2026-06-12", "status": "Aberto"}]
 if 'base_sistema' not in st.session_state:
     st.session_state.base_sistema = None
-if 'contagens' not in st.session_state:
-    st.session_state.contagens = {}
+if 'inventarios' not in st.session_state:
+    st.session_state.inventarios = []
+if 'contagens_por_inventario' not in st.session_state:
+    # Estrutura para separar as contagens de cada inventário criado
+    st.session_state.contagens_por_inventario = {}
 if 'pagina_atual' not in st.session_state:
     st.session_state.pagina_atual = 1
 if 'historico_equipe' not in st.session_state:
-    # Dados para o gráfico de desempenho da equipe
     st.session_state.historico_equipe = pd.DataFrame({
         'Operador': ['Junior', 'Tiago', 'Ana', 'Carlos'],
         'Inventários Feitos': [8, 5, 3, 2]
@@ -80,44 +80,61 @@ if not st.session_state.logged_in:
             else:
                 st.error("Usuário ou senha incorretos.")
 else:
-    # --- CÁLCULO DE MÉTRICAS DA BARRA LATERAL ---
-    total_itens_base = 0
-    total_contados = 0
-    total_pendentes = 0
-    progresso = 0.0
-
-    if st.session_state.base_sistema is not None:
-        total_itens_base = len(st.session_state.base_sistema)
-        total_contados = len(st.session_state.contagens)
-        total_pendentes = max(0, total_itens_base - total_contados)
-        if total_itens_base > 0:
-            progresso = total_contados / total_itens_base
-
+    
     # 1. BARRA LATERAL (SIDEBAR)
     with st.sidebar:
-        st.write("📁 **Selecione o inventário**")
-        lista_inv = [f"{i['id']} – {i['nome']} ({i['data']})" for i in st.session_state.inventarios]
-        inventario_selecionado = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
+        st.write("📂 **Carregar Base de Dados (Saldo)**")
+        arquivo_excel = st.file_uploader("Suba o arquivo Excel do sistema (.xlsx)", type=["xlsx"], label_visibility="collapsed")
+        if arquivo_excel is not None and st.session_state.base_sistema is None:
+            st.session_state.base_sistema = pd.read_excel(arquivo_excel)
+            st.toast("Base de dados (Saldo) carregada com sucesso!")
+            st.rerun()
+            
+        st.markdown("---")
+        st.write("📁 **Selecione ou Crie um Inventário**")
         
-        with st.expander("➕ Novo Inventário", expanded=False):
-            with st.form("form_novo", clear_on_submit=True):
-                novo_nome = st.text_input("Nome")
-                botao_criar = st.form_submit_button("Criar", type="primary")
-                if botao_criar:
-                    if novo_nome:
-                        novo_id = f"#{len(st.session_state.inventarios) + 39}"
-                        hoje = datetime.date.today().strftime("%Y-%m-%d")
-                        st.session_state.inventarios.append({"id": novo_id, "nome": novo_nome, "data": hoje, "status": "Aberto"})
-                        st.rerun()
+        if not st.session_state.inventarios:
+            st.info("Nenhum inventário ativo. Crie um abaixo para iniciar.")
+            id_inventario_atual = None
+        else:
+            lista_inv = [f"{i['id']} – {i['nome']}" for i in st.session_state.inventarios]
+            inventario_selecionado = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
+            id_inventario_atual = inventario_selecionado.split(" – ")[0]
 
-        if st.button("🔒 Fechar inventário atual", use_container_width=True):
-            st.sidebar.warning("Inventário finalizado.")
+        # Criar novo inventário
+        with st.expander("➕ Novo Inventário", expanded=not st.session_state.inventarios):
+            with st.form("form_novo", clear_on_submit=True):
+                novo_nome = st.text_input("Nome do Inventário")
+                botao_criar = st.form_submit_button("Criar", type="primary")
+                if botao_criar and novo_nome:
+                    novo_id = f"#{len(st.session_state.inventarios) + 39}"
+                    hoje = datetime.date.today().strftime("%Y-%m-%d")
+                    st.session_state.inventarios.append({"id": novo_id, "nome": novo_nome, "data": hoje})
+                    # Inicializa o pote de contagem vazio para este novo inventário
+                    st.session_state.contagens_por_inventario[novo_id] = {}
+                    st.toast(f"Inventário {novo_id} Criado!")
+                    st.rerun()
 
         st.markdown("---")
         st.write("👤 **Operador**")
         nome_operador = st.text_input("Seu nome", value=st.session_state.operador, key="op_input", label_visibility="collapsed")
-        
-        # INDICADORES LATERAIS ESTILIZADOS COMO NOS PRINTS
+
+        # --- LÓGICA DE MÉTRICAS DINÂMICAS VINCULADAS AO INVENTÁRIO ATUAL ---
+        total_itens_base = 0
+        total_contados = 0
+        total_pendentes = 0
+        progresso = 0.0
+
+        # Se houver uma base carregada E um inventário ativo selecionado
+        if st.session_state.base_sistema is not None and id_inventario_atual is not None:
+            total_itens_base = len(st.session_state.base_sistema)
+            # Puxa apenas as contagens realizadas DENTRO deste inventário específico
+            contagens_atuais = st.session_state.contagens_por_inventario.get(id_inventario_atual, {})
+            total_contados = len(contagens_atuais)
+            total_pendentes = max(0, total_itens_base - total_contados)
+            if total_itens_base > 0:
+                progresso = total_contados / total_itens_base
+
         st.markdown("---")
         st.markdown(f'<div class="card-lateral"><div class="card-titulo">📋 ITENS NA BASE</div><div class="card-valor">{total_itens_base}</div></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="card-lateral"><div class="card-titulo">✅ CONTADOS</div><div class="card-valor">{total_contados}</div></div>', unsafe_allow_html=True)
@@ -127,18 +144,11 @@ else:
         st.progress(progresso)
         st.caption(f"{progresso*100:.1f}% concluído")
 
-        st.markdown("---")
-        with st.expander("📁 Carregar / Atualizar Estoque", expanded=False):
-            arquivo_excel = st.file_uploader("Suba o arquivo (.xlsx)", type=["xlsx"])
-            if arquivo_excel is not None:
-                st.session_state.base_sistema = pd.read_excel(arquivo_excel)
-                st.toast("Base importada com sucesso!")
-                st.rerun()
-
     # 2. PAINEL PRINCIPAL
     st.title("📋 Painel de Controle de Estoque")
     st.caption("Tel Telecomunicações · Painel de Auditoria Ativa")
     
+    # Abas estruturadas
     aba_contar, aba_atual, aba_base, aba_graficos = st.tabs([
         "🔍 Contar Item", 
         "📊 Contagem Atual", 
@@ -146,13 +156,19 @@ else:
         "🏆 Desempenho da Equipe"
     ])
     
-    # --- ABA 1: CONTAR ITEM ---
-    with aba_contar:
-        if st.session_state.base_sistema is None:
-            st.warning("⚠️ Nenhuma base carregada. Faça o upload do Excel na barra lateral para começar.")
-        else:
+    # VERIFICAÇÃO SE FLUXO INICIAL FOI SEGUIDO
+    if st.session_state.base_sistema is None:
+        st.warning("⚠️ Passo 1 pendente: Faça o upload do arquivo de Saldo na barra lateral para alimentar a base.")
+    elif id_inventario_atual is None:
+        st.warning("⚠️ Passo 2 pendente: Crie um Novo Inventário na barra lateral para vincular as contagens à base.")
+    else:
+        # Puxa o dicionário de contagens do inventário ativo selecionado
+        contagens_mutaveis = st.session_state.contagens_por_inventario[id_inventario_atual]
+        
+        # --- ABA 1: CONTAR ITEM ---
+        with aba_contar:
             st.write("### Registrar Contagem Física")
-            cod_bipado = st.text_input("Digite ou Bipe o Código do Produto", key="bip")
+            cod_bipado = st.text_input("Digite ou Bipe o Código do Produto para Buscar na Base", key="bip")
             
             if cod_bipado:
                 df = st.session_state.base_sistema
@@ -167,50 +183,47 @@ else:
                     with col_col2:
                         qtd_col = 'Qtd Estoque' if 'Qtd Estoque' in df.columns else df.columns[4]
                         qtd_sis = item.iloc[0][qtd_col]
-                        st.metric("Quantidade no Sistema", int(qtd_sis))
+                        st.metric("Quantidade no Sistema (Saldo)", int(qtd_sis))
                     
+                    st.markdown("---")
                     qtd_fisica = st.number_input("Digite a Quantidade Física Encontrada", min_value=0, step=1)
                     if st.button("Incluir Item Contado", type="primary"):
-                        st.session_state.contagens[cod_bipado.upper()] = {
+                        # Salva a contagem isolada dentro do respectivo inventário ativo
+                        contagens_mutaveis[cod_bipado.upper()] = {
                             "Físico": qtd_fisica,
                             "Sistema": int(qtd_sis),
                             "Descrição": item.iloc[0][desc_col]
                         }
-                        st.success("Item contabilizado!")
+                        st.success(f"Item {cod_bipado.upper()} adicionado às contagens!")
                         st.rerun()
                 else:
-                    st.error("Código não encontrado na base de dados.")
+                    st.error("Código não localizado no Saldo importado.")
 
-    # --- ABA 2: CONTAGEM ATUAL ---
-    with aba_atual:
-        if not st.session_state.contagens:
-            st.info("Nenhum item foi contado ainda neste inventário.")
-        else:
-            df_contado = pd.DataFrame.from_dict(st.session_state.contagens, orient='index').reset_index()
-            df_contado.columns = ['Cód. Produto', 'Estoque Físico', 'Qtd Estoque', 'Desc. Produto']
-            df_contado['Divergência'] = df_contado['Estoque Físico'] - df_contado['Qtd Estoque']
-            
-            st.write("### Itens Diferenciados")
-            st.dataframe(df_contado, use_container_width=True)
+        # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO DE DIVERGÊNCIAS) ---
+        with aba_atual:
+            if not contagens_mutaveis:
+                st.info("Nenhum item foi auditado neste inventário corrente.")
+            else:
+                df_contado = pd.DataFrame.from_dict(contagens_mutaveis, orient='index').reset_index()
+                df_contado.columns = ['Cód. Produto', 'Estoque Físico', 'Qtd Estoque', 'Desc. Produto']
+                df_contado['Divergência'] = df_contado['Estoque Físico'] - df_contado['Qtd Estoque']
+                
+                st.write("### Itens Auditados e Divergências Calculadas")
+                st.dataframe(df_contado, use_container_width=True)
 
-    # --- ABA 3: BASE DE ESTOQUE ---
-    with aba_base:
-        if st.session_state.base_sistema is None:
-            st.info("Aguardando upload da planilha de estoque na barra lateral.")
-        else:
+        # --- ABA 3: BASE DE ESTOQUE ---
+        with aba_base:
             df_visualizacao = st.session_state.base_sistema.copy()
             
-            # Filtro dropdown superior
             filtro_estoque = st.selectbox("Filtrar por Estoque Físico", ["Todos", "Apenas Pendentes", "Apenas Contados"])
-            
-            # Barra de pesquisa
-            pesquisa = st.text_input("🔍 Pesquisar (código ou descrição)", placeholder="Digite um termo para filtrar...")
+            pesquisa = st.text_input("🔍 Pesquisar (código ou descrição)", placeholder="Filtre rapidamente a lista...")
             
             col_cod = 'Cód. Produto' if 'Cód. Produto' in df_visualizacao.columns else df_visualizacao.columns[0]
             col_desc = 'Desc. Produto' if 'Desc. Produto' in df_visualizacao.columns else df_visualizacao.columns[1]
             
+            # O status de Pendente/Contado avalia diretamente o inventário selecionado
             df_visualizacao['Status'] = df_visualizacao[col_cod].apply(
-                lambda x: "✅ Contado" if str(x).upper() in st.session_state.contagens else "⏳ Pendente"
+                lambda x: "✅ Contado" if str(x).upper() in contagens_mutaveis else "⏳ Pendente"
             )
             
             if filtro_estoque == "Apenas Pendentes":
@@ -224,18 +237,16 @@ else:
                     df_visualizacao[col_desc].astype(str).str.contains(pesquisa, case=False)
                 ]
             
-            # Reposiciona o status na primeira coluna
             cols = ['Status'] + [c for c in df_visualizacao.columns if c != 'Status']
             df_visualizacao = df_visualizacao[cols]
             
             st.markdown("---")
             col_inf, col_sli = st.columns([2, 2])
             with col_inf:
-                st.caption(f"{len(df_visualizacao)} itens encontrados | Arquivo ativo")
+                st.caption(f"{len(df_visualizacao)} itens listados na base de dados ativa.")
             with col_sli:
                 itens_por_pagina = st.slider("Itens por página", min_value=10, max_value=100, value=50, step=10)
             
-            # Paginação estruturada
             total_linhas = len(df_visualizacao)
             total_paginas = max(1, (total_linhas + itens_por_pagina - 1) // itens_por_pagina)
             
@@ -256,15 +267,15 @@ else:
             
             st.dataframe(df_visualizacao.iloc[inicio:fim], use_container_width=True)
 
-    # --- ABA 4: GRÁFICO DA EQUIPE ---
-    with aba_graficos:
-        st.write("### 🏆 Ranking de Inventários por Operador")
-        df_equipe = st.session_state.historico_equipe.copy()
-        if total_contados > 0:
-            if nome_operador in df_equipe['Operador'].values:
-                df_equipe.loc[df_equipe['Operador'] == nome_operador, 'Inventários Feitos'] += 1
-            else:
-                novo_op = pd.DataFrame({'Operador': [nome_operador], 'Inventários Feitos': [1]})
-                df_equipe = pd.concat([df_equipe, novo_op], ignore_index=True)
-        df_equipe = df_equipe.sort_values(by='Inventários Feitos', ascending=False)
-        st.bar_chart(data=df_equipe, x='Operador', y='Inventários Feitos', color="#e65100")
+        # --- ABA 4: GRÁFICO DA EQUIPE ---
+        with aba_graficos:
+            st.write("### 🏆 Ranking de Inventários por Operador")
+            df_equipe = st.session_state.historico_equipe.copy()
+            if total_contados > 0:
+                if nome_operador in df_equipe['Operador'].values:
+                    df_equipe.loc[df_equipe['Operador'] == nome_operador, 'Inventários Feitos'] += 1
+                else:
+                    novo_op = pd.DataFrame({'Operador': [nome_operador], 'Inventários Feitos': [1]})
+                    df_equipe = pd.concat([df_equipe, novo_op], ignore_index=True)
+            df_equipe = df_equipe.sort_values(by='Inventários Feitos', ascending=False)
+            st.bar_chart(data=df_equipe, x='Operador', y='Inventários Feitos', color="#e65100")
