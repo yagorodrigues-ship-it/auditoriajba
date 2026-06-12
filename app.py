@@ -187,7 +187,7 @@ else:
         contagens_mutaveis = st.session_state.contagens_por_inventario[id_inventario_atual]
         df_exemplo = st.session_state.base_sistema
         
-        # Definição estrita das colunas baseadas na sua tabela
+        # --- DEFINIÇÃO DO MAPA DE COLUNAS CONFORME SUA PLANILHA ---
         col_cod = 'Cód. Produto' if 'Cód. Produto' in df_exemplo.columns else df_exemplo.columns[0]
         col_desc = 'Desc. Produto' if 'Desc. Produto' in df_exemplo.columns else (df_exemplo.columns[1] if len(df_exemplo.columns) > 1 else df_exemplo.columns[0])
         col_local = 'Desc. Estoque Físico' if 'Desc. Estoque Físico' in df_exemplo.columns else (df_exemplo.columns[2] if len(df_exemplo.columns) > 2 else 'Geral')
@@ -208,6 +208,7 @@ else:
                     st.rerun()
             
             if codigo_input:
+                # Filtragem travada estritamente pela coluna 'Cód. Produto'
                 item = df_exemplo[df_exemplo[col_cod].astype(str).str.upper() == codigo_input.upper()]
                 
                 if not item.empty:
@@ -215,7 +216,7 @@ else:
                     desc_val = item.iloc[0][col_desc]
                     local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
                     
-                    # Tratamento seguro contra células em branco/nulas (NaN)
+                    # Captura segura da quantidade sistêmica (Impede erros com NaN)
                     raw_qtd_sis = item.iloc[0][col_qtd]
                     try:
                         qtd_sis = int(pd.to_numeric(raw_qtd_sis, errors='coerce'))
@@ -224,7 +225,7 @@ else:
                     except:
                         qtd_sis = 0
                     
-                    # Renderização dos Cards Superiores
+                    # Renderização dos 4 Cards Superiores
                     b1, b2, b3, b4 = st.columns(4)
                     with b1:
                         st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
@@ -235,15 +236,16 @@ else:
                     with b4:
                         st.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS</div><div class="bloco-valor" style="color:#2ecc71;">● Ativo</div></div>', unsafe_allow_html=True)
                     
-                    # Organização das informações textuais e do formulário de envio
                     st.markdown(f"**Descrição:** {desc_val}")
                     st.markdown(f"**Local:** {local_val}")
                     
+                    # Card largo de saldo do sistema
                     st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                     
+                    # Área de inserção física e observações integrada
                     with st.form("confirmar_contagem_form", clear_on_submit=True):
                         qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=0)
-                        observacao = st.text_input("📝 Observação (opcional)", placeholder="Notas adicionais sobre o produto...")
+                        observacao = st.text_input("📝 Observação (opcional)", placeholder="Notas ou observações adicionais sobre o produto...")
                         btn_confirmar = st.form_submit_button("✅ Confirmar Contagem", type="primary", use_container_width=True)
                         
                         if btn_confirmar:
