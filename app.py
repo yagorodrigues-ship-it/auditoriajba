@@ -6,7 +6,6 @@ import datetime
 st.set_page_config(page_title="Contagem de Estoque Físico", layout="wide")
 
 # --- ESTILIZAÇÃO PERSONALIZADA (Botão Laranja) ---
-# Força o botão primário do Streamlit a ficar laranja como no seu sistema original
 st.markdown("""
     <style>
     div.stButton > button:first-child[kind="primary"] {
@@ -42,7 +41,6 @@ if not st.session_state.logged_in:
         botao_login = st.form_submit_button("Entrar", type="primary")
         
         if botao_login:
-            # Login simples para teste (Usuário: admin / Senha: 123)
             if usuario == "admin" and senha == "123":
                 st.session_state.logged_in = True
                 st.session_state.operador = usuario
@@ -52,17 +50,16 @@ if not st.session_state.logged_in:
 else:
     # --- SE USUÁRIO LOGADO, MOSTRA O SISTEMA ---
     
-    # 1. BARRA LATERAL (SIDEBAR) - Igual à imagem_bcbec8.png
+    # 1. BARRA LATERAL (SIDEBAR)
     with st.sidebar:
         st.header("📁 Inventário Ativo")
         
-        # Opções de inventários cadastrados
         lista_inv = [f"{i['id']} – {i['nome']} ({i['data']})" for i in st.session_state.inventarios]
         inventario_selecionado = st.selectbox("Selecione o inventário", lista_inv)
         
         st.markdown("---")
         
-        # Criar novo inventário (CORRIGIDO COM FORMULÁRIO)
+        # Criar novo inventário (CORRIGIDO COM FORMULÁRIO COMPLETO)
         with st.expander("➕ Novo Inventário", expanded=False):
             with st.form("form_novo_inventario", clear_on_submit=True):
                 novo_nome = st.text_input("Nome")
@@ -71,7 +68,14 @@ else:
                 
                 if botao_criar:
                     if novo_nome:
-                        # Gera o próximo ID com base no tamanho da lista
                         proximo_numero = len(st.session_state.inventarios) + 37
                         novo_id = f"#{proximo_numero}"
-                        hoje =
+                        hoje = datetime.date.today().strftime("%Y-%m-%d")
+                        
+                        st.session_state.inventarios.append({
+                            "id": novo_id, 
+                            "nome": novo_nome, 
+                            "data": hoje, 
+                            "status": "Aberto"
+                        })
+                        st.toast(f"✅ Inventário
