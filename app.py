@@ -218,7 +218,7 @@ else:
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
             col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo', 'id_estoque'], -1)
 
-        # --- CÁLCULO DE PROGRESSO COM VALIDAÇÃO TRATADA CONTRA FALSA DIVERGÊNCIA ---
+        # --- CÁLCULO DE PROGRESSO (CORRIGIDO SEM NAMEERROR) ---
         total_itens_base = 0
         total_contados = 0
         total_pendentes = 0
@@ -236,15 +236,14 @@ else:
                 if not match_base.empty:
                     raw_ativo = str(match_base.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in match_base.columns else ""
                     
-                    # Normaliza se o ativo original está ausente, nulo ou zerado
-                    tem_ativo_estrito = raw_ativo and raw_ativo not in ["NAN", "SIM", "", "0", "0.0"]
+                    # Identifica se o item realmente exige controle por número de patrimônio/ativo estrito
+                    tem_ativo_estrico = raw_ativo and raw_ativo not in ["NAN", "SIM", "", "0", "0.0"]
                     
-                    if tem_ativo_estrict:
-                        # Se possui ativo obrigatório mapeado, valida se bate
+                    if tem_ativo_estrico:
                         if str(c_row['ativo']).upper().strip() == raw_ativo:
                             contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
                     else:
-                        # Se na base está zerado/vazio, valida apenas se foi lançado
+                        # Se na base está zerado/sem ativo cadastrado, valida apenas se as quantidades batem
                         contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
             
             total_contados = len(df_contagens_atuais)
@@ -316,7 +315,6 @@ else:
                         except:
                             qtd_sis = 0
                         
-                        # Tratamento completo do Ativo esperado do saldo original
                         ativo_original_base = str(item.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in item.columns else ""
                         if ativo_original_base in ["NAN", "SIM", "", "0", "0.0"]:
                             ativo_original_base = ""
@@ -337,15 +335,14 @@ else:
                         if ativo_original_base:
                             st.info(f"📋 **Nota de Sistema:** Este produto exige cruzamento estruturado com o Ativo Nº **{ativo_original_base}**.")
                         else:
-                            st.caption("ℹ️ **Nota:** Produto sem Ativo controlado mapeado no saldo (Campo Opcional).")
+                            st.caption("ℹ️ **Nota:** Produto com linha de ativo zerada/ausente no Excel (Campo Opcional).")
                         
                         st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                         
                         with st.form("confirmar_contagem_form", clear_on_submit=True):
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=1)
                             
-                            # Rótulo dinâmico informando se é obrigatório ou opcional
-                            rotulo_ativo = "🔢 Número do Ativo / Patrimônio (Obrigatório)" if ativo_original_base else "🔢 Número do Ativo / Patrimônio (Opcional - Linha Zerada na base)"
+                            rotulo_ativo = "🔢 Número do Ativo / Patrimônio (Obrigatório)" if ativo_original_base else "🔢 Número do Ativo / Patrimônio (Opcional - Linha Zerada)"
                             ativo_input = st.text_input(rotulo_ativo, placeholder="Insira o número se houver...")
                             
                             observacao = st.text_input("📝 Observação (opcional)")
@@ -354,17 +351,15 @@ else:
                             if btn_confirmar:
                                 ativo_digitado_limpo = ativo_input.strip().upper()
                                 
-                                # SOLICITAÇÃO ATENDIDA: Só barra se possuir ativo configurado no saldo
+                                # VALIDAÇÃO FLEXÍVEL: Só obriga se o ativo existir e for válido na planilha base
                                 if ativo_original_base and not ativo_digitado_limpo:
-                                    st.error("❌ Erro: Este item exige a identificação do número de Ativo para validação!")
+                                    st.error("❌ Erro: O preenchimento do número de Ativo é obrigatório para este item!")
                                 else:
                                     agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
                                     
-                                    # Validação Inteligente da Divergência:
+                                    # Lógica de cálculo do saldo sistêmico
                                     qtd_sistema_calculada = qtd_sis
-                                    
-                                    # Se a base tem um ativo e o digitado for incorreto, força a divergência (Zera a expectativa do sistema para esse ativo errado)
                                     if ativo_original_base and ativo_digitado_limpo != ativo_original_base:
                                         qtd_sistema_calculada = 0
                                         
