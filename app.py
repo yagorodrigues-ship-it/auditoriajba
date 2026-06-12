@@ -78,13 +78,15 @@ if 'base_sistema' not in st.session_state:
 if 'nome_arquivo_excel' not in st.session_state:
     st.session_state.nome_arquivo_excel = ""
 if 'inventarios' not in st.session_state:
-    st.session_state.inventarios = []
+    st.session_state.inventarios = [
+        {"id": "#39", "nome": "TEste JBA", "data": "2026-06-12", "status": "Fechado"}
+    ]
 if 'contagens_por_inventario' not in st.session_state:
-    st.session_state.contagens_por_inventario = {}
+    st.session_state.contagens_por_inventario = {"#39": {}}
 if 'pagina_atual' not in st.session_state:
     st.session_state.pagina_atual = 1
 if 'operador' not in st.session_state:
-    st.session_state.operador = "admin"
+    st.session_state.operador = ""
 if 'historico_equipe' not in st.session_state:
     st.session_state.historico_equipe = pd.DataFrame({
         'Operador': ['Junior', 'Tiago', 'Ana', 'Carlos'],
@@ -101,7 +103,7 @@ if not st.session_state.logged_in:
         if botao_login:
             if usuario == "admin" and senha == "123":
                 st.session_state.logged_in = True
-                st.session_state.operador = usuario
+                st.session_state.operador = "admin"
                 st.rerun()
             else:
                 st.error("Usuário ou senha incorretos.")
@@ -118,15 +120,18 @@ else:
             st.rerun()
             
         st.markdown("---")
-        st.write("📁 **Selecione ou Crie um Inventário**")
+        st.write("📁 **Selecione o inventário**")
         
         if not st.session_state.inventarios:
             st.info("Nenhum inventário ativo. Crie um abaixo para iniciar.")
             id_inventario_atual = None
+            inventario_selecionado_obj = None
         else:
-            lista_inv = [f"{i['id']} – {i['nome']}" for i in st.session_state.inventarios]
+            # Lista apenas inventários para seleção
+            lista_inv = [f"{i['id']} – {i['nome']} ({i['status']})" for i in st.session_state.inventarios]
             inventario_selected = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
             id_inventario_atual = inventario_selected.split(" – ")[0]
+            inventario_selecionado_obj = next(i for i in st.session_state.inventarios if i['id'] == id_inventario_atual)
 
         # Criar novo inventário
         with st.expander("➕ Novo Inventário", expanded=not st.session_state.inventarios):
@@ -134,16 +139,31 @@ else:
                 novo_nome = st.text_input("Nome do Inventário")
                 botao_criar = st.form_submit_button("Criar", type="primary")
                 if botao_criar and novo_nome:
-                    novo_id = f"#{len(st.session_state.inventarios) + 40}"
+                    novo_id = f"#{len(st.session_state.inventarios) + 39}"
                     hoje = datetime.date.today().strftime("%Y-%m-%d")
-                    st.session_state.inventarios.append({"id": novo_id, "nome": novo_nome, "data": hoje})
+                    st.session_state.inventarios.insert(0, {"id": novo_id, "nome": novo_nome, "data": hoje, "status": "Aberto"})
                     st.session_state.contagens_por_inventario[novo_id] = {}
                     st.toast(f"Inventário {novo_id} Criado!")
                     st.rerun()
 
+        # Botão Fechar Inventário Atual (Conforme Print)
+        if inventario_selecionado_obj and inventario_selecionado_obj['status'] == "Aberto":
+            if st.button("🔒 Fechar inventário atual", use_container_width=True):
+                inventario_selecionado_obj['status'] = "Fechado"
+                # Contabiliza no histórico da equipe
+                nome_op = st.session_state.operador if st.session_state.operador else "admin"
+                df_eq = st.session_state.historico_equipe
+                if nome_op in df_eq['Operador'].values:
+                    st.session_state.historico_equipe.loc[df_eq['Operador'] == nome_op, 'Inventários Feitos'] += 1
+                else:
+                    novo_op = pd.DataFrame({'Operador': [nome_op], 'Inventários Feitos': [1]})
+                    st.session_state.historico_equipe = pd.concat([st.session_state.historico_equipe, novo_op], ignore_index=True)
+                st.toast("Inventário finalizado e fechado com sucesso!")
+                st.rerun()
+
         st.markdown("---")
         st.write("👤 **Operador**")
-        st.session_state.operador = st.text_input("Seu nome", value=st.session_state.operador, key="op_input_text", label_visibility="collapsed")
+        st.session_state.operador = st.text_input("Seu nome", value=st.session_state.operador, key="op_input_text", label_visibility="collapsed", placeholder="Seu nome")
 
         # --- CÁLCULO DE MÉTRICAS DINÂMICAS ---
         total_itens_base = 0
@@ -172,9 +192,11 @@ else:
     st.title("📦 Painel Geral de Auditoria")
     st.caption("Tel Telecomunicações · Painel de Auditoria Ativa")
     
-    aba_contar, aba_atual, aba_base, aba_graficos = st.tabs([
+    # Abas principais ajustadas com os nomes idênticos aos prints
+    aba_contar, aba_atual, aba_historico, aba_base, aba_graficos = st.tabs([
         "🔍 Contar Item", 
         "📊 Contagem Atual", 
+        "📁 Histórico de Inventários",
         "📄 Base de Estoque",
         "🏆 Desempenho da Equipe"
     ])
@@ -184,11 +206,10 @@ else:
     elif id_inventario_atual is None:
         st.warning("⚠️ Passo 2 pendente: Crie um Novo Inventário na barra lateral para vincular as contagens à base.")
     else:
-        contagens_mutaveis = st.session_state.contagens_por_inventario[id_inventario_atual]
+        contagens_mutaveis = st.session_state.contagens_por_inventario.get(id_inventario_atual, {})
         df_exemplo = st.session_state.base_sistema
         
-        # --- LÓGICA DE MAPEAMENTO INTELIGENTE E FLEXÍVEL DE COLUNAS ---
-        # Analisa os cabeçalhos reais da planilha para evitar quebras por acentos ou espaços extras
+        # --- MAPEAMENTO DA PLANILHA PELOS CÓDIGOS CORRETOS ---
         colunas_reais = list(df_exemplo.columns)
         
         def encontrar_coluna(opcoes, default_idx):
@@ -206,66 +227,71 @@ else:
         
         # --- ABA 1: CONTAR ITEM ---
         with aba_contar:
-            c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
-            with c_busca:
-                codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", placeholder="Bipe ou digite o código aqui...", key="input_bip_chave")
-            with c_filtro:
-                st.selectbox("📍 Estoque Físico", ["Todos"], key="sel_est_fisico")
-            with c_limpar:
-                st.write("") 
-                if st.button("🗑️ Limpar", use_container_width=True, key="clear_btn"):
-                    st.session_state.input_bip_chave = ""
-                    st.rerun()
-            
-            if codigo_input:
-                item = df_exemplo[df_exemplo[col_cod].astype(str).str.upper().strip() == codigo_input.upper().strip()]
+            if inventario_selecionado_obj and inventario_selecionado_obj['status'] == "Fechado":
+                st.error("🔒 Este inventário está Fechado. Selecione ou crie um inventário Aberto para realizar contagens.")
+            else:
+                c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
+                with c_busca:
+                    codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", placeholder="Bipe ou digite o código aqui...", key="input_bip_chave")
+                with c_filtro:
+                    st.selectbox("📍 Estoque Físico", ["Todos"], key="sel_est_fisico")
+                with c_limpar:
+                    st.write("") 
+                    if st.button("🗑️ Limpar", use_container_width=True, key="clear_btn"):
+                        st.session_state.input_bip_chave = ""
+                        st.rerun()
                 
-                if not item.empty:
-                    unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
-                    desc_val = item.iloc[0][col_desc]
-                    local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
+                if codigo_input:
+                    # CORREÇÃO DO ATTRIBUTEERROR: Conversão robusta em string antes das operações textuais
+                    serie_codigos = df_exemplo[col_cod].astype(str).str.upper().str.strip()
+                    item = df_exemplo[serie_codigos == str(codigo_input).upper().strip()]
                     
-                    # Captura e tratamento numérico seguro contra NaN
-                    raw_qtd_sis = item.iloc[0][col_qtd]
-                    try:
-                        qtd_sis = int(pd.to_numeric(raw_qtd_sis, errors='coerce'))
-                        if pd.isna(qtd_sis):
-                            qtd_sis = 0
-                    except:
-                        qtd_sis = 0
-                    
-                    # Renderização dos 4 Cards Superiores
-                    b1, b2, b3, b4 = st.columns(4)
-                    with b1:
-                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
-                    with b2:
-                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor">{local_val}</div></div>', unsafe_allow_html=True)
-                    with b3:
-                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
-                    with b4:
-                        st.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS</div><div class="bloco-valor" style="color:#2ecc71;">● Ativo</div></div>', unsafe_allow_html=True)
-                    
-                    st.markdown(f"**Descrição:** {desc_val}")
-                    st.markdown(f"**Local:** {local_val}")
-                    
-                    st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
-                    
-                    with st.form("confirmar_contagem_form", clear_on_submit=True):
-                        qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=0)
-                        observacao = st.text_input("📝 Observação (opcional)", placeholder="Notas ou observações adicionais sobre o produto...")
-                        btn_confirmar = st.form_submit_button("✅ Confirmar Contagem", type="primary", use_container_width=True)
+                    if not item.empty:
+                        unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
+                        desc_val = item.iloc[0][col_desc]
+                        local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
                         
-                        if btn_confirmar:
-                            contagens_mutaveis[codigo_input.upper().strip()] = {
-                                "Físico": qtd_fisica,
-                                "Sistema": qtd_sis,
-                                "Descrição": desc_val,
-                                "Observação": observacao
-                            }
-                            st.toast(f"Contagem do item {codigo_input.upper()} adicionada!")
-                            st.rerun()
-                else:
-                    st.error("Código do produto não localizado na base de dados (Saldo).")
+                        raw_qtd_sis = item.iloc[0][col_qtd]
+                        try:
+                            qtd_sis = int(pd.to_numeric(raw_qtd_sis, errors='coerce'))
+                            if pd.isna(qtd_sis):
+                                qtd_sis = 0
+                        except:
+                            qtd_sis = 0
+                        
+                        # Renderização dos 4 Cards Superiores
+                        b1, b2, b3, b4 = st.columns(4)
+                        with b1:
+                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
+                        with b2:
+                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor">{local_val}</div></div>', unsafe_allow_html=True)
+                        with b3:
+                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
+                        with b4:
+                            st.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS</div><div class="bloco-valor" style="color:#2ecc71;">● Ativo</div></div>', unsafe_allow_html=True)
+                        
+                        st.markdown(f"**Descrição:** {desc_val}")
+                        st.markdown(f"**Local:** {local_val}")
+                        
+                        st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
+                        
+                        with st.form("confirmar_contagem_form", clear_on_submit=True):
+                            qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=0)
+                            observacao = st.text_input("📝 Observação (opcional)", placeholder="Notas adicionais sobre o produto...")
+                            btn_confirmar = st.form_submit_button("✅ Confirmar Contagem", type="primary", use_container_width=True)
+                            
+                            if btn_confirmar:
+                                contagens_mutaveis[codigo_input.upper().strip()] = {
+                                    "Físico": qtd_fisica,
+                                    "Sistema": qtd_sis,
+                                    "Descrição": desc_val,
+                                    "Observação": observacao
+                                }
+                                st.session_state.contagens_por_inventario[id_inventario_atual] = contagens_mutaveis
+                                st.toast(f"Contagem do item {codigo_input.upper()} adicionada!")
+                                st.rerun()
+                    else:
+                        st.error("Código do produto não localizado na base de dados (Saldo).")
 
         # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO) ---
         with aba_atual:
@@ -279,14 +305,31 @@ else:
                 st.write("### Itens Auditados e Divergências")
                 st.dataframe(df_contado, use_container_width=True)
 
-        # --- ABA 3: BASE DE ESTOQUE (CORRIGIDA E PROTEGIDA CONTRA KEYERROR) ---
+        # --- ABA 3: HISTÓRICO DE INVENTÁRIOS (NOVO - IGUAL AO PRINT) ---
+        with aba_historico:
+            st.write("### 📁 Histórico de Inventários")
+            st.caption("None")
+            
+            for inv in st.session_state.inventarios:
+                cor_bola = "🟢" if inv['status'] == "Aberto" else "🔴"
+                qtd_contada_inv = len(st.session_state.contagens_por_inventario.get(inv['id'], {}))
+                
+                with st.expander(f"{cor_bola} {inv['id']} – {inv['nome']} | {inv['data']} | {qtd_contada_inv} itens"):
+                    detalhes_contagem = st.session_state.contagens_por_inventario.get(inv['id'], {})
+                    if not detalhes_contagem:
+                        st.caption("Nenhum item contabilizado neste registro.")
+                    else:
+                        df_hist_inv = pd.DataFrame.from_dict(detalhes_contagem, orient='index').reset_index()
+                        df_hist_inv.columns = ['Cód. Produto', 'Físico', 'Sistema', 'Descrição', 'Observação']
+                        st.dataframe(df_hist_inv, use_container_width=True)
+
+        # --- ABA 4: BASE DE ESTOQUE ---
         with aba_base:
             df_visualizacao = st.session_state.base_sistema.copy()
             
             filtro_estoque = st.selectbox("Filtrar por Estoque Físico", ["Todos", "Apenas Pendentes", "Apenas Contados"], key="filtro_base_tab")
             pesquisa = st.text_input("🔍 Pesquisar (código ou descrição)", placeholder="Filtre por trechos de dados...", key="pesquisa_base_tab")
             
-            # Validação dinâmica do status baseada no mapeamento inteligente
             df_visualizacao['Status'] = df_visualizacao[col_cod].apply(
                 lambda x: "✅ Contado" if str(x).upper().strip() in contagens_mutaveis else "⏳ Pendente"
             )
@@ -332,15 +375,9 @@ else:
             
             st.dataframe(df_visualizacao.iloc[inicio:fim], use_container_width=True)
 
-        # --- ABA 4: GRÁFICO DA EQUIPE ---
+        # --- ABA 5: GRÁFICO DA EQUIPE ---
         with aba_graficos:
             st.write("### 🏆 Ranking de Inventários por Operador")
             df_equipe = st.session_state.historico_equipe.copy()
-            if total_contados > 0:
-                if st.session_state.operador in df_equipe['Operador'].values:
-                    df_equipe.loc[df_equipe['Operador'] == st.session_state.operador, 'Inventários Feitos'] += 1
-                else:
-                    novo_op = pd.DataFrame({'Operador': [st.session_state.operador], 'Inventários Feitos': [1]})
-                    df_equipe = pd.concat([df_equipe, novo_op], ignore_index=True)
             df_equipe = df_equipe.sort_values(by='Inventários Feitos', ascending=False)
             st.bar_chart(data=df_equipe, x='Operador', y='Inventários Feitos', color="#d35400")
