@@ -347,7 +347,7 @@ else:
                             if btn_confirmar:
                                 ativo_digitado_limpo = ativo_input.strip().upper()
                                 
-                                if高度_da_base_lista := ativos_da_base_lista:
+                                if len(ativos_da_base_lista) > 0:
                                     if not ativo_digitado_limpo:
                                         st.error("❌ Erro: O preenchimento do número de Ativo é obrigatório para este item!")
                                     else:
@@ -355,7 +355,7 @@ else:
                                         lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
                                         
                                         qtd_sistema_calculada = qtd_sis
-                                        if ativo_digitado_limpo in高度_da_base_lista:
+                                        if ativo_digitado_limpo in ativos_da_base_lista:
                                             linha_especifica = item[item[col_ativo_base].astype(str).str.upper().str.strip() == ativo_digitado_limpo]
                                             try:
                                                 qtd_sistema_calculada = int(pd.to_numeric(linha_especifica.iloc[0][col_qtd], errors='coerce'))
@@ -377,7 +377,6 @@ else:
                                         st.session_state.reset_bip = True
                                         st.rerun()
                                 else:
-                                    # Se a base não possui ativos configurados, o campo vira puramente opcional
                                     agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
                                     dif_calculada = qtd_fisica - qtd_sis
