@@ -216,9 +216,9 @@ else:
             col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
             col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-            col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo'], -1)
+            col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo', 'id_estoque'], -1)
 
-        # --- CÁLCULO DE MÉTRICAS DINÂMICAS COM VALIDAÇÃO DE ATIVO CHAVE ---
+        # --- CÁLCULO DE PROGRESSO COM VALIDAÇÃO UNIFICADA DE ATIVO + CÓDIGO ---
         total_itens_base = 0
         total_contados = 0
         total_pendentes = 0
@@ -228,26 +228,24 @@ else:
             total_itens_base = len(st.session_state.base_sistema)
             df_contagens_atuais = pd.read_sql_query(f"SELECT * FROM contagens WHERE inventario_id = '{id_inventario_atual.replace('#','')}'", conn)
             
-            # Validação cruzada: Conta apenas os lançamentos onde o Código + Ativo batem com a Base ou se o item não exige Ativo na base
-            contados_validos = 0
+            contados_validos_set = set()
             for idx, c_row in df_contagens_atuais.iterrows():
                 match_base = st.session_state.base_sistema[
-                    (st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == str(c_row['cod_produto']).upper().strip())
+                    st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == str(c_row['cod_produto']).upper().strip()
                 ]
                 if not match_base.empty:
-                    # Se na base existe um número de ativo cadastrado naquela coluna, valida se bate
                     ativo_esperado = str(match_base.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in match_base.columns else ""
-                    if ativo_esperado and ativo_esperado != "NAN" and ativo_esperado != "SIM" and ativo_esperado != "":
+                    # Validação Unificada: Se o ativo digitado bate perfeitamente com o esperado da base para aquele código
+                    if ativo_esperado and ativo_esperado not in ["NAN", "SIM", ""]:
                         if str(c_row['ativo']).upper().strip() == ativo_esperado:
-                            contados_validos += 1
+                            contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
                     else:
-                        # Se não tem ativo estrito na base para cruzar, considera contado por código
-                        contados_validos += 1
+                        contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
             
-            total_contados = len(df_contagens_atuais) # Lançamentos totais feitos na tela
-            total_pendentes = max(0, total_itens_base - contados_validos)
+            total_contados = len(df_contagens_atuais)
+            total_pendentes = max(0, total_itens_base - len(contados_validos_set))
             if total_itens_base > 0:
-                progresso = min(1.0, contados_validos / total_itens_base)
+                progresso = min(1.0, len(contados_validos_set) / total_itens_base)
 
         st.markdown("---")
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">📋 ITENS NA BASE</div><div class="card-lateral-valor">{total_itens_base}</div></div>', unsafe_allow_html=True)
@@ -288,7 +286,7 @@ else:
                     if st.session_state.reset_bip:
                         st.session_state.reset_bip = False
                         st.rerun()
-                    codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", placeholder="Ex: 1234-5678 — Enter para buscar", key="input_bip_chave")
+                    codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", placeholder="Ex: TEAT0139Z — Enter para buscar", key="input_bip_chave")
                 with c_filtro:
                     st.selectbox("📍 Estoque Físico", ["Todos"], key="sel_est_fisico")
                 with c_limpar:
@@ -313,9 +311,9 @@ else:
                         except:
                             qtd_sis = 0
                         
-                        # Ativo cadastrado originalmente na base para conferência
+                        # Captura o Ativo esperado gravado no Saldo
                         ativo_original_base = str(item.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in item.columns else ""
-                        if ativo_original_base == "NAN" or ativo_original_base == "SIM":
+                        if ativo_original_base in ["NAN", "SIM", ""]:
                             ativo_original_base = ""
 
                         b1, b2, b3, b4 = st.columns(4)
@@ -331,13 +329,13 @@ else:
                         st.markdown(f"**Descrição:** {desc_val}")
                         st.markdown(f"**Local:** {local_val}")
                         if ativo_original_base:
-                            st.info(f"📋 **Nota de Sistema:** Este produto espera o Ativo Nº **{ativo_original_base}** na base.")
+                            st.info(f"📋 **Nota de Sistema:** Este produto aguarda o cruzamento com o Ativo Nº **{ativo_original_base}**.")
                         
                         st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                         
                         with st.form("confirmar_contagem_form", clear_on_submit=True):
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=1)
-                            ativo_input = st.text_input("🔢 Número do Ativo / Patrimônio (Obrigatório)", placeholder="Digite o número gravado no equipamento...")
+                            ativo_input = st.text_input("🔢 Número do Ativo / Patrimônio (Obrigatório)", placeholder="Insira o número gravado no equipamento...")
                             observacao = st.text_input("📝 Observação (opcional)")
                             btn_confirmar = st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True)
                             
@@ -349,12 +347,10 @@ else:
                                     agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
                                     
-                                    # REGRA DE UNIFICAÇÃO DA SUA SOLICITAÇÃO:
-                                    # Se a base possui um ativo específico esperado e o digitado NÃO bater,
-                                    # a Qtd do Sistema passa a ser considerada 0 para este lançamento, forçando a divergência!
+                                    # REGRA DE UNIFICAÇÃO: Se o ativo não bater com a base, considera Qtd Sistema como 0 (Força a Divergência)
                                     qtd_sistema_calculada = qtd_sis
                                     if ativo_original_base and ativo_digitado_limpo != ativo_original_base:
-                                        qtd_sistema_calculada = 0 # O Ativo não bateu -> considera que o sistema esperava 0 desse Ativo errado
+                                        qtd_sistema_calculada = 0 
                                     
                                     dif_calculada = qtd_fisica - qtd_sistema_calculada
                                     
@@ -365,15 +361,9 @@ else:
                                     """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
                                     conn.commit()
                                     
-                                    if ativo_original_base and ativo_digitado_limpo != ativo_original_base:
-                                        st.toast(f"⚠️ Lançado com Ativo Divergente! Sistema computou como Divergência.")
-                                    else:
-                                        st.toast(f"✅ Ativo {ativo_digitado_limpo} salvo permanentemente!")
-                                        
+                                    st.toast(f"Lançamento processado! Tela atualizada.")
                                     st.session_state.reset_bip = True
                                     st.rerun()
-                    else:
-                        st.error("Código do produto não localizado na base de dados (Saldo).")
 
         # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO) ---
         with aba_atual:
@@ -393,7 +383,7 @@ else:
                 r1.metric("📦 ITENS CONTADOS", total_auditado)
                 r2.metric("⚠️ COM DIVERGÊNCIA", itens_divergentes)
                 r3.metric("🔢 QTD TOTAL CONTADA", soma_contada)
-                r4.metric("🗄️ QTD TOTAL SISTEMA", f"{soma_sistema} (Diferença: {diferenca_acumulada})")
+                r4.metric("🗄️ QTD TOTAL SISTEMA", f"{soma_sistema} (↓ {diferenca_acumulada})")
                 
                 st.markdown(f'<div class="alerta-divergencia"><strong>⚠️ {itens_divergentes} item(ns) apresentando divergência ou inconformidade de Ativo ({porcentagem_divergencia:.0f}%)</strong></div>', unsafe_allow_html=True)
                 
@@ -409,7 +399,7 @@ else:
                         st.toast("Linha excluída com sucesso!")
                         st.rerun()
 
-        # --- ABA 3: HISTÓRICO DE INVENTÁRIOS ---
+        # --- ABA 3: HISTÓRICO DE INVENTÁRIOS (CORRIGIDA DA ENGINE XLSWRITER) ---
         with aba_historico:
             st.write("### 📁 Histórico de Inventários Arquivados")
             for idx, inv in df_inventarios.iterrows():
@@ -432,9 +422,9 @@ else:
                         ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora', 'lote']
                         st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
                         
+                        # CORREÇÃO DA ENGINE: openpyxl para rodar nativamente no Streamlit Cloud sem quebras
                         buffer = io.BytesIO()
-                        with pd.ExcelWriter(buffer, engine='xlsxwriter') as writer:
-                            df_hist_inv[ordem_colunas_print].to_excel(writer, sheet_name='Inventário', index=False)
+                        df_hist_inv[ordem_colunas_print].to_excel(buffer, index=False, engine='openpyxl')
                         
                         st.download_button(
                             label="📥 Exportar este Inventário para Excel (.xlsx)",
@@ -450,25 +440,25 @@ else:
             filtro_estoque = st.selectbox("Filtrar por Estoque Físico", ["Todos", "Apenas Pendentes", "Apenas Contados"], key="filtro_base_tab")
             pesquisa = st.text_input("🔍 Pesquisar (código ou descrição)", placeholder="Filtre por trechos de dados...", key="pesquisa_base_tab")
             
-            # Ajuste visual de Status considerando cruzamento correto de ativos
+            # Recalcula o status considerando a unificação de Ativos Corretos
             codigos_contados_set = set()
             if not df_contagens_mutaveis.empty:
                 for idx, r_cont in df_contagens_mutaveis.iterrows():
                     match_base = df_visualizacao[df_visualizacao[col_cod].astype(str).str.upper().str.strip() == str(r_cont['cod_produto']).upper().strip()]
                     if not match_base.empty:
                         at_esp = str(match_base.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in match_base.columns else ""
-                        if at_esp and at_esp != "NAN" and at_esp != "SIM" and at_esp != "":
+                        if at_esp and at_esp not in ["NAN", "SIM", ""]:
                             if str(r_cont['ativo']).upper().strip() == at_esp:
                                 codigos_contados_set.add(str(r_cont['cod_produto']).upper().strip())
                         else:
                             codigos_contados_set.add(str(r_cont['cod_produto']).upper().strip())
 
             df_visualizacao['Status'] = df_visualizacao[col_cod].apply(
-                lambda x: "✅ Contado Corretamente" if str(x).upper().strip() in codigos_contados_set else "⏳ Pendente/Incompleto"
+                lambda x: "✅ Contado Corretamente" if str(x).upper().strip() in codigos_contados_set else "⏳ Pendente/Divergente"
             )
             
             if filtro_estoque == "Apenas Pendentes":
-                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "⏳ Pendente/Incompleto"]
+                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "⏳ Pendente/Divergente"]
             elif filtro_estoque == "Apenas Contados":
                 df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "✅ Contado Corretamente"]
                 
@@ -510,7 +500,7 @@ else:
         # --- ABA 5: DESEMPENHO DA EQUIPE ---
         with aba_graficos:
             st.write("### 🏆 Ranking de Inventários por Operador")
-            df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(DISTINCT inventario_id) as [Inventários Feitos] FROM contagens WHERE operador IS NOT NULL AND operador != '' GROUP BY operador", conn)
+            df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(DISTINCT inventario_id) as [Inventários Feitos'] FROM contagens WHERE operador IS NOT NULL AND operador != '' GROUP BY operador", conn)
             if df_ops.empty:
                 st.info("Aguardando lançamentos para processar dados de operadores.")
             else:
