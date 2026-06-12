@@ -187,12 +187,12 @@ else:
         contagens_mutaveis = st.session_state.contagens_por_inventario[id_inventario_atual]
         df_exemplo = st.session_state.base_sistema
         
-        # --- DEFINIÇÃO DO MAPA DE COLUNAS CONFORME SUA PLANILHA ---
-        col_cod = 'Cód. Produto' if 'Cód. Produto' in df_exemplo.columns else df_exemplo.columns[0]
-        col_desc = 'Desc. Produto' if 'Desc. Produto' in df_exemplo.columns else (df_exemplo.columns[1] if len(df_exemplo.columns) > 1 else df_exemplo.columns[0])
-        col_local = 'Desc. Estoque Físico' if 'Desc. Estoque Físico' in df_exemplo.columns else (df_exemplo.columns[2] if len(df_exemplo.columns) > 2 else 'Geral')
-        col_unidade = 'Unid. Medida' if 'Unid. Medida' in df_exemplo.columns else 'UN'
-        col_qtd = 'Qtd Estoque' if 'Qtd Estoque' in df_exemplo.columns else df_exemplo.columns[-1]
+        # --- DEFINIÇÃO ESTREITA E FIXA DOS NOMES DAS COLUNAS SOLICITADAS ---
+        col_cod = 'Cód. Produto'
+        col_desc = 'Desc. Produto'
+        col_local = 'Desc. Estoque Físico'
+        col_unidade = 'Unid. Medida'
+        col_qtd = 'Qtd Estoque'
         
         # --- ABA 1: CONTAR ITEM ---
         with aba_contar:
@@ -208,131 +208,43 @@ else:
                     st.rerun()
             
             if codigo_input:
-                # Filtragem travada estritamente pela coluna 'Cód. Produto'
-                item = df_exemplo[df_exemplo[col_cod].astype(str).str.upper() == codigo_input.upper()]
+                # Validação prévia para garantir que a planilha importada possui os cabeçalhos corretos
+                colunas_obrigatorias = [col_cod, col_desc, col_local, col_unidade, col_qtd]
+                colunas_faltantes = [c for c in colunas_obrigatorias if c not in df_exemplo.columns]
                 
-                if not item.empty:
-                    unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
-                    desc_val = item.iloc[0][col_desc]
-                    local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
+                if colunas_faltantes:
+                    st.error(f"⚠️ Arquivo inválido! A planilha precisa conter os cabeçalhos: {', '.join(colunas_obrigatorias)}. Faltando: {', '.join(colunas_faltantes)}")
+                else:
+                    # Busca restrita de dados associada à coluna estrita 'Cód. Produto'
+                    item = df_exemplo[df_exemplo[col_cod].astype(str).str.upper() == codigo_input.upper()]
                     
-                    # Captura segura da quantidade sistêmica (Impede erros com NaN)
-                    raw_qtd_sis = item.iloc[0][col_qtd]
-                    try:
-                        qtd_sis = int(pd.to_numeric(raw_qtd_sis, errors='coerce'))
-                        if pd.isna(qtd_sis):
-                            qtd_sis = 0
-                    except:
-                        qtd_sis = 0
-                    
-                    # Renderização dos 4 Cards Superiores
-                    b1, b2, b3, b4 = st.columns(4)
-                    with b1:
-                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
-                    with b2:
-                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor">{local_val}</div></div>', unsafe_allow_html=True)
-                    with b3:
-                        st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
-                    with b4:
-                        st.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS</div><div class="bloco-valor" style="color:#2ecc71;">● Ativo</div></div>', unsafe_allow_html=True)
-                    
-                    st.markdown(f"**Descrição:** {desc_val}")
-                    st.markdown(f"**Local:** {local_val}")
-                    
-                    # Card largo de saldo do sistema
-                    st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
-                    
-                    # Área de inserção física e observações integrada
-                    with st.form("confirmar_contagem_form", clear_on_submit=True):
-                        qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=0)
-                        observacao = st.text_input("📝 Observação (opcional)", placeholder="Notas ou observações adicionais sobre o produto...")
-                        btn_confirmar = st.form_submit_button("✅ Confirmar Contagem", type="primary", use_container_width=True)
+                    if not item.empty:
+                        unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
+                        desc_val = item.iloc[0][col_desc]
+                        local_val = item.iloc[0][col_local]
                         
-                        if btn_confirmar:
-                            contagens_mutaveis[codigo_input.upper()] = {
-                                "Físico": qtd_fisica,
-                                "Sistema": qtd_sis,
-                                "Descrição": desc_val,
-                                "Observação": observacao
-                            }
-                            st.toast(f"Contagem do item {codigo_input.upper()} adicionada!")
-                            st.rerun()
-                else:
-                    st.error("Código do produto não localizado na base de dados (Saldo).")
-
-        # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO) ---
-        with aba_atual:
-            if not contagens_mutaveis:
-                st.info("Nenhum item foi auditado neste inventário corrente.")
-            else:
-                df_contado = pd.DataFrame.from_dict(contagens_mutaveis, orient='index').reset_index()
-                df_contado.columns = ['Cód. Produto', 'Estoque Físico', 'Qtd Estoque', 'Desc. Produto', 'Observação']
-                df_contado['Divergência'] = df_contado['Estoque Físico'] - df_contado['Qtd Estoque']
-                
-                st.write("### Itens Auditados e Divergências")
-                st.dataframe(df_contado, use_container_width=True)
-
-        # --- ABA 3: BASE DE ESTOQUE ---
-        with aba_base:
-            df_visualizacao = st.session_state.base_sistema.copy()
-            
-            filtro_estoque = st.selectbox("Filtrar por Estoque Físico", ["Todos", "Apenas Pendentes", "Apenas Contados"], key="filtro_base_tab")
-            pesquisa = st.text_input("🔍 Pesquisar (código ou descrição)", placeholder="Filtre por trechos de dados...", key="pesquisa_base_tab")
-            
-            df_visualizacao['Status'] = df_visualizacao[col_cod].apply(
-                lambda x: "✅ Contado" if str(x).upper() in contagens_mutaveis else "⏳ Pendente"
-            )
-            
-            if filtro_estoque == "Apenas Pendentes":
-                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "⏳ Pendente"]
-            elif filtro_estoque == "Apenas Contados":
-                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "✅ Contado"]
-                
-            if pesquisa:
-                df_visualizacao = df_visualizacao[
-                    df_visualizacao[col_cod].astype(str).str.contains(pesquisa, case=False) | 
-                    df_visualizacao[col_desc].astype(str).str.contains(pesquisa, case=False)
-                ]
-            
-            cols = ['Status'] + [c for c in df_visualizacao.columns if c != 'Status']
-            df_visualizacao = df_visualizacao[cols]
-            
-            st.markdown("---")
-            col_inf, col_sli = st.columns([2, 2])
-            with col_inf:
-                st.caption(f"{len(df_visualizacao)} itens encontrados | Arquivo: {st.session_state.nome_arquivo_excel}")
-            with col_sli:
-                itens_por_pagina = st.slider("Itens por página", min_value=10, max_value=100, value=50, step=10, key="slider_pag")
-            
-            total_linhas = len(df_visualizacao)
-            total_paginas = max(1, (total_linhas + itens_por_pagina - 1) // itens_por_pagina)
-            
-            col_ant, col_pag, col_prox = st.columns([1, 2, 1])
-            with col_ant:
-                if st.button("◀ Anterior", use_container_width=True, key="btn_ant") and st.session_state.pagina_atual > 1:
-                    st.session_state.pagina_atual -= 1
-                    st.rerun()
-            with col_pag:
-                st.markdown(f"<p style='text-align: center; font-weight: bold;'>Página {st.session_state.pagina_atual} de {total_paginas}</p>", unsafe_allow_html=True)
-            with col_prox:
-                if st.button("Próxima ▶", use_container_width=True, key="btn_prox") and st.session_state.pagina_atual < total_paginas:
-                    st.session_state.pagina_atual += 1
-                    st.rerun()
-            
-            inicio = (st.session_state.pagina_atual - 1) * itens_por_pagina
-            fim = inicio + itens_por_pagina
-            
-            st.dataframe(df_visualizacao.iloc[inicio:fim], use_container_width=True)
-
-        # --- ABA 4: GRÁFICO DA EQUIPE ---
-        with aba_graficos:
-            st.write("### 🏆 Ranking de Inventários por Operador")
-            df_equipe = st.session_state.historico_equipe.copy()
-            if total_contados > 0:
-                if st.session_state.operador in df_equipe['Operador'].values:
-                    df_equipe.loc[df_equipe['Operador'] == st.session_state.operador, 'Inventários Feitos'] += 1
-                else:
-                    novo_op = pd.DataFrame({'Operador': [st.session_state.operador], 'Inventários Feitos': [1]})
-                    df_equipe = pd.concat([df_equipe, novo_op], ignore_index=True)
-            df_equipe = df_equipe.sort_values(by='Inventários Feitos', ascending=False)
-            st.bar_chart(data=df_equipe, x='Operador', y='Inventários Feitos', color="#d35400")
+                        # Captura e conversão numérica segura do saldo da coluna 'Qtd Estoque'
+                        raw_qtd_sis = item.iloc[0][col_qtd]
+                        try:
+                            qtd_sis = int(pd.to_numeric(raw_qtd_sis, errors='coerce'))
+                            if pd.isna(qtd_sis):
+                                qtd_sis = 0
+                        except:
+                            qtd_sis = 0
+                        
+                        # Renderização dos 4 Blocos Superiores com HTML customizado
+                        b1, b2, b3, b4 = st.columns(4)
+                        with b1:
+                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
+                        with b2:
+                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor">{local_val}</div></div>', unsafe_allow_html=True)
+                        with b3:
+                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
+                        with b4:
+                            st.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS</div><div class="bloco-valor" style="color:#2ecc71;">● Ativo</div></div>', unsafe_allow_html=True)
+                        
+                        # Apresentação clara de descrição e local puxados da base
+                        st.markdown(f"**Descrição:** {desc_val}")
+                        st.markdown(f"**Local:** {local_val}")
+                        
+                        #
