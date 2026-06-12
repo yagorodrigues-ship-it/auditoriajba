@@ -235,7 +235,6 @@ else:
                 ]
                 if not match_base.empty:
                     ativo_esperado = str(match_base.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in match_base.columns else ""
-                    # Validação Unificada: Se o ativo digitado bate perfeitamente com o esperado da base para aquele código
                     if ativo_esperado and ativo_esperado not in ["NAN", "SIM", ""]:
                         if str(c_row['ativo']).upper().strip() == ativo_esperado:
                             contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
@@ -311,7 +310,6 @@ else:
                         except:
                             qtd_sis = 0
                         
-                        # Captura o Ativo esperado gravado no Saldo
                         ativo_original_base = str(item.iloc[0][col_ativo_base]).upper().strip() if col_ativo_base in item.columns else ""
                         if ativo_original_base in ["NAN", "SIM", ""]:
                             ativo_original_base = ""
@@ -347,7 +345,6 @@ else:
                                     agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
                                     
-                                    # REGRA DE UNIFICAÇÃO: Se o ativo não bater com a base, considera Qtd Sistema como 0 (Força a Divergência)
                                     qtd_sistema_calculada = qtd_sis
                                     if ativo_original_base and ativo_digitado_limpo != ativo_original_base:
                                         qtd_sistema_calculada = 0 
@@ -364,8 +361,10 @@ else:
                                     st.toast(f"Lançamento processado! Tela atualizada.")
                                     st.session_state.reset_bip = True
                                     st.rerun()
+                    else:
+                        st.error("Código do produto não localizado na base de dados (Saldo).")
 
-        # --- ABA 2: CONTAGEM ATUAL (RELATÓRIO) ---
+        # --- ABA 2: CONTAGEM ATUAL ---
         with aba_atual:
             st.subheader(f"Inventário: {id_inventario_atual} – {inventario_selecionado_obj['nome']} ({inventario_selecionado_obj['data']})")
             
@@ -383,7 +382,7 @@ else:
                 r1.metric("📦 ITENS CONTADOS", total_auditado)
                 r2.metric("⚠️ COM DIVERGÊNCIA", itens_divergentes)
                 r3.metric("🔢 QTD TOTAL CONTADA", soma_contada)
-                r4.metric("🗄️ QTD TOTAL SISTEMA", f"{soma_sistema} (↓ {diferenca_acumulada})")
+                r4.metric("🗄️ QTD TOTAL SISTEMA", f"{soma_sistema} (Diferença: {diferenca_acumulada})")
                 
                 st.markdown(f'<div class="alerta-divergencia"><strong>⚠️ {itens_divergentes} item(ns) apresentando divergência ou inconformidade de Ativo ({porcentagem_divergencia:.0f}%)</strong></div>', unsafe_allow_html=True)
                 
@@ -399,7 +398,7 @@ else:
                         st.toast("Linha excluída com sucesso!")
                         st.rerun()
 
-        # --- ABA 3: HISTÓRICO DE INVENTÁRIOS (CORRIGIDA DA ENGINE XLSWRITER) ---
+        # --- ABA 3: HISTÓRICO DE INVENTÁRIOS ---
         with aba_historico:
             st.write("### 📁 Histórico de Inventários Arquivados")
             for idx, inv in df_inventarios.iterrows():
@@ -422,7 +421,6 @@ else:
                         ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora', 'lote']
                         st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
                         
-                        # CORREÇÃO DA ENGINE: openpyxl para rodar nativamente no Streamlit Cloud sem quebras
                         buffer = io.BytesIO()
                         df_hist_inv[ordem_colunas_print].to_excel(buffer, index=False, engine='openpyxl')
                         
@@ -440,7 +438,6 @@ else:
             filtro_estoque = st.selectbox("Filtrar por Estoque Físico", ["Todos", "Apenas Pendentes", "Apenas Contados"], key="filtro_base_tab")
             pesquisa = st.text_input("🔍 Pesquisar (código ou descrição)", placeholder="Filtre por trechos de dados...", key="pesquisa_base_tab")
             
-            # Recalcula o status considerando a unificação de Ativos Corretos
             codigos_contados_set = set()
             if not df_contagens_mutaveis.empty:
                 for idx, r_cont in df_contagens_mutaveis.iterrows():
@@ -497,10 +494,11 @@ else:
             fim = inicio + itens_por_pagina
             st.dataframe(df_visualizacao.iloc[inicio:fim], use_container_width=True)
 
-        # --- ABA 5: DESEMPENHO DA EQUIPE ---
+        # --- ABA 5: DESEMPENHO DA EQUIPE (CORREÇÃO DE ASPAS APLICADA) ---
         with aba_graficos:
             st.write("### 🏆 Ranking de Inventários por Operador")
-            df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(DISTINCT inventario_id) as [Inventários Feitos'] FROM contagens WHERE operador IS NOT NULL AND operador != '' GROUP BY operador", conn)
+            # Correção cirúrgica na string SQL das aspas soltas do print
+            df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(DISTINCT inventario_id) as [Inventários Feitos] FROM contagens WHERE operador IS NOT NULL AND operador != '' GROUP BY operador", conn)
             if df_ops.empty:
                 st.info("Aguardando lançamentos para processar dados de operadores.")
             else:
