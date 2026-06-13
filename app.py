@@ -3,15 +3,9 @@ import pandas as pd
 import datetime
 import sqlite3
 import io
-import hashlib  # Adicionado para segurança das senhas
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Contagem de Estoque Físico", layout="wide")
-
-# --- FUNÇÃO AUXILIAR DE SEGURANÇA (HASH DE SENHA) ---
-def gerar_hash_senha(senha: str) -> str:
-    """Gera um hash SHA-256 para proteger as senhas no banco de dados."""
-    return hashlib.sha256(senha.encode('utf-8')).hexdigest()
 
 # --- BANCO DE DADOS PERMANENTE (SQLITE) ---
 def conectar_banco():
@@ -83,14 +77,13 @@ def inicializar_banco():
         )
     """)
     
-    # Criar administrador padrão se a tabela estiver vazia (Senha padrão: 123)
+    # Criar administrador padrão se a tabela estiver vazia
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
-        senha_admin_hash = gerar_hash_senha("123")
         cursor.execute("""
             INSERT INTO usuarios (nome, cpf, email, senha) 
             VALUES (?, ?, ?, ?)
-        """, ("Administrador Tel", "00000000000", "admin@tel.com.br", senha_admin_hash))
+        """, ("Administrador Tel", "00000000000", "admin@tel.com.br", "123"))
         
     conn.commit()
     conn.close()
@@ -195,17 +188,6 @@ if 'ultimo_item_sucesso' not in st.session_state:
 def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
 
-def tratar_dataframe_excel(df):
-    """Garante que códigos numéricos lidos do Excel não fiquem formatados como float com '.0'"""
-    for col in df.columns:
-        if df[col].dtype == 'float64' or df[col].dtype == 'int64':
-            # Se não houver números fracionados reais na coluna, trata como string limpa
-            if (df[col] % 1 == 0).all():
-                df[col] = df[col].fillna(0).astype(int).astype(str)
-        else:
-            df[col] = df[col].astype(str).str.strip()
-    return df
-
 # --- TELA DE ACESSO ---
 if not st.session_state.logged_in:
     conn = conectar_banco()
@@ -220,13 +202,11 @@ if not st.session_state.logged_in:
             if botao_login:
                 id_limpo = identificador.strip()
                 doc_limpo = limpar_documento(id_limpo)
-                senha_hash = gerar_hash_senha(senha)
-                
                 cursor = conn.cursor()
                 cursor.execute("""
                     SELECT nome FROM usuarios 
                     WHERE (email = ? OR cpf = ?) AND senha = ?
-                """, (id_limpo, doc_limpo, senha_hash))
+                """, (id_limpo, doc_limpo, senha))
                 user = cursor.fetchone()
                 
                 if user:
@@ -265,15 +245,12 @@ if not st.session_state.logged_in:
                 else:
                     try:
                         cursor = conn.cursor()
-                        nova_senha_hash = gerar_hash_senha(nova_senha)
-                        cursor.execute("""
-                            INSERT INTO usuarios (nome, cpf, email, senha) VALUES (?, ?, ?, ?)
-                        """, (novo_nome.strip(), cpf_l, novo_email.strip(), nova_senha_hash))
+                        cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha) VALUES (?, ?, ?, ?)", (novo_nome.strip(), cpf_l, novo_email.strip(), nova_senha))
                         conn.commit()
                         st.success("✅ Cadastrado com sucesso!")
                         st.session_state.tela_acesso = "login"
                         st.rerun()
-                    except sqlite3.IntegrityError:
+                    except:
                         st.error("❌ CPF ou E-mail já existente.")
                         
         if st.button("◀ Voltar"):
@@ -294,8 +271,7 @@ if not st.session_state.logged_in:
                 cursor.execute("SELECT id FROM usuarios WHERE email = ? OR cpf = ?", (v_limpo, v_doc))
                 row = cursor.fetchone()
                 if row and nova_senha_rec:
-                    nova_senha_rec_hash = gerar_hash_senha(nova_senha_rec)
-                    cursor.execute("UPDATE usuarios SET senha = ? WHERE id = ?", (nova_senha_rec_hash, row[0]))
+                    cursor.execute("UPDATE usuarios SET senha = ? WHERE id = ?", (nova_senha_rec, row[0]))
                     conn.commit()
                     st.success("✅ Senha alterada!")
                     st.session_state.tela_acesso = "login"
@@ -329,8 +305,7 @@ else:
         st.write("📂 **Carregar Base de Dados (Funcionários)**")
         arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed", key="func_excel_loader")
         if arquivo_excel is not None and st.session_state.base_sistema is None:
-            df_carregado = pd.read_excel(arquivo_excel)
-            st.session_state.base_sistema = tratar_dataframe_excel(df_carregado)
+            st.session_state.base_sistema = pd.read_excel(arquivo_excel)
             st.session_state.nome_arquivo_excel = arquivo_excel.name
             st.rerun()
             
@@ -399,8 +374,7 @@ else:
 
         if st.session_state.base_sistema is not None and id_inventario_atual is not None:
             total_itens_base = len(st.session_state.base_sistema)
-            id_limpo_inv = id_inventario_atual.replace('#','')
-            df_contagens_atuais = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_limpo_inv,))
+            df_contagens_atuais = pd.read_sql_query(f"SELECT * FROM contagens WHERE inventario_id = '{id_inventario_atual.replace('#','')}'", conn)
             
             contados_validos_set = set()
             for idx, c_row in df_contagens_atuais.iterrows():
@@ -431,8 +405,7 @@ else:
         st.session_state.ultimo_item_sucesso = ""
 
     # ABAS DO PAINEL PRINCIPAL
-    id_limpo_atual = id_inventario_atual.replace('#','') if id_inventario_atual else ""
-    df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_limpo_atual,)) if id_inventario_atual else pd.DataFrame()
+    df_contagens_mutaveis = pd.read_sql_query(f"SELECT * FROM contagens WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn) if id_inventario_atual else pd.DataFrame()
     
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Auditoria Supervisor", "📁 Histórico", "📄 Base de Estoque", "🏆 Desempenho"]
     aba_contar, aba_atual, aba_supervisor, aba_historico, aba_base, aba_graficos = st.tabs(abas)
@@ -561,16 +534,16 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: AUDITORIA DO SUPERVISOR ---
+    # --- ABA 3: AUDITORIA DO SUPERVISOR (UNIFICADA E TOTALMENTE LIBERADA) ---
     with aba_supervisor:
         st.title("🔬 Controle de Qualidade e Acuracidade Amostral")
         
         if id_inventario_atual is None:
             st.warning("⚠️ Selecione o inventário na barra lateral.")
         else:
-            id_limpo_sup = id_inventario_atual.replace('#','')
-            df_auditorias = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_limpo_sup,))
+            df_auditorias = pd.read_sql_query(f"SELECT * FROM auditorias_supervisor WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn)
             
+            # [PARTE SUPERIOR] Indicadores de Qualidade e Acuracidade
             if not df_auditorias.empty:
                 total_sup = len(df_auditorias)
                 certos_qtd = len(df_auditorias[df_auditorias['diferenca'] == 0])
@@ -594,9 +567,11 @@ else:
             else:
                 st.info("💡 Nenhuma amostragem de acuracidade coletada até o momento para este inventário.")
             
+            # [PARTE CENTRAL] Lançamento e Bipe de Amostras
             if st.session_state.base_supervisor is None:
                 st.warning("⚠️ Passo pendente: Carregue a sua planilha de amostragem na seção inferior desta tela para habilitar os lançamentos.")
             else:
+                # MAPEAMENTO AUTOMÁTICO DE COLUNAS DA BASE SUPERVISOR
                 colunas_sup = list(st.session_state.base_supervisor.columns)
                 def encontrar_col_sup(opcoes, default_idx):
                     for opcao in opcoes:
@@ -661,6 +636,7 @@ else:
                 st.write("### 📝 Histórico de Amostras Coletadas")
                 st.dataframe(df_auditorias, use_container_width=True, hide_index=True)
                 
+            # [PARTE INFERIOR] Upload da Planilha de Amostragem Totalmente Liberado para o ADM
             st.markdown("---")
             st.subheader("📤 Carregar Planilha de Auditoria / Amostragem")
             st.markdown("Suba abaixo o arquivo Excel específico com os itens que você quer contar nesta amostragem.")
@@ -672,8 +648,7 @@ else:
             )
             
             if arquivo_supervisor is not None and st.session_state.base_supervisor is None:
-                df_sup_carregado = pd.read_excel(arquivo_supervisor)
-                st.session_state.base_supervisor = tratar_dataframe_excel(df_sup_carregado)
+                st.session_state.base_supervisor = pd.read_excel(arquivo_supervisor)
                 st.session_state.nome_arquivo_supervisor = arquivo_supervisor.name
                 st.success(f"✅ Planilha de Auditoria '{arquivo_supervisor.name}' processada e carregada com sucesso!")
                 st.rerun()
@@ -693,9 +668,8 @@ else:
     with aba_historico:
         st.write("### 📁 Histórico de Inventários Arquivados")
         for idx, inv in df_inventarios.iterrows():
-            id_inv_loop = inv['id'].replace('#','')
-            df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inv_loop,))
-            with st.expander(f"📁 {inv['id']} – {inv['nome']} | {inv['data']} | {inv['status']} | {len(df_hist_inv)} itens"):
+            df_hist_inv = pd.read_sql_query(f"SELECT * FROM contagens WHERE inventario_id = '{inv['id'].replace('#','')}' ORDER BY id DESC", conn)
+            with st.expander(f"📁 {inv['id']} – {inv['nome']} | {inv['data']} | {len(df_hist_inv)} itens"):
                 if not df_hist_inv.empty:
                     ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
                     st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
@@ -710,7 +684,7 @@ else:
                             if st.button("❌ Excluir Definitivamente", key=f"del_inv_{inv['id']}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
-                                cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (id_inv_loop,))
+                                cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
                                 conn.commit()
                                 st.rerun()
 
