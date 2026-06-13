@@ -27,7 +27,7 @@ def inicializar_banco():
         CREATE TABLE IF NOT EXISTS contagens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             inventario_id TEXT,
-            id_estoque INTEGER,
+            id_estoque TEXT,
             desc_estoque TEXT,
             cod_produto TEXT,
             desc_produto TEXT,
@@ -205,7 +205,7 @@ else:
         st.session_state.operador = st.text_input("Seu nome", value=st.session_state.operador, key="op_input_text", label_visibility="collapsed", placeholder="Seu nome")
 
         # --- MAPEAMENTO INTELIGENTE DE COLUNAS ---
-        col_cod, col_desc, col_local, col_unidade, col_qtd, col_ativo_base = "", "", "", "", "", ""
+        col_cod, col_desc, col_local, col_unidade, col_qtd, col_ativo_base, col_id_estoque = "", "", "", "", "", "", ""
         if st.session_state.base_sistema is not None:
             colunas_reais = list(st.session_state.base_sistema.columns)
             
@@ -221,6 +221,7 @@ else:
             col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
             col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
+            col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoque', 'codestoque'], 0)
             
             # Priorização estrita da coluna exata "Ativo"
             col_ativo_base = "Não Encontrado"
@@ -229,7 +230,7 @@ else:
                     col_ativo_base = col
                     break
             if col_ativo_base == "Não Encontrado":
-                col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo', 'id_estoque'], -1)
+                col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo'], -1)
 
         # --- CÁLCULO DE PROGRESSO DINÂMICO ---
         total_itens_base = 0
@@ -274,7 +275,7 @@ else:
     st.title("📦 Painel Geral de Auditoria")
     st.caption("Tel Telecomunicações · Painel de Auditoria Ativa")
     
-    # Exibe confirmação visual de sucesso do item anterior se aplicável
+    # Exibe confirmação visual de sucesso do item anterior
     if st.session_state.ultimo_item_sucesso:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
@@ -302,11 +303,10 @@ else:
             else:
                 c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
                 with c_busca:
-                    # ALTERAÇÃO: Chave dinâmica baseada no contador_reset força o campo a renascer vazio após cada rerun de sucesso
                     codigo_input = st.text_input(
                         "💻 Código do Produto (etiqueta ou manual)", 
                         value="", 
-                        placeholder="Ex: TEAT0139Z — Enter para buscar", 
+                        placeholder="Bipe a etiqueta ou digite o código...", 
                         key=f"input_bip_dinamico_{st.session_state.contador_reset}"
                     )
                 with c_filtro:
@@ -318,13 +318,24 @@ else:
                         st.rerun()
                 
                 if codigo_input:
+                    busca_limpa = str(codigo_input).upper().strip()
+                    
+                    # --- REGRA INTELIGENTE DE RASTREIO E CONVERSÃO ---
+                    # Se o operador bipar o formato "2183 - 0452-1264-4", extraímos o código real após o traço
+                    if " - " in busca_limpa:
+                        codigo_rastreio = busca_limpa.split(" - ")[-1].strip()
+                    else:
+                        codigo_rastreio = busca_limpa
+
+                    # Procura na base comparando com o código do produto extraído
                     serie_codigos = df_exemplo[col_cod].astype(str).str.upper().str.strip()
-                    item = df_exemplo[serie_codigos == str(codigo_input).upper().strip()]
+                    item = df_exemplo[serie_codigos == codigo_rastreio]
                     
                     if not item.empty:
                         unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
                         desc_val = item.iloc[0][col_desc]
                         local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
+                        id_estoque_val = str(item.iloc[0][col_id_estoque]).strip() if col_id_estoque in item.columns else ""
                         
                         raw_qtd_sis = item.iloc[0][col_qtd]
                         try:
@@ -338,16 +349,16 @@ else:
 
                         b1, b2, b3, b4 = st.columns(4)
                         with b1:
-                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
                         with b2:
                             st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
                         with b3:
                             st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
                         with b4:
-                            st.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS</div><div class="bloco-valor" style="color:#2ecc71;">● Ativo</div></div>', unsafe_allow_html=True)
+                            st.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS BARRA</div><div class="bloco-valor" style="color:#2ecc71;">● Conectado</div></div>', unsafe_allow_html=True)
                         
                         st.markdown(f"**Descrição:** {desc_val}")
-                        st.markdown(f"**Local:** {local_val}")
+                        st.markdown(f"**Local:** {local_val} &nbsp;|&nbsp; **Chave de Geração da Etiqueta:** `{id_estoque_val} - {codigo_rastreio}`")
                         
                         if map_reais_ativos_lista := ativos_da_base_lista:
                             st.info(f"📋 **Nota de Sistema:** Este item possui ativos mapeados no saldo da coluna '{col_ativo_base}'. Ativos válidos: {', '.join(map_reais_ativos_lista)}")
@@ -393,15 +404,15 @@ else:
                                     cursor.execute("""
                                         INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
+                                    """, (id_inventario_atual.replace("#",""), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
                                     conn.commit()
                                     
-                                    # GUARDA MENSAGEM E FORÇA RESET ABSOLUTO DA INTERFACE
-                                    st.session_state.ultimo_item_sucesso = f"✅ Sucesso: O item '{codigo_input.upper().strip()}' foi registrado com {qtd_fisica} unidade(s)!"
+                                    # GERA O COMPORTAMENTO DE AUTO-RESET E LIMPEZA COMPLETA DA INTERFACE
+                                    st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado: O item '{codigo_rastreio}' foi adicionado com sucesso!"
                                     st.session_state.contador_reset += 1
                                     st.rerun()
                     else:
-                        st.error("Código do produto não localizado na base de dados (Saldo).")
+                        st.error(f"Código do produto '{codigo_rastreio}' não localizado na base de dados (Saldo).")
 
         # --- ABA 2: CONTAGEM ATUAL ---
         with aba_atual:
