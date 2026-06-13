@@ -127,8 +127,10 @@ if 'pagina_atual' not in st.session_state:
     st.session_state.pagina_atual = 1
 if 'operador' not in st.session_state:
     st.session_state.operador = ""
-if 'reset_bip' not in st.session_state:
-    st.session_state.reset_bip = False
+
+# Estado dinâmico que armazena a string de entrada para gerenciar resets forçados
+if 'valor_bipado' not in st.session_state:
+    st.session_state.valor_bipado = ""
 
 # --- TELA DE LOGIN ---
 if not st.session_state.logged_in:
@@ -204,6 +206,7 @@ else:
         col_cod, col_desc, col_local, col_unidade, col_qtd, col_ativo_base = "", "", "", "", "", ""
         if st.session_state.base_sistema is not None:
             colunas_reais = list(st.session_state.base_sistema.columns)
+            
             def encontrar_coluna(opcoes, default_idx):
                 for opcao in opcoes:
                     for col in colunas_reais:
@@ -216,7 +219,15 @@ else:
             col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
             col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-            col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo', 'id_estoque'], -1)
+            
+            # ALTERAÇÃO: Prioridade total na busca exata do nome "Ativo" ignorando outras variações parciais primeiro
+            col_ativo_base = "Não Encontrado"
+            for col in colunas_reais:
+                if col.strip().lower() == "ativo":
+                    col_ativo_base = col
+                    break
+            if col_ativo_base == "Não Encontrado":
+                col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo', 'id_estoque'], -1)
 
         # --- CÁLCULO DE PROGRESSO DINÂMICO ---
         total_itens_base = 0
@@ -284,21 +295,25 @@ else:
             else:
                 c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
                 with c_busca:
-                    if st.session_state.reset_bip:
-                        st.session_state.reset_bip = False
-                        st.rerun()
-                    codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", value="", placeholder="Ex: TEAT0139Z — Enter para buscar", key="input_bip_chave")
+                    # Input de pesquisa agora utiliza e atualiza estritamente o estado global controlado 'valor_bipado'
+                    codigo_input = st.text_input(
+                        "💻 Código do Produto (etiqueta ou manual)", 
+                        value=st.session_state.valor_bipado, 
+                        placeholder="Ex: TEAT0139Z — Enter para buscar", 
+                        key="input_bip_chave"
+                    )
+                    st.session_state.valor_bipado = codigo_input
                 with c_filtro:
                     st.selectbox("📍 Estoque Físico", ["Todos"], key="sel_est_fisico")
                 with c_limpar:
                     st.write("") 
                     if st.button("🗑️ Limpar", use_container_width=True, key="clear_btn"):
-                        st.session_state.reset_bip = True
+                        st.session_state.valor_bipado = ""
                         st.rerun()
                 
-                if codigo_input:
+                if st.session_state.valor_bipado:
                     serie_codigos = df_exemplo[col_cod].astype(str).str.upper().str.strip()
-                    item = df_exemplo[serie_codigos == str(codigo_input).upper().strip()]
+                    item = df_exemplo[serie_codigos == str(st.session_state.valor_bipado).upper().strip()]
                     
                     if not item.empty:
                         unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
@@ -317,7 +332,7 @@ else:
 
                         b1, b2, b3, b4 = st.columns(4)
                         with b1:
-                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{st.session_state.valor_bipado.upper()}</div></div>', unsafe_allow_html=True)
                         with b2:
                             st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
                         with b3:
@@ -329,17 +344,16 @@ else:
                         st.markdown(f"**Local:** {local_val}")
                         
                         if map_reais_ativos_lista := ativos_da_base_lista:
-                            st.info(f"📋 **Nota de Sistema:** Este item possui ativos mapeados no saldo. Ativos válidos: {', '.join(map_reais_ativos_lista)}")
+                            st.info(f"📋 **Nota de Sistema:** Este item possui ativos mapeados no saldo da coluna '{col_ativo_base}'. Ativos válidos: {', '.join(map_reais_ativos_lista)}")
                         else:
-                            st.caption("ℹ️ **Nota:** Linhas de ativo zeradas ou ausentes para este item no Excel (Campo Opcional).")
+                            st.caption(f"ℹ️ **Nota:** Nossos sistemas não localizaram registros válidos de ativos para esta linha no campo '{col_ativo_base}' do Excel.")
                         
                         st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                         
                         with st.form("confirmar_contagem_form", clear_on_submit=True):
-                            # AJUSTE: Quantidade padrão inicializada em 0 em vez de 1
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
                             
-                            rotulo_ativo = "🔢 Número do Ativo / Patrimônio (Obrigatório)" if map_reais_ativos_lista else "🔢 Número do Ativo / Patrimônio (Opcional - Linha Zerada)"
+                            rotulo_ativo = "🔢 Número do Ativo / Patrimônio (Obrigatório)" if map_reais_ativos_lista else "🔢 Número do Ativo / Patrimônio (Opcional)"
                             ativo_input = st.text_input(rotulo_ativo, placeholder="Insira o número de identificação do ativo...")
                             
                             observacao = st.text_input("📝 Observação (opcional)")
@@ -348,7 +362,6 @@ else:
                             if btn_confirmar:
                                 ativo_digitado_limpo = ativo_input.strip().upper()
                                 
-                                # AJUSTE: Trava estrita de quantidade obrigatória preenchida (> 0)
                                 if qtd_fisica <= 0:
                                     st.error("❌ Erro: O preenchimento de uma quantidade contada maior que 0 é obrigatório para realizar o lançamento!")
                                 elif map_reais_ativos_lista and not ativo_digitado_limpo:
@@ -374,12 +387,13 @@ else:
                                     cursor.execute("""
                                         INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
+                                    """, (id_inventario_atual.replace("#",""), 1118, local_val, st.session_state.valor_bipado.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
                                     conn.commit()
                                     
-                                    st.toast(f"Lançamento processado! Tela redefinida para nova busca.")
-                                    # ATUALIZAÇÃO: Força o reset completo do estado de busca da tela, limpando a memória do último código
-                                    st.session_state.reset_bip = True
+                                    st.toast(f"Lançamento processado!")
+                                    
+                                    # ALTERAÇÃO CRUCIAL: Zera a variável de estado que preenche o input para liberar o próximo bip limpo
+                                    st.session_state.valor_bipado = ""
                                     st.rerun()
                     else:
                         st.error("Código do produto não localizado na base de dados (Saldo).")
