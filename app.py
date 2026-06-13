@@ -166,13 +166,6 @@ st.markdown("""
         border-left: 5px solid #2980b9;
         margin-bottom: 20px;
     }
-    .pasta-encerramento {
-        background-color: #f4f6f7;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #e74c3c;
-        margin-bottom: 20px;
-    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -292,9 +285,12 @@ else:
     conn = conectar_banco()
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor ORDER BY data DESC, id DESC", conn)
-    eh_supervisor = any(x in st.session_state.operador.lower() for x in ["administrador", "admin", "supervisor"])
     
-    # Definição segura global para que todas as abas tenham acesso direto sem NameError
+    # LIBERAÇÃO DEFINITIVA DO ADMIN: Validação para Yago Rodrigues + Chaves padrões de hierarquia
+    nome_usuario_logado_limpo = st.session_state.operador.lower()
+    eh_supervisor = any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"])
+    
+    # Escopo inicializado seguro para as tabelas correntes
     id_inventario_atual_inicial = df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else ""
     df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual_inicial,)) if id_inventario_atual_inicial else pd.DataFrame()
     
@@ -398,12 +394,9 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    # CORREÇÃO DEFINITIVA DO NAMEERROR: Mapeando os nomes exatos das abas para evitar quebra de variáveis desempacotadas
-    abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📄 Base de Estoque", "🏆 Desempenho"]
-    aba_contar, aba_atual, aba_supervisor, aba_acuracidade, aba_base, aba_graficos = st.tabs(abas)
-    
-    # Para manter retrocompatibilidade com chamadas internas antigas de outras rotas, espelhamos o ponteiro
-    aba_historico = aba_acuracidade
+    # ORGANIZAÇÃO DAS ABAS EXATAMENTE COMO SOLICITADO
+    abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho"]
+    aba_contar, aba_atual, aba_supervisor, aba_acuracidade, aba_historico_geral, aba_base, aba_graficos = st.tabs(abas)
     
     # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS) ---
     with aba_contar:
@@ -439,9 +432,6 @@ else:
                         if pd.isna(qtd_sis): qtd_sis = 0
                     except: qtd_sis = 0
                     
-                    ativos_da_base_lista = [str(x).upper().strip() for x in item[col_ativo_base].tolist() if col_ativo_base in item.columns]
-                    ativos_da_base_lista = [x for x in list(set(ativos_da_base_lista)) if x not in ["NAN", "SIM", "", "0", "0.0"]]
-                    
                     b1, b2, b3, b4 = st.columns(4)
                     b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
                     b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
@@ -452,8 +442,7 @@ else:
                     
                     with st.form("confirmar_form", clear_on_submit=True):
                         qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
-                        rotulo_ativo = "🔢 Número do Ativo (Obrigatório)" if ativos_da_base_lista else "🔢 Número do Ativo (Opcional)"
-                        ativo_input = st.text_input(rotulo_ativo)
+                        ativo_input = st.text_input("🔢 Número do Ativo (Opcional)")
                         observacao = st.text_input("📝 Observação (opcional)")
                         
                         if st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True):
@@ -512,7 +501,7 @@ else:
         st.title("🔬 Controle de Qualidade Amostral do Supervisor")
         
         if not eh_supervisor:
-            st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor.")
+            st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor (Acesso Liberado para Yago Rodrigues).")
         else:
             st.subheader("📁 Controle de Inventários do Supervisor")
             col_sel, col_btn = st.columns([7, 3])
@@ -652,9 +641,9 @@ else:
                     st.session_state.nome_arquivo_supervisor = ""
                     st.rerun()
 
-    # --- ABA 4: ACURACIDADE ESTOQUE (PLANILHA DE MÉTRICAS + HISTÓRICO ARQUIVADO COMPACTADO) ---
+    # --- ABA 4: ACURACIDADE ESTOQUE (APENAS INDICADORES VISUAIS COM BOLAS DE CORES DO SUPERVISOR) ---
     with aba_acuracidade:
-        st.title("📈 Acuracidade e Histórico Consolidado de Estoque")
+        st.title("📈 Acuracidade - Controle Amostral")
         
         st.write("### 📊 Pasta de Acuracidade de Amostragens (Métricas por Depósito)")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -672,12 +661,21 @@ else:
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
                 data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
                 
+                pct_saldo = (certos_qtd / total_itens_dep) * 100
+                pct_etiq = (certos_etiq / total_itens_dep) * 100
+                pct_local = (certos_local / total_itens_dep) * 100
+                
+                # ADIÇÃO DAS BOLINHAS COLORIDAS: Verde para 100% (Sem erros), Vermelha para qualquer falha encontrada
+                bola_saldo = f"🟢 {pct_saldo:.1f}%" if pct_saldo == 100 else f"🔴 {pct_saldo:.1f}%"
+                bola_etiq = f"🟢 {pct_etiq:.1f}%" if pct_etiq == 100 else f"🔴 {pct_etiq:.1f}%"
+                bola_local = f"🟢 {pct_local:.1f}%" if pct_local == 100 else f"🔴 {pct_local:.1f}%"
+                
                 linhas_planilha_acuracidade.append({
                     "CÓDIGO ESTOQUE AUDITADO": dep_id,
                     "DESCRIÇÃO DO ESTOQUE": desc_dep,
-                    "ACURACIDADE DE SALDO": f"{(certos_qtd / total_itens_dep)*100:.1f}%",
-                    "ACURACIDADE ETIQUETAS": f"{(certos_etiq / total_itens_dep)*100:.1f}%",
-                    "ACURACIDADE LOCALIZAÇÃO": f"{(certos_local / total_itens_dep)*100:.1f}%",
+                    "ACURACIDADE DE SALDO": bola_saldo,
+                    "ACURACIDADE ETIQUETAS": bola_etiq,
+                    "ACURACIDADE LOCALIZAÇÃO": bola_local,
                     "QUANTOS ITENS CONTABILIZADOS": total_itens_dep,
                     "DATA": data_ultima
                 })
@@ -686,31 +684,27 @@ else:
             st.dataframe(df_planilha_final, use_container_width=True, hide_index=True)
             
         st.markdown("---")
-        st.write("### 📁 Histórico de Inventários Arquivados (Gerais e Amostrais)")
-        
-        st.markdown("**📋 Inventários da Equipe**")
-        for idx, inv in df_inventarios.iterrows():
-            df_hist_inv_loop = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv['id'].replace('#',''),))
-            with st.expander(f"📁 {inv['id']} – {inv['nome']} | {inv['data']} | {len(df_hist_inv_loop)} itens"):
-                if not df_hist_inv_loop.empty:
-                    st.dataframe(df_hist_inv_loop, use_container_width=True, hide_index=True)
-                    
-        st.markdown("**🔬 Auditorias do Supervisor**")
-        for idx, inv_s in df_inventarios_sup.iterrows():
-            df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
-            with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens"):
-                if not df_hist_sup.empty:
-                    st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
+        st.write("### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
+        if df_inventarios_sup.empty:
+            st.info("Nenhum histórico amostral arquivado.")
+        else:
+            for idx, inv_s in df_inventarios_sup.iterrows():
+                df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
+                with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
+                    if not df_hist_sup.empty:
+                        st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
 
-    # --- ABA 5: HISTÓRICO DE INVENTÁRIOS (FUNCIONÁRIOS) ---
-    with aba_historico:
-        st.write("### 📁 Arquivo Geral de Movimentações")
+    # --- ABA 5: HISTÓRICO GERAL (ARQUIVO GERAL DE MOVIMENTAÇÕES DOS FUNCIONÁRIOS REATIVADO) ---
+    with aba_historico_geral:
+        st.title("📁 Arquivo Geral de Movimentações")
+        st.write("Abaixo consta a listagem completa de contagens e lançamentos realizados pelas equipes operacionais em campo:")
+        
         if df_inventarios.empty:
-            st.info("Nenhum inventário geral registrado.")
+            st.info("Nenhum inventário operacional registrado no banco de dados.")
         else:
             for idx, inv in df_inventarios.iterrows():
                 df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv['id'].replace('#',''),))
-                with st.expander(f"📁 {inv['id']} – {inv['nome']} | {inv['data']} | {len(df_hist_inv)} itens"):
+                with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data Inicial: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} itens lançados)"):
                     if not df_hist_inv.empty:
                         ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
                         st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
