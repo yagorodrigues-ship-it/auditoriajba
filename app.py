@@ -157,6 +157,13 @@ st.markdown("""
         font-size: 28px;
         font-weight: bold;
     }
+    .pasta-encerramento {
+        background-color: #f4f6f7;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #e74c3c;
+        margin-bottom: 20px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -395,7 +402,7 @@ else:
 
         st.markdown("---")
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">📋 ITENS NA BASE</div><div class="card-lateral-valor">{total_itens_base}</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">✅ LANÇAMENTOS FEITOS</div><div class="card-lateral-valor">{total_contados}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">¼ LANÇAMENTOS FEITOS</div><div class="card-lateral-valor">{total_contados}</div></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">⏳ PENDENTES REAIS</div><div class="card-lateral-valor">{total_pendentes}</div></div>', unsafe_allow_html=True)
         st.write("**PROGRESSO DA CONTAGEM**")
         st.progress(progresso)
@@ -534,7 +541,7 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: AUDITORIA DO SUPERVISOR (UNIFICADA E TOTALMENTE LIBERADA) ---
+    # --- ABA 3: AUDITORIA DO SUPERVISOR (MODIFICADA) ---
     with aba_supervisor:
         st.title("🔬 Controle de Qualidade e Acuracidade Amostral")
         
@@ -543,7 +550,17 @@ else:
         else:
             df_auditorias = pd.read_sql_query(f"SELECT * FROM auditorias_supervisor WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn)
             
-            # [PARTE SUPERIOR] Indicadores de Qualidade e Acuracidade
+            # --- [NOVA MODIFICAÇÃO]: PASTA DAS AUDITORIAS QUE VOU ENCERRAR (NO TOPO) ---
+            st.markdown(f"""
+                <div class="pasta-encerramento">
+                    <h4 style="margin: 0; color: #c0392b;">📂 Pasta de Encerramento Automático</h4>
+                    <p style="margin: 5px 0 0 0; font-size: 14px; color: #2c3e50;">
+                        Você está gerenciando a auditoria amostragem vinculada ao Inventário Ativo: <strong>{id_inventario_atual} - {inventario_selecionado_obj['nome']}</strong> (Status: <strong>{inventario_selecionado_obj['status']}</strong>).
+                    </p>
+                </div>
+            """, unsafe_allow_html=True)
+
+            # [PARTE CENTRAL] Indicadores de Qualidade com Nova Ordem (Estoque vindo ANTES do Saldo)
             if not df_auditorias.empty:
                 total_sup = len(df_auditorias)
                 certos_qtd = len(df_auditorias[df_auditorias['diferenca'] == 0])
@@ -554,20 +571,27 @@ else:
                 acuracidade_etiq = (certos_etiq / total_sup) * 100
                 acuracidade_local = (certos_local / total_sup) * 100
                 
-                m1, m2, m3, m4 = st.columns(4)
+                # Pegando as informações do último estoque auditado
+                ultimo_cod_estoque = df_auditorias.iloc[0]['id_estoque'] if 'id_estoque' in df_auditorias.columns else "N/I"
+                ultimo_desc_estoque = df_auditorias.iloc[0]['desc_estoque'] if 'desc_estoque' in df_auditorias.columns else "Não Informado"
+                
+                m1, m2, m3, m4, m5 = st.columns(5)
                 with m1:
-                    st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🎯 ACURACIDADE DE SALDO</div><div class="bloco-valor" style="color:#27ae60;">{acuracidade_saldo:.1f}%</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #7f8c8d;"><div class="bloco-titulo">🔑 CÓDIGO ESTOQUE AUDITADO</div><div class="bloco-valor" style="color:#34495e; font-size:20px;">{ultimo_cod_estoque}</div></div>', unsafe_allow_html=True)
                 with m2:
-                    st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #9b59b6;"><div class="bloco-titulo">🏷️ ACURACIDADE ETIQUETAS</div><div class="bloco-valor" style="color:#8e44ad;">{acuracidade_etiq:.1f}%</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #16a085;"><div class="bloco-titulo">📍 DESCRIÇÃO DO ESTOQUE</div><div class="bloco-valor" style="color:#16a085; font-size:16px; font-weight:bold; height:36px; overflow:hidden;">{ultimo_desc_estoque}</div></div>', unsafe_allow_html=True)
                 with m3:
-                    st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #3498db;"><div class="bloco-titulo">📍 ACURACIDADE LOCALIZAÇÃO</div><div class="bloco-valor" style="color:#2980b9;">{acuracidade_local:.1f}%</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🎯 ACURACIDADE DE SALDO</div><div class="bloco-valor" style="color:#27ae60;">{acuracidade_saldo:.1f}%</div></div>', unsafe_allow_html=True)
                 with m4:
-                    st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">📋 AMOSTRAS CHECADAS</div><div class="bloco-valor">{total_sup} itens</div></div>', unsafe_allow_html=True)
+                    st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #9b59b6;"><div class="bloco-titulo">🏷️ ACURACIDADE ETIQUETAS</div><div class="bloco-valor" style="color:#8e44ad;">{acuracidade_etiq:.1f}%</div></div>', unsafe_allow_html=True)
+                with m5:
+                    st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #3498db;"><div class="bloco-titulo">📍 ACURACIDADE LOCALIZAÇÃO</div><div class="bloco-valor" style="color:#2980b9;">{acuracidade_local:.1f}%</div></div>', unsafe_allow_html=True)
+                
                 st.markdown("---")
             else:
                 st.info("💡 Nenhuma amostragem de acuracidade coletada até o momento para este inventário.")
             
-            # [PARTE CENTRAL] Lançamento e Bipe de Amostras
+            # Lançamento e Bipe de Amostras
             if st.session_state.base_supervisor is None:
                 st.warning("⚠️ Passo pendente: Carregue a sua planilha de amostragem na seção inferior desta tela para habilitar os lançamentos.")
             else:
@@ -632,11 +656,12 @@ else:
                     else:
                         st.error(f"❌ Produto '{cod_sup}' não localizado na sua Base de Auditoria.")
             
+            # --- HISTÓRICO DE AMOSTRAS EMBAIXO DA PASTA ---
             if not df_auditorias.empty:
                 st.write("### 📝 Histórico de Amostras Coletadas")
                 st.dataframe(df_auditorias, use_container_width=True, hide_index=True)
                 
-            # [PARTE INFERIOR] Upload da Planilha de Amostragem Totalmente Liberado para o ADM
+            # Upload da Planilha de Amostragem (Seção Inferior)
             st.markdown("---")
             st.subheader("📤 Carregar Planilha de Auditoria / Amostragem")
             st.markdown("Suba abaixo o arquivo Excel específico com os itens que você quer contar nesta amostragem.")
