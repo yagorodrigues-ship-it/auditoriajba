@@ -288,6 +288,7 @@ if not st.session_state.logged_in:
 else:
     conn = conectar_banco()
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
+    eh_supervisor = st.session_state.operador in ["Administrador Tel", "admin"]
     
     # SIDEBAR
     with st.sidebar:
@@ -401,12 +402,11 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    # ABAS DO PAINEL PRINCIPAL
+    # ABAS DO PAINEL PRINCIPAL (Adicionado a nova aba de Upload dedicada)
     df_contagens_mutaveis = pd.read_sql_query(f"SELECT * FROM contagens WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn) if id_inventario_atual else pd.DataFrame()
     
-    aba_contar, aba_atual, aba_supervisor, aba_historico, aba_base, aba_graficos = st.tabs([
-        "🔍 Contar Item", "📊 Contagem Atual", "🔬 Auditoria Supervisor", "📁 Histórico", "📄 Base de Estoque", "🏆 Desempenho"
-    ])
+     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Auditoria Supervisor", "📤 Upload Base Supervisor", "📁 Histórico", "📄 Base de Estoque", "🏆 Desempenho"]
+    aba_contar, aba_atual, aba_supervisor, aba_upload_sup, aba_historico, aba_base, aba_graficos = st.tabs(abas)
     
     # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS) ---
     with aba_contar:
@@ -532,39 +532,18 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: AUDITORIA DO SUPERVISOR (COM UPLOAD EXCLUSIVO E ISOLADO) ---
+    # --- ABA 3: AUDITORIA DO SUPERVISOR (FOCO EM LANÇAMENTOS E DADOS) ---
     with aba_supervisor:
         st.title("🔬 Controle de Qualidade e Acuracidade Amostral")
         
-        # VERIFICAÇÃO DE PERFIL PARA EXIBIÇÃO DO PAINEL DE ARQUIVO DO ADM
-        eh_supervisor = st.session_state.operador in ["Administrador Tel", "admin"]
-        
-        # --- NOVO BOX DE UPLOAD INTERNO DA ABA DO SUPERVISOR ---
-        if eh_supervisor:
-            st.markdown("### 📤 Carregar Base de Dados Exclusiva do Supervisor")
-            arquivo_supervisor = st.file_uploader("Suba a planilha Excel para a amostragem do supervisor (.xlsx)", type=["xlsx"], key="sup_excel_loader", label_visibility="collapsed")
-            if arquivo_supervisor is not None and st.session_state.base_supervisor is None:
-                st.session_state.base_supervisor = pd.read_excel(arquivo_supervisor)
-                st.session_state.nome_arquivo_supervisor = arquivo_supervisor.name
-                st.success(f"✅ Base do Supervisor '{arquivo_supervisor.name}' carregada com sucesso!")
-                st.rerun()
-            if st.session_state.base_supervisor is not None:
-                st.caption(f"📁 Arquivo ativo do Supervisor: **{st.session_state.nome_arquivo_supervisor}**")
-                if st.button("🔄 Substituir/Limpar Base do Supervisor"):
-                    st.session_state.base_supervisor = None
-                    st.session_state.nome_arquivo_supervisor = ""
-                    st.rerun()
-            st.markdown("---")
-
         if id_inventario_atual is None:
             st.warning("⚠️ Selecione o inventário na barra lateral.")
         elif st.session_state.base_supervisor is None:
-            st.warning("⚠️ Passo pendente: O Supervisor precisa carregar sua planilha de amostragem exclusiva acima.")
+            st.warning("⚠️ Passo pendente: O Supervisor precisa carregar sua planilha de amostragem exclusiva na aba '📤 Upload Base Supervisor'.")
         else:
-            # Puxar dados salvos das auditorias amostrais do banco SQLite
             df_auditorias = pd.read_sql_query(f"SELECT * FROM auditorias_supervisor WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn)
             
-            # Renderização de Indicadores de Acuracidade
+            # Indicadores de Qualidade
             if not df_auditorias.empty:
                 total_sup = len(df_auditorias)
                 certos_qtd = len(df_auditorias[df_auditorias['diferenca'] == 0])
@@ -588,7 +567,7 @@ else:
             else:
                 st.info("💡 Nenhuma amostragem de acuracidade coletada até o momento para este inventário.")
             
-            # MAPEAMENTO AUTOMÁTICO DE COLUNAS DA PLANILHA EXCLUSIVA DO SUPERVISOR
+            # MAPEAMENTO AUTOMÁTICO DE COLUNAS DA BASE SUPERVISOR
             colunas_sup = list(st.session_state.base_supervisor.columns)
             def encontrar_col_sup(opcoes, default_idx):
                 for opcao in opcoes:
@@ -615,7 +594,6 @@ else:
                     busca_sup = str(bip_supervisor).upper().strip()
                     cod_sup = busca_sup.split(" - ")[-1].strip() if " - " in busca_sup else busca_sup
                     
-                    # CONSULTA EXCLUSIVA NA PLANILHA DO SUPERVISOR
                     item_sup = st.session_state.base_supervisor[st.session_state.base_supervisor[col_cod_sup].astype(str).str.upper().str.strip() == cod_sup]
                     if not item_sup.empty:
                         desc_sup = item_sup.iloc[0][col_desc_sup]
@@ -653,12 +631,46 @@ else:
                     else:
                         st.error(f"❌ Produto '{cod_sup}' não localizado na Base do Supervisor.")
             
-            # Exibe a tabela de amostras coletadas
             if not df_auditorias.empty:
                 st.write("### 📝 Histórico de Amostras Coletadas pelo Supervisor")
                 st.dataframe(df_auditorias, use_container_width=True, hide_index=True)
 
-    # --- ABA 4: HISTÓRICO DE INVENTÁRIOS ---
+    # --- ABA 4: UPLOAD EXCLUSIVO DA BASE DO SUPERVISOR (NOVA ABA ISOLADA) ---
+    with aba_upload_sup:
+        st.title("📤 Painel de Upload - Amostragem do Supervisor")
+        
+        if not eh_supervisor:
+            st.error("🔒 Área Restrita: Apenas administradores e supervisores podem gerenciar esta base de dados.")
+        else:
+            st.markdown("""
+            Suba aqui o arquivo Excel contendo as linhas de saldo amostrais que você separou para auditar de forma independente.
+            """)
+            
+            arquivo_supervisor = st.file_uploader(
+                "Escolha o arquivo Excel para o Supervisor (.xlsx)", 
+                type=["xlsx"], 
+                key="sup_exclusive_excel_loader"
+            )
+            
+            if arquivo_supervisor is not None and st.session_state.base_supervisor is None:
+                st.session_state.base_supervisor = pd.read_excel(arquivo_supervisor)
+                st.session_state.nome_arquivo_supervisor = arquivo_supervisor.name
+                st.success(f"✅ Base do Supervisor '{arquivo_supervisor.name}' processada e carregada com sucesso!")
+                st.rerun()
+                
+            if st.session_state.base_supervisor is not None:
+                st.info(f"📂 **Base Ativa carregada:** {st.session_state.nome_arquivo_supervisor}")
+                
+                # Exibe um preview da planilha carregada pelo supervisor para checagem simples
+                with st.expander("👀 Visualizar prévia dos dados carregados"):
+                    st.dataframe(st.session_state.base_supervisor.head(10), use_container_width=True)
+                    
+                if st.button("🗑️ Remover / Limpar Planilha do Supervisor", type="primary"):
+                    st.session_state.base_supervisor = None
+                    st.session_state.nome_arquivo_supervisor = ""
+                    st.rerun()
+
+    # --- ABA 5: HISTÓRICO DE INVENTÁRIOS ---
     with aba_historico:
         st.write("### 📁 Histórico de Inventários Arquivados")
         for idx, inv in df_inventarios.iterrows():
@@ -674,7 +686,7 @@ else:
                         df_hist_inv[ordem_colunas_print].to_excel(buffer, index=False, engine='openpyxl')
                         st.download_button(label="📥 Exportar para Excel (.xlsx)", data=buffer.getvalue(), file_name=f"Inventario_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_{inv['id']}")
                     with c_del:
-                        if st.session_state.operador in ["Administrador Tel", "admin"]:
+                        if eh_supervisor:
                             if st.button("❌ Excluir Definitivamente", key=f"del_inv_{inv['id']}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
@@ -682,14 +694,14 @@ else:
                                 conn.commit()
                                 st.rerun()
 
-    # --- ABA 5: BASE DE ESTOQUE ---
+    # --- ABA 6: BASE DE ESTOQUE (FUNCIONÁRIOS) ---
     with aba_base:
         if st.session_state.base_sistema is not None:
             st.dataframe(st.session_state.base_sistema, use_container_width=True)
         else:
             st.info("Nenhuma base carregada.")
 
-    # --- ABA 6: DESEMPENHO ---
+    # --- ABA 7: DESEMPENHO ---
     with aba_graficos:
         st.write("### 🏆 Ranking de Lançamentos por Operador")
         df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(id) as [Lançamentos Feitos] FROM contagens GROUP BY operador", conn)
