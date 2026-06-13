@@ -405,7 +405,8 @@ else:
                 busca_limpa = str(codigo_input).upper().strip()
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
                 
-                item = df_exemplo[df_exemplo[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
+                # CORREÇÃO DO NAMEERROR: Substituído df_exemplo por st.session_state.base_sistema de forma explícita
+                item = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
                 if not item.empty:
                     unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
                     desc_val = item.iloc[0][col_desc]
@@ -471,7 +472,7 @@ else:
                 else:
                     st.error("❌ Código não localizado.")
 
-    # --- ABA 2: CONTAGEM ATUAL (RETORNADO OS 4 CARDS E BANNER DE PROGRESSO DE ACORDO COM O SEU PEDIDO) ---
+    # --- ABA 2: CONTAGEM ATUAL ---
     with aba_atual:
         if id_inventario_atual:
             st.subheader(f"Inventário: {id_inventario_atual} – {inventario_selecionado_obj['nome']} ({inventario_selecionado_obj['data']})")
@@ -479,7 +480,6 @@ else:
             if df_contagens_mutaveis.empty:
                 st.info("Nenhum item foi auditado neste inventário corrente.")
             else:
-                # Cálculos dinâmicos para o topo da tela
                 total_auditado = len(df_contagens_mutaveis)
                 itens_divergentes = len(df_contagens_mutaveis[df_contagens_mutaveis['diferenca'] != 0])
                 soma_contada = int(df_contagens_mutaveis['qtd_contada'].sum())
@@ -487,7 +487,6 @@ else:
                 diferenca_acumulada = int(df_contagens_mutaveis['diferenca'].sum())
                 porcentagem_divergencia = (itens_divergentes / total_auditado) * 100 if total_auditado > 0 else 0
                 
-                # Renderização fiel dos 4 blocos informativos no topo da aba
                 c1, c2, c3, c4 = st.columns(4)
                 with c1:
                     st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">📦 ITENS CONTADOS</div><div class="bloco-valor">{total_auditado}</div></div>', unsafe_allow_html=True)
@@ -498,14 +497,12 @@ else:
                 with c4:
                     st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">🗄️ QTD TOTAL SISTEMA</div><div class="bloco-valor">{soma_sistema} <span style="font-size:14px; color:#e74c3c;">(↓ {abs(diferenca_acumulada)})</span></div></div>', unsafe_allow_html=True)
                 
-                # Banner de aviso laranja idêntico ao solicitado
                 st.markdown(f"""
                     <div class="alerta-divergencia">
                         <strong>⚠️ {itens_divergentes} item(ns) apresentando divergência ou inconformidade de Ativo/Quantidade ({porcentagem_divergencia:.0f}%)</strong>
                     </div>
                 """, unsafe_allow_html=True)
                 
-                # Tabela de dados estruturada
                 ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
                 st.dataframe(df_contagens_mutaveis[ordem_colunas_print], use_container_width=True, hide_index=True)
                 
@@ -536,7 +533,7 @@ else:
                         df_hist_inv[ordem_colunas_print].to_excel(buffer, index=False, engine='openpyxl')
                         st.download_button(label="📥 Exportar para Excel (.xlsx)", data=buffer.getvalue(), file_name=f"Inventario_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_{inv['id']}")
                     with c_del:
-                        if st.session_state.operador == "admin" or st.session_state.operador == "Administrador Tel":
+                        if st.session_state.operador in ["Administrador Tel", "admin"]:
                             if st.button("❌ Excluir Definitivamente", key=f"del_inv_{inv['id']}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
