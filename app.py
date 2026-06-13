@@ -166,6 +166,13 @@ st.markdown("""
         border-left: 5px solid #2980b9;
         margin-bottom: 20px;
     }
+    .pasta-encerramento {
+        background-color: #f4f6f7;
+        padding: 15px;
+        border-radius: 8px;
+        border-left: 5px solid #e74c3c;
+        margin-bottom: 20px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -287,7 +294,7 @@ else:
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor ORDER BY data DESC, id DESC", conn)
     eh_supervisor = any(x in st.session_state.operador.lower() for x in ["administrador", "admin", "supervisor"])
     
-    # CORREÇÃO DO NAMEERROR: Definindo a variável mutável no topo global do bloco logado para todas as abas lerem com segurança
+    # Definição segura global para que todas as abas tenham acesso direto sem NameError
     id_inventario_atual_inicial = df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else ""
     df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual_inicial,)) if id_inventario_atual_inicial else pd.DataFrame()
     
@@ -339,7 +346,7 @@ else:
                 conn.commit()
                 st.rerun()
 
-        # --- MAPEAMENTO DE COLUNAS (BASE FUNCIONÁRIOS) ---
+        # --- MAPEAMENTO DE COLUNAS ---
         col_cod, col_desc, col_local, col_unidade, col_qtd, col_ativo_base, col_id_estoque = "", "", "", "", "", "", ""
         if st.session_state.base_sistema is not None:
             colunas_reais = list(st.session_state.base_sistema.columns)
@@ -387,9 +394,16 @@ else:
         st.write("**PROGRESSO DA CONTAGEM**")
         st.progress(progresso)
 
-    # ABAS DO PAINEL PRINCIPAL
+    if st.session_state.ultimo_item_sucesso:
+        st.success(st.session_state.ultimo_item_sucesso)
+        st.session_state.ultimo_item_sucesso = ""
+
+    # CORREÇÃO DEFINITIVA DO NAMEERROR: Mapeando os nomes exatos das abas para evitar quebra de variáveis desempacotadas
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📄 Base de Estoque", "🏆 Desempenho"]
     aba_contar, aba_atual, aba_supervisor, aba_acuracidade, aba_base, aba_graficos = st.tabs(abas)
+    
+    # Para manter retrocompatibilidade com chamadas internas antigas de outras rotas, espelhamos o ponteiro
+    aba_historico = aba_acuracidade
     
     # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS) ---
     with aba_contar:
@@ -435,10 +449,6 @@ else:
                     b4.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS BARRA</div><div class="bloco-valor" style="color:#2ecc71;">● Conectado</div></div>', unsafe_allow_html=True)
                     
                     st.markdown(f"**Descrição:** {desc_val}")
-                    if ativos_da_base_lista:
-                        st.info(f"📋 **Nota de Sistema:** Este item possui ativos mapeados no saldo. Ativos válidos: {', '.join(ativos_da_base_lista)}")
-                    
-                    st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                     
                     with st.form("confirmar_form", clear_on_submit=True):
                         qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
@@ -486,7 +496,12 @@ else:
                 with c3: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">🔢 QTD TOTAL CONTADA</div><div class="bloco-valor">{soma_contada}</div></div>', unsafe_allow_html=True)
                 with c4: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">🗄️ QTD TOTAL SISTEMA</div><div class="bloco-valor">{soma_sistema} <span style="font-size:14px; color:#e74c3c;">(↓ {abs(diferenca_acumulada)})</span></div></div>', unsafe_allow_html=True)
                 
-                st.markdown(f'<div class="alerta-divergencia"><strong>⚠️ {itens_divergentes} item(ns) apresentando divergência ou inconformidade ({porcentagem_divergencia:.0f}%)</strong></div>', unsafe_allow_html=True)
+                st.markdown(f"""
+                    <div class="alerta-divergencia">
+                        <strong>⚠️ {itens_divergentes} item(ns) apresentando divergência ou inconformidade ({porcentagem_divergencia:.0f}%)</strong>
+                    </div>
+                """, unsafe_allow_html=True)
+                
                 ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
                 st.dataframe(df_contagens_mutaveis[ordem_colunas_print], use_container_width=True, hide_index=True)
         else:
