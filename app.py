@@ -3,6 +3,8 @@ import pandas as pd
 import datetime
 import sqlite3
 import io
+import random
+import string
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Contagem de Estoque Físico", layout="wide")
@@ -15,6 +17,18 @@ def conectar_banco():
 def inicializar_banco():
     conn = conectar_banco()
     cursor = conn.cursor()
+    
+    # Nova tabela de usuários/colaboradores
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS usuarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            nome TEXT,
+            cpf TEXT UNIQUE,
+            email TEXT UNIQUE,
+            senha TEXT
+        )
+    """)
+    
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios (
             id TEXT PRIMARY KEY,
@@ -42,6 +56,15 @@ def inicializar_banco():
             lote TEXT
         )
     """)
+    
+    # Criar um usuário administrador padrão caso a tabela esteja vazia
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO usuarios (nome, cpf, email, senha) 
+            VALUES (?, ?, ?, ?)
+        """, ("Administrador Tel", "00000000000", "admin@tel.com.br", "123"))
+        
     conn.commit()
     conn.close()
 
@@ -117,6 +140,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
+# --- GERENCIAMENTO DE ESTADO ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'base_sistema' not in st.session_state:
@@ -127,6 +151,8 @@ if 'pagina_atual' not in st.session_state:
     st.session_state.pagina_atual = 1
 if 'operador' not in st.session_state:
     st.session_state.operador = ""
+if 'tela_acesso' not in st.session_state:
+    st.session_state.tela_acesso = "login"  # login, cadastro, recuperar
 
 # Contadores de controle para forçar limpeza visual estrita de inputs
 if 'contador_reset' not in st.session_state:
@@ -134,26 +160,162 @@ if 'contador_reset' not in st.session_state:
 if 'ultimo_item_sucesso' not in st.session_state:
     st.session_state.ultimo_item_sucesso = ""
 
-# --- TELA DE LOGIN ---
+# --- AUXILIARES DE AUTENTICAÇÃO ---
+def limpar_documento(doc):
+    return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
+
+# --- CONTROLADOR DA TELA DE LOGIN / ACESSO ---
 if not st.session_state.logged_in:
-    st.title("🔒 Acesso ao Sistema de Estoque")
-    with st.form("login_form"):
-        usuario = st.text_input("Usuário")
-        senha = st.text_input("Senha", type="password")
-        botao_login = st.form_submit_button("Entrar", type="primary")
-        if botao_login:
-            if usuario == "admin" and senha == "123":
-                st.session_state.logged_in = True
-                st.session_state.operador = "admin"
+    conn = conectar_banco()
+    
+    # TELA 1: LOGIN TRADICIONAL
+    if st.session_state.tela_acesso == "login":
+        st.title("🔒 Acesso ao Sistema de Estoque")
+        st.caption("Insira suas credenciais cadastradas (CPF ou E-mail) para prosseguir.")
+        
+        with st.form("login_form"):
+            identificador = st.text_input("CPF (somente números) ou E-mail")
+            senha = st.text_input("Senha", type="password")
+            botao_login = st.form_submit_button("Entrar no Sistema", type="primary", use_container_width=True)
+            
+            if botao_login:
+                identificador_limpo = identificador.strip()
+                id_doc_limpo = limpar_documento(identificador_limpo)
+                
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT nome FROM usuarios 
+                    WHERE (email = ? OR cpf = ?) AND senha = ?
+                """, (identificador_limpo, id_doc_limpo, senha))
+                usuario_encontrado = cursor.fetchone()
+                
+                if usuario_encontrado:
+                    st.session_state.logged_in = True
+                    st.session_state.operador = usuario_encontrado[0]
+                    st.toast(f"Bem-vindo, {usuario_encontrado[0]}!")
+                    st.rerun()
+                else:
+                    st.error("❌ Usuário, CPF ou senha incorretos. Verifique os dados ou cadastre-se.")
+                    
+        # Botões de navegação de fluxo fora do formulário
+        c_cad, c_rec = st.columns(2)
+        with c_cad:
+            if st.button("📝 Não tem conta? Cadastrar-se", use_container_width=True):
+                st.session_state.tela_acesso = "cadastro"
                 st.rerun()
-            else:
-                st.error("Usuário ou senha incorretos.")
+        with c_rec:
+            if st.button("🔑 Esqueceu a senha? Recuperar", use_container_width=True):
+                st.session_state.tela_acesso = "recuperar"
+                st.rerun()
+
+    # TELA 2: CADASTRO DE NOVO COLABORADOR
+    elif st.session_state.tela_acesso == "cadastro":
+        st.title("📝 Cadastro de Novo Colaborador")
+        st.caption("Preencha todos os campos para liberar seu acesso às auditorias.")
+        
+        with st.form("cadastro_form"):
+            novo_nome = st.text_input("Nome Completo")
+            novo_cpf = st.text_input("CPF (Apenas números)")
+            novo_email = st.text_input("E-mail Corporativo ou Pessoal")
+            nova_senha = st.text_input("Crie uma Senha", type="password")
+            confirma_senha = st.text_input("Confirme a Senha", type="password")
+            
+            botao_salvar_cad = st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True)
+            
+            if botao_salvar_cad:
+                cpf_limpo = limpar_documento(novo_cpf)
+                email_limpo = novo_email.strip()
+                
+                if not novo_nome or not cpf_limpo or not email_limpo or not nova_senha:
+                    st.error("⚠️ Todos os campos são obrigatórios!")
+                elif nova_senha != confirma_senha:
+                    st.error("❌ As senhas digitadas não coincidem!")
+                else:
+                    try:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            INSERT INTO usuarios (nome, cpf, email, senha) 
+                            VALUES (?, ?, ?, ?)
+                        """, (novo_nome.strip(), cpf_limpo, email_limpo, nova_senha))
+                        conn.commit()
+                        st.success("✅ Cadastro realizado com sucesso! Faça seu login.")
+                        st.session_state.tela_acesso = "login"
+                        st.rerun()
+                    except sqlite3.IntegrityError:
+                        st.error("❌ Falha no cadastro: Este CPF ou E-mail já está cadastrado no sistema!")
+                        
+        if st.button("◀ Voltar para o Login", use_container_width=True):
+            st.session_state.tela_acesso = "login"
+            st.rerun()
+
+    # TELA 3: RECUPERAÇÃO DE SENHA / TOKENS
+    elif st.session_state.tela_acesso == "recuperar":
+        st.title("🔑 Recuperação de Acesso")
+        st.caption("Valide sua identidade por e-mail ou CPF para gerar uma redefinição.")
+        
+        with st.form("recuperar_form"):
+            validador = st.text_input("Informe seu E-mail ou CPF cadastrado")
+            nova_senha_rec = st.text_input("Digite sua NOVA senha", type="password")
+            botao_recuperar = st.form_submit_button("Redefinir Senha", type="primary", use_container_width=True)
+            
+            if botao_recuperar:
+                validador_limpo = validador.strip()
+                validador_doc = limpar_documento(validador_limpo)
+                
+                cursor = conn.cursor()
+                cursor.execute("SELECT id, email, nome FROM usuarios WHERE email = ? OR cpf = ?", (validador_limpo, validador_doc))
+                user = cursor.fetchone()
+                
+                if user and nova_senha_rec:
+                    user_id, user_email, user_nome = user[0], user[1], user[2]
+                    
+                    # Atualiza diretamente no banco a nova senha informada
+                    cursor.execute("UPDATE usuarios SET senha = ? WHERE id = ?", (nova_senha_rec, user_id))
+                    conn.commit()
+                    
+                    st.success(f"🎉 Pronto {user_nome}! Sua senha foi alterada com sucesso. Um log de segurança foi emitido.")
+                    
+                    # --- NOTA TÉCNICA DE ENVIO SMTP (OPCIONAL) ---
+                    # Se você possuir os dados de um servidor de e-mail corporativo (Outlook, Gmail, etc) 
+                    # basta descomentar as linhas abaixo para realizar o disparo real:
+                    #
+                    # import smtplib
+                    # from email.mime.text import MIMEText
+                    # msg = MIMEText(f"Olá {user_nome}, sua senha de acesso ao Painel de Auditoria foi alterada hoje.")
+                    # msg['Subject'] = 'Alteração de Senha - Sistema de Estoque'
+                    # msg['From'] = 'seu_email_sistema@tel.com'
+                    # msg['To'] = user_email
+                    # with smtplib.SMTP('smtp.seu_provedor.com', 587) as server:
+                    #     server.starttls()
+                    #     server.login('seu_email_sistema@tel.com', 'sua_senha_smtp')
+                    #     server.send_message(msg)
+                    
+                    st.session_state.tela_acesso = "login"
+                    st.rerun()
+                else:
+                    st.error("❌ Nenhuma conta ativa foi localizada com o CPF ou E-mail informado.")
+                    
+        if st.button("◀ Voltar para o Login", use_container_width=True):
+            st.session_state.tela_acesso = "login"
+            st.rerun()
+            
+    conn.close()
+
+# --- INTERFACE LOGADA DO SISTEMA ---
 else:
     conn = conectar_banco()
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
     
     # 1. BARRA LATERAL (SIDEBAR)
     with st.sidebar:
+        st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
+        if st.button("🚪 Sair da Conta", use_container_width=True):
+            st.session_state.logged_in = False
+            st.session_state.operador = ""
+            st.session_state.tela_acesso = "login"
+            st.rerun()
+            
+        st.markdown("---")
         st.write("📂 **Carregar Base de Dados (Saldo)**")
         arquivo_excel = st.file_uploader("Suba o arquivo Excel do sistema (.xlsx)", type=["xlsx"], label_visibility="collapsed")
         if arquivo_excel is not None and st.session_state.base_sistema is None:
@@ -200,10 +362,6 @@ else:
                 st.toast("Inventário finalizado e fechado com sucesso!")
                 st.rerun()
 
-        st.markdown("---")
-        st.write("👤 **Operador**")
-        st.session_state.operador = st.text_input("Seu nome", value=st.session_state.operador, key="op_input_text", label_visibility="collapsed", placeholder="Seu nome")
-
         # --- MAPEAMENTO INTELIGENTE DE COLUNAS ---
         col_cod, col_desc, col_local, col_unidade, col_qtd, col_ativo_base, col_id_estoque = "", "", "", "", "", "", ""
         if st.session_state.base_sistema is not None:
@@ -223,7 +381,6 @@ else:
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
             col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoque', 'codestoque'], 0)
             
-            # Priorização estrita da coluna exata "Ativo"
             col_ativo_base = "Não Encontrado"
             for col in colunas_reais:
                 if col.strip().lower() == "ativo":
@@ -267,25 +424,19 @@ else:
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">✅ LANÇAMENTOS FEITOS</div><div class="card-lateral-valor">{total_contados}</div></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">⏳ PENDENTES REAIS</div><div class="card-lateral-valor">{total_pendentes}</div></div>', unsafe_allow_html=True)
         
-        st.write("**PROGRESSO DA CONTAGEM (ATIVOS CORRETOS)**")
+        st.write("**PROGRESSO DA CONTAGEM**")
         st.progress(progresso)
-        st.caption(f"{progresso*100:.1f}% concluído")
 
     # 2. PAINEL PRINCIPAL
     st.title("📦 Painel Geral de Auditoria")
     st.caption("Tel Telecomunicações · Painel de Auditoria Ativa")
     
-    # Exibe confirmação visual de sucesso do item anterior
     if st.session_state.ultimo_item_sucesso:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
     aba_contar, aba_atual, aba_historico, aba_base, aba_graficos = st.tabs([
-        "🔍 Contar Item", 
-        "📊 Contagem Atual", 
-        "📁 Histórico de Inventários",
-        "📄 Base de Estoque",
-        "🏆 Desempenho da Equipe"
+        "🔍 Contar Item", "📊 Contagem Atual", "📁 Histórico de Inventários", "📄 Base de Estoque", "🏆 Desempenho"
     ])
     
     if st.session_state.base_sistema is None:
@@ -299,7 +450,7 @@ else:
         # --- ABA 1: CONTAR ITEM ---
         with aba_contar:
             if inventario_selecionado_obj is not None and inventario_selecionado_obj['status'] == "Fechado":
-                st.error("🔒 Este inventário está Fechado. Selecione ou crie um inventário Aberto na barra lateral.")
+                st.error("🔒 Este inventário está Fechado.")
             else:
                 c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
                 with c_busca:
@@ -320,14 +471,12 @@ else:
                 if codigo_input:
                     busca_limpa = str(codigo_input).upper().strip()
                     
-                    # --- REGRA INTELIGENTE DE RASTREIO E CONVERSÃO ---
-                    # Se o operador bipar o formato "2183 - 0452-1264-4", extraímos o código real após o traço
+                    # Regra inteligente de rastreio de bipes combinados
                     if " - " in busca_limpa:
                         codigo_rastreio = busca_limpa.split(" - ")[-1].strip()
                     else:
                         codigo_rastreio = busca_limpa
 
-                    # Procura na base comparando com o código do produto extraído
                     serie_codigos = df_exemplo[col_cod].astype(str).str.upper().str.strip()
                     item = df_exemplo[serie_codigos == codigo_rastreio]
                     
@@ -361,42 +510,34 @@ else:
                         st.markdown(f"**Local:** {local_val} &nbsp;|&nbsp; **Chave de Geração da Etiqueta:** `{id_estoque_val} - {codigo_rastreio}`")
                         
                         if map_reais_ativos_lista := ativos_da_base_lista:
-                            st.info(f"📋 **Nota de Sistema:** Este item possui ativos mapeados no saldo da coluna '{col_ativo_base}'. Ativos válidos: {', '.join(map_reais_ativos_lista)}")
-                        else:
-                            st.caption(f"ℹ️ **Nota:** Linhas de ativo zeradas ou ausentes para este item no campo '{col_ativo_base}' do Excel (Campo Opcional).")
+                            st.info(f"📋 Ativos válidos: {', '.join(map_reais_ativos_lista)}")
                         
                         st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                         
                         with st.form("confirmar_contagem_form", clear_on_submit=True):
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
-                            
-                            rotulo_ativo = "🔢 Número do Ativo / Patrimônio (Obrigatório)" if map_reais_ativos_lista else "🔢 Número do Ativo / Patrimônio (Opcional)"
-                            ativo_input = st.text_input(rotulo_ativo, placeholder="Insira o número de identificação do ativo...")
-                            
+                            rotulo_ativo = "🔢 Número do Ativo (Obrigatório)" if map_reais_ativos_lista else "🔢 Número do Ativo (Opcional)"
+                            ativo_input = st.text_input(rotulo_ativo)
                             observacao = st.text_input("📝 Observação (opcional)")
                             btn_confirmar = st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True)
                             
                             if btn_confirmar:
                                 ativo_digitado_limpo = ativo_input.strip().upper()
-                                
                                 if qtd_fisica <= 0:
-                                    st.error("❌ Erro: O preenchimento de uma quantidade contada maior que 0 é obrigatório para realizar o lançamento!")
+                                    st.error("❌ Erro: Informe uma quantidade maior que 0!")
                                 elif map_reais_ativos_lista and not ativo_digitado_limpo:
-                                    st.error("❌ Erro: O preenchimento do número de Ativo é obrigatório para este item!")
+                                    st.error("❌ Erro: O preenchimento do número de Ativo é obrigatório!")
                                 else:
                                     agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                                     lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
                                     
                                     qtd_sistema_calculada = qtd_sis
-                                    if map_reais_ativos_lista:
-                                        if ativo_digitado_limpo in map_reais_ativos_lista:
-                                            linha_especifica = item[item[col_ativo_base].astype(str).str.upper().str.strip() == ativo_digitado_limpo]
-                                            try:
-                                                qtd_sistema_calculada = int(pd.to_numeric(linha_especifica.iloc[0][col_qtd], errors='coerce'))
-                                            except:
-                                                qtd_sistema_calculada = 1
-                                        else:
-                                            qtd_sistema_calculada = 0
+                                    if map_reais_ativos_lista and ativo_digitado_limpo in map_reais_ativos_lista:
+                                        linha_especifica = item[item[col_ativo_base].astype(str).str.upper().str.strip() == ativo_digitado_limpo]
+                                        try:
+                                            qtd_sistema_calculada = int(pd.to_numeric(linha_especifica.iloc[0][col_qtd], errors='coerce'))
+                                        except:
+                                            qtd_sistema_calculada = 1
                                             
                                     dif_calculada = qtd_fisica - qtd_sistema_calculada
                                     
@@ -407,163 +548,39 @@ else:
                                     """, (id_inventario_atual.replace("#",""), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
                                     conn.commit()
                                     
-                                    # GERA O COMPORTAMENTO DE AUTO-RESET E LIMPEZA COMPLETA DA INTERFACE
                                     st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado: O item '{codigo_rastreio}' foi adicionado com sucesso!"
                                     st.session_state.contador_reset += 1
                                     st.rerun()
                     else:
-                        st.error(f"Código do produto '{codigo_rastreio}' não localizado na base de dados (Saldo).")
+                        st.error(f"Código do produto '{codigo_rastreio}' não localizado.")
 
         # --- ABA 2: CONTAGEM ATUAL ---
         with aba_atual:
-            st.subheader(f"Inventário: {id_inventario_atual} – {inventario_selecionado_obj['nome']} ({inventario_selecionado_obj['data']})")
-            
+            st.subheader(f"Inventário: {id_inventario_atual} – {inventario_selecionado_obj['nome']}")
             if df_contagens_mutaveis.empty:
                 st.info("Nenhum item foi auditado neste inventário corrente.")
             else:
-                total_auditado = len(df_contagens_mutaveis)
-                itens_divergentes = len(df_contagens_mutaveis[df_contagens_mutaveis['diferenca'] != 0])
-                soma_contada = int(df_contagens_mutaveis['qtd_contada'].sum())
-                soma_sistema = int(df_contagens_mutaveis['qtd_sistema'].sum())
-                diferenca_acumulada = int(df_contagens_mutaveis['diferenca'].sum())
-                porcentagem_divergencia = (itens_divergentes / total_auditado) * 100
-                
-                r1, r2, r3, r4 = st.columns(4)
-                r1.metric("📦 ITENS CONTADOS", total_auditado)
-                r2.metric("⚠️ COM DIVERGÊNCIA", itens_divergentes)
-                r3.metric("🔢 QTD TOTAL CONTADA", soma_contada)
-                r4.metric("🗄️ QTD TOTAL SISTEMA", f"{soma_sistema} (Diferença: {diferenca_acumulada})")
-                
-                st.markdown(f'<div class="alerta-divergencia"><strong>⚠️ {itens_divergentes} item(ns) apresentando divergência ou inconformidade de Ativo/Quantidade ({porcentagem_divergencia:.0f}%)</strong></div>', unsafe_allow_html=True)
-                
-                ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora', 'lote']
+                ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
                 st.dataframe(df_contagens_mutaveis[ordem_colunas_print], use_container_width=True, hide_index=True)
-                
-                if inventario_selecionado_obj['status'] == "Aberto":
-                    id_para_remover = st.selectbox("Selecione o ID da linha para excluir contagem:", [""] + df_contagens_mutaveis['id'].tolist())
-                    if id_para_remover and st.button("🗑️ Excluir linha selecionada"):
-                        cursor = conn.cursor()
-                        cursor.execute("DELETE FROM contagens WHERE id = ?", (id_para_remover,))
-                        conn.commit()
-                        st.toast("Linha excluída com sucesso!")
-                        st.rerun()
 
         # --- ABA 3: HISTÓRICO DE INVENTÁRIOS ---
         with aba_historico:
             st.write("### 📁 Histórico de Inventários Arquivados")
             for idx, inv in df_inventarios.iterrows():
-                cor_bola = "🟢" if inv['status'] == "Aberto" else "🔴"
                 df_hist_inv = pd.read_sql_query(f"SELECT * FROM contagens WHERE inventario_id = '{inv['id'].replace('#','')}' ORDER BY id DESC", conn)
-                qtd_contada_inv = len(df_hist_inv)
-                
-                with st.expander(f"{cor_bola} {inv['id']} – {inv['nome']} | {inv['data']} | {qtd_contada_inv} itens"):
-                    st.write(f"**Status:** {inv['status']} &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; **Início:** {inv['data']}")
-                    
-                    if df_hist_inv.empty:
-                        st.info("Nenhum item contado neste inventário.")
-                        if st.session_state.operador == "admin":
-                            if st.button("🗑️ Excluir inventário vazio", key=f"del_vazio_{inv['id']}_{idx}"):
-                                cursor = conn.cursor()
-                                cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
-                                conn.commit()
-                                st.toast("Inventário vazio excluído do histórico!")
-                                st.rerun()
-                    else:
-                        ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora', 'lote']
-                        st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
-                        
-                        c_dl, c_del_full = st.columns([4, 2])
-                        with c_dl:
-                            buffer = io.BytesIO()
-                            df_hist_inv[ordem_colunas_print].to_excel(buffer, index=False, engine='openpyxl')
-                            st.download_button(
-                                label="📥 Exportar este Inventário para Excel (.xlsx)",
-                                data=buffer.getvalue(),
-                                file_name=f"Inventario_{inv['id']}_{inv['nome']}.xlsx",
-                                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                                key=f"dl_excel_{inv['id']}"
-                            )
-                        with c_del_full:
-                            if st.session_state.operador == "admin":
-                                if st.button("❌ Excluir Inventário Arquivado", key=f"del_full_{inv['id']}_{idx}", use_container_width=True):
-                                    cursor = conn.cursor()
-                                    cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
-                                    cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
-                                    conn.commit()
-                                    st.toast(f"Inventário {inv['id']} excluído permanentemente.")
-                                    st.rerun()
+                with st.expander(f"📁 {inv['id']} – {inv['nome']} | {inv['data']} | {len(df_hist_inv)} itens"):
+                    if not df_hist_inv.empty:
+                        st.dataframe(df_hist_inv, use_container_width=True, hide_index=True)
 
         # --- ABA 4: BASE DE ESTOQUE ---
         with aba_base:
-            df_visualizacao = st.session_state.base_sistema.copy()
-            filtro_estoque = st.selectbox("Filtrar por Estoque Físico", ["Todos", "Apenas Pendentes", "Apenas Contados"], key="filtro_base_tab")
-            pesquisa = st.text_input("🔍 Pesquisar (código ou descrição)", placeholder="Filtre por trechos de dados...", key="pesquisa_base_tab")
-            
-            codigos_contados_set = set()
-            if not df_contagens_mutaveis.empty:
-                for idx, r_cont in df_contagens_mutaveis.iterrows():
-                    match_base = df_visualizacao[df_visualizacao[col_cod].astype(str).str.upper().str.strip() == str(r_cont['cod_produto']).upper().strip()]
-                    if not match_base.empty:
-                        at_esp = [str(x).upper().strip() for x in match_base[col_ativo_base].tolist() if col_ativo_base in match_base.columns]
-                        at_esp = [x for x in at_esp if x not in ["NAN", "SIM", "", "0", "0.0"]]
-                        if at_esp:
-                            if str(r_cont['ativo']).upper().strip() in at_esp:
-                                codigos_contados_set.add(str(r_cont['cod_produto']).upper().strip())
-                        else:
-                            codigos_contados_set.add(str(r_cont['cod_produto']).upper().strip())
-
-            df_visualizacao['Status'] = df_visualizacao[col_cod].apply(
-                lambda x: "✅ Contado" if str(x).upper().strip() in codigos_contados_set else "⏳ Pendente"
-            )
-            
-            if filtro_estoque == "Apenas Pendentes":
-                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "⏳ Pendente"]
-            elif filtro_estoque == "Apenas Contados":
-                df_visualizacao = df_visualizacao[df_visualizacao['Status'] == "✅ Contado"]
-                
-            if pesquisa:
-                df_visualizacao = df_visualizacao[
-                    df_visualizacao[col_cod].astype(str).str.contains(pesquisa, case=False) | 
-                    df_visualizacao[col_desc].astype(str).str.contains(pesquisa, case=False)
-                ]
-            
-            cols = ['Status'] + [c for c in df_visualizacao.columns if c != 'Status']
-            df_visualizacao = df_visualizacao[cols]
-            
-            st.markdown("---")
-            col_inf, col_sli = st.columns([2, 2])
-            with col_inf:
-                st.caption(f"{len(df_visualizacao)} itens encontrados | Arquivo: {st.session_state.nome_arquivo_excel}")
-            with col_sli:
-                itens_por_pagina = st.slider("Itens por página", min_value=10, max_value=100, value=50, step=10, key="slider_pag")
-            
-            total_linhas = len(df_visualizacao)
-            total_paginas = max(1, (total_linhas + itens_por_pagina - 1) // itens_por_pagina)
-            
-            col_ant, col_pag, col_prox = st.columns([1, 2, 1])
-            with col_ant:
-                if st.button("◀ Anterior", use_container_width=True, key="btn_ant") and st.session_state.pagina_atual > 1:
-                    st.session_state.pagina_atual -= 1
-                    st.rerun()
-            with col_pag:
-                st.markdown(f"<p style='text-align: center; font-weight: bold;'>Página {st.session_state.pagina_atual} de {total_paginas}</p>", unsafe_allow_html=True)
-            with col_prox:
-                if st.button("Próxima ▶", use_container_width=True, key="btn_prox") and st.session_state.pagina_atual < total_paginas:
-                    st.session_state.pagina_atual += 1
-                    st.rerun()
-            
-            inicio = (st.session_state.pagina_atual - 1) * itens_por_pagina
-            fim = inicio + itens_por_pagina
-            st.dataframe(df_visualizacao.iloc[inicio:fim], use_container_width=True)
+            st.dataframe(st.session_state.base_sistema, use_container_width=True)
 
         # --- ABA 5: DESEMPENHO DA EQUIPE ---
         with aba_graficos:
             st.write("### 🏆 Ranking de Inventários por Operador")
-            df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(DISTINCT inventario_id) as [Inventários Feitos] FROM contagens WHERE operador IS NOT NULL AND operador != '' GROUP BY operador", conn)
-            if df_ops.empty:
-                st.info("Aguardando lançamentos para processar dados de operadores.")
-            else:
-                df_ops = df_ops.sort_values(by='Inventários Feitos', ascending=False)
-                st.bar_chart(data=df_ops, x='Operador', y='Inventários Feitos', color="#d35400")
+            df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(id) as [Lançamentos Feitos] FROM contagens GROUP BY operador", conn)
+            if not df_ops.empty:
+                st.bar_chart(data=df_ops, x='Operador', y='Lançamentos Feitos', color="#d35400")
                 
     conn.close()
