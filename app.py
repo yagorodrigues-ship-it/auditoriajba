@@ -157,6 +157,24 @@ st.markdown("""
         font-size: 28px;
         font-weight: bold;
     }
+    .tabela-fechamento {
+        width: 100%;
+        border-collapse: collapse;
+        margin-top: 10px;
+        margin-bottom: 20px;
+    }
+    .tabela-fechamento th {
+        background-color: #1b4f72;
+        color: white;
+        padding: 10px;
+        text-align: left;
+        font-size: 14px;
+    }
+    .tabela-fechamento td {
+        border: 1px solid #d4e6f1;
+        padding: 10px;
+        font-size: 14px;
+    }
     </style>
 """, unsafe_allow_html=True)
 
@@ -288,8 +306,6 @@ if not st.session_state.logged_in:
 else:
     conn = conectar_banco()
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
-    
-    # Identificação flexível de ADM/Supervisor
     eh_supervisor = any(x in st.session_state.operador.lower() for x in ["administrador", "admin", "supervisor"])
     
     # SIDEBAR
@@ -415,7 +431,7 @@ else:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
         elif inventario_selecionado_obj['status'] == "Fechado":
-            st.error("🔒 Inventário selecionado está Fechado.")
+            st.error("🔒 Inventário selecionado está Fechado. Consulte os resultados na aba do Supervisor.")
         else:
             c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
             with c_busca:
@@ -534,7 +550,7 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: AUDITORIA DO SUPERVISOR (UNIFICADA E TOTALMENTE LIBERADA) ---
+    # --- ABA 3: AUDITORIA DO SUPERVISOR (CONSOLIDADA CONFORME FLUXO PEDIDO) ---
     with aba_supervisor:
         st.title("🔬 Controle de Qualidade e Acuracidade Amostral")
         
@@ -543,7 +559,64 @@ else:
         else:
             df_auditorias = pd.read_sql_query(f"SELECT * FROM auditorias_supervisor WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn)
             
-            # [PARTE SUPERIOR] Indicadores de Qualidade e Acuracidade
+            # [PARTE SUPERIOR - DINÂMICA]: Se o inventário estiver FECHADO, exibe a tabela de controle de acuracidade por depósito
+            if inventario_selecionado_obj['status'] == "Fechado":
+                st.markdown("### 📋 Relatório Executivo de Controle de Qualidade (Inventário Fechado)")
+                if df_auditorias.empty:
+                    st.info("Não foram consolidadas amostras de acuracidade pelo supervisor para este fechamento.")
+                else:
+                    # Agrupa os bips do supervisor por estoque físico/depósito para detalhar o resultado
+                    resumo_fechamento = []
+                    grouped = df_auditorias.groupby('desc_estoque')
+                    for deposito, group in grouped:
+                        total_dep = len(group)
+                        certos_qtd_dep = len(group[group['diferenca'] == 0])
+                        certos_etiq_dep = len(group[group['etiqueta_correta'] == "Sim"])
+                        certos_local_dep = len(group[group['localizacao_correta'] == "Sim"])
+                        
+                        p_saldo = f"{(certos_qtd_dep / total_dep) * 100:.1f}%"
+                        p_etiq = f"{(certos_etiq_dep / total_dep) * 100:.1f}%"
+                        p_local = f"{(certos_local_dep / total_dep) * 100:.1f}%"
+                        
+                        resumo_fechamento.append({
+                            "Descrição do Estoque Físico": deposito,
+                            "Acuracidade de Contagem (Saldo)": p_saldo,
+                            "Acuracidade de Etiquetas": p_etiq,
+                            "Acuracidade de Endereçamento (Local)": p_local,
+                            "Amostras Auditadas": total_dep
+                        })
+                    
+                    df_resumo_fechamento = pd.DataFrame(resumo_fechamento)
+                    
+                    # Converte para HTML limpo para renderizar com estilo CSS customizado
+                    html_tabela = f"""
+                    <table class="tabela-fechamento">
+                        <thead>
+                            <tr>
+                                <th>Descrição do Estoque Físico</th>
+                                <th>Acuracidade de Contagem (Saldo)</th>
+                                <th>Acuracidade de Etiquetas</th>
+                                <th>Acuracidade de Endereçamento (Local)</th>
+                                <th>Amostras Auditadas</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                    """
+                    for _, r in df_resumo_fechamento.iterrows():
+                        html_tabela += f"""
+                            <tr>
+                                <td><strong>{r['Descrição do Estoque Físico']}</strong></td>
+                                <td style="color:#27ae60; font-weight:bold;">{r['Acuracidade de Contagem (Saldo)']}</td>
+                                <td style="color:#8e44ad; font-weight:bold;">{r['Acuracidade de Etiquetas']}</td>
+                                <td style="color:#2980b9; font-weight:bold;">{r['Acuracidade de Endereçamento (Local)']}</td>
+                                <td>{r['Amostras Auditadas']} itens</td>
+                            </tr>
+                        """
+                    html_tabela += "</tbody></table>"
+                    st.markdown(html_tabela, unsafe_allow_html=True)
+                    st.markdown("---")
+
+            # Indicadores de Acuracidade Gerais (Sempre visíveis no topo)
             if not df_auditorias.empty:
                 total_sup = len(df_auditorias)
                 certos_qtd = len(df_auditorias[df_auditorias['diferenca'] == 0])
@@ -567,9 +640,11 @@ else:
             else:
                 st.info("💡 Nenhuma amostragem de acuracidade coletada até o momento para este inventário.")
             
-            # [PARTE CENTRAL] Lançamento e Bipe de Amostras
+            # [PARTE CENTRAL]: Lançamento e Bipes (Bloqueado se o inventário já foi fechado)
             if st.session_state.base_supervisor is None:
-                st.warning("⚠️ Passo pendente: Carregue a sua planilha de amostragem na seção inferior desta tela para habilitar os lançamentos.")
+                st.warning("⚠️ Passo pendente: Carregue a sua planilha de amostragem na seção inferior desta tela para habilitar os bipes do ADM.")
+            elif inventario_selecionado_obj['status'] == "Fechado":
+                st.info("🔒 Lançamentos Encerrados: Este inventário foi finalizado. Os campos de digitação foram recolhidos.")
             else:
                 # MAPEAMENTO AUTOMÁTICO DE COLUNAS DA BASE SUPERVISOR
                 colunas_sup = list(st.session_state.base_supervisor.columns)
@@ -636,27 +711,28 @@ else:
                 st.write("### 📝 Histórico de Amostras Coletadas")
                 st.dataframe(df_auditorias, use_container_width=True, hide_index=True)
                 
-            # [PARTE INFERIOR] Upload da Planilha de Amostragem Totalmente Liberado para o ADM
+            # [PARTE INFERIOR]: Módulo unificado de upload do ADM/Supervisor
             st.markdown("---")
-            st.subheader("📤 Carregar Planilha de Auditoria / Amostragem")
-            st.markdown("Suba abaixo o arquivo Excel específico com os itens que você quer contar nesta amostragem.")
+            st.subheader("O que Eu vou contar: Carregá Upload de Auditoria")
+            st.markdown("Espaço exclusivo para o ADM injetar a planilha com os itens escolhidos a dedo para conferência amostragem.")
             
             arquivo_supervisor = st.file_uploader(
-                "Escolha o arquivo Excel para Auditoria (.xlsx)", 
+                "Suba o arquivo Excel de Auditoria (.xlsx)", 
                 type=["xlsx"], 
-                key="sup_unified_excel_loader"
+                key="sup_unified_excel_loader",
+                label_visibility="collapsed"
             )
             
             if arquivo_supervisor is not None and st.session_state.base_supervisor is None:
                 st.session_state.base_supervisor = pd.read_excel(arquivo_supervisor)
                 st.session_state.nome_arquivo_supervisor = arquivo_supervisor.name
-                st.success(f"✅ Planilha de Auditoria '{arquivo_supervisor.name}' processada e carregada com sucesso!")
+                st.success(f"✅ Planilha de Auditoria '{arquivo_supervisor.name}' carregada com sucesso!")
                 st.rerun()
                 
             if st.session_state.base_supervisor is not None:
                 st.info(f"📂 **Base de Auditoria Ativa:** {st.session_state.nome_arquivo_supervisor}")
                 
-                with st.expander("👀 Visualizar prévia dos dados carregados"):
+                with st.expander("👀 Visualizar prévia dos dados carregados do Supervisor"):
                     st.dataframe(st.session_state.base_supervisor.head(10), use_container_width=True)
                     
                 if st.button("🗑️ Remover / Limpar Planilha de Auditoria", type="primary"):
