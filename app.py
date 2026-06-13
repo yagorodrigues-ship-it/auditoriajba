@@ -218,7 +218,7 @@ else:
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
             col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo', 'id_estoque'], -1)
 
-        # --- CÁLCULO DE PROGRESSO DINÂMICO E SEGURO ---
+        # --- CÁLCULO DE PROGRESSO DINÂMICO ---
         total_itens_base = 0
         total_contados = 0
         total_pendentes = 0
@@ -287,7 +287,7 @@ else:
                     if st.session_state.reset_bip:
                         st.session_state.reset_bip = False
                         st.rerun()
-                    codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", placeholder="Ex: TEAT0139Z — Enter para buscar", key="input_bip_chave")
+                    codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", value="", placeholder="Ex: TEAT0139Z — Enter para buscar", key="input_bip_chave")
                 with c_filtro:
                     st.selectbox("📍 Estoque Físico", ["Todos"], key="sel_est_fisico")
                 with c_limpar:
@@ -328,17 +328,18 @@ else:
                         st.markdown(f"**Descrição:** {desc_val}")
                         st.markdown(f"**Local:** {local_val}")
                         
-                        if ativos_da_base_lista:
-                            st.info(f"📋 **Nota de Sistema:** Este item possui ativos mapeados no saldo. Ativos válidos: {', '.join(ativos_da_base_lista)}")
+                        if map_reais_ativos_lista := ativos_da_base_lista:
+                            st.info(f"📋 **Nota de Sistema:** Este item possui ativos mapeados no saldo. Ativos válidos: {', '.join(map_reais_ativos_lista)}")
                         else:
                             st.caption("ℹ️ **Nota:** Linhas de ativo zeradas ou ausentes para este item no Excel (Campo Opcional).")
                         
                         st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                         
                         with st.form("confirmar_contagem_form", clear_on_submit=True):
-                            qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=0, step=1, value=1)
+                            # AJUSTE: Quantidade padrão inicializada em 0 em vez de 1
+                            qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
                             
-                            rotulo_ativo = "🔢 Número do Ativo / Patrimônio (Obrigatório)" if ativos_da_base_lista else "🔢 Número do Ativo / Patrimônio (Opcional - Linha Zerada)"
+                            rotulo_ativo = "🔢 Número do Ativo / Patrimônio (Obrigatório)" if map_reais_ativos_lista else "🔢 Número do Ativo / Patrimônio (Opcional - Linha Zerada)"
                             ativo_input = st.text_input(rotulo_ativo, placeholder="Insira o número de identificação do ativo...")
                             
                             observacao = st.text_input("📝 Observação (opcional)")
@@ -347,15 +348,18 @@ else:
                             if btn_confirmar:
                                 ativo_digitado_limpo = ativo_input.strip().upper()
                                 
-                                if len(ativos_da_base_lista) > 0:
-                                    if not ativo_digitado_limpo:
-                                        st.error("❌ Erro: O preenchimento do número de Ativo é obrigatório para este item!")
-                                    else:
-                                        agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                        lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
-                                        
-                                        qtd_sistema_calculada = qtd_sis
-                                        if ativo_digitado_limpo in ativos_da_base_lista:
+                                # AJUSTE: Trava estrita de quantidade obrigatória preenchida (> 0)
+                                if qtd_fisica <= 0:
+                                    st.error("❌ Erro: O preenchimento de uma quantidade contada maior que 0 é obrigatório para realizar o lançamento!")
+                                elif map_reais_ativos_lista and not ativo_digitado_limpo:
+                                    st.error("❌ Erro: O preenchimento do número de Ativo é obrigatório para este item!")
+                                else:
+                                    agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
+                                    
+                                    qtd_sistema_calculada = qtd_sis
+                                    if map_reais_ativos_lista:
+                                        if ativo_digitado_limpo in map_reais_ativos_lista:
                                             linha_especifica = item[item[col_ativo_base].astype(str).str.upper().str.strip() == ativo_digitado_limpo]
                                             try:
                                                 qtd_sistema_calculada = int(pd.to_numeric(linha_especifica.iloc[0][col_qtd], errors='coerce'))
@@ -364,31 +368,17 @@ else:
                                         else:
                                             qtd_sistema_calculada = 0
                                             
-                                        dif_calculada = qtd_fisica - qtd_sistema_calculada
-                                        
-                                        cursor = conn.cursor()
-                                        cursor.execute("""
-                                            INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                        """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
-                                        conn.commit()
-                                        
-                                        st.toast(f"Lançamento processado e armazenado de forma isolada!")
-                                        st.session_state.reset_bip = True
-                                        st.rerun()
-                                else:
-                                    agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                    lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
-                                    dif_calculada = qtd_fisica - qtd_sis
+                                    dif_calculada = qtd_fisica - qtd_sistema_calculada
                                     
                                     cursor = conn.cursor()
                                     cursor.execute("""
                                         INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sis, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
+                                    """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
                                     conn.commit()
                                     
-                                    st.toast(f"Lançamento opcional processado!")
+                                    st.toast(f"Lançamento processado! Tela redefinida para nova busca.")
+                                    # ATUALIZAÇÃO: Força o reset completo do estado de busca da tela, limpando a memória do último código
                                     st.session_state.reset_bip = True
                                     st.rerun()
                     else:
