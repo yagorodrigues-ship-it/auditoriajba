@@ -288,7 +288,9 @@ if not st.session_state.logged_in:
 else:
     conn = conectar_banco()
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
-    eh_supervisor = st.session_state.operador in ["Administrador Tel", "admin"]
+    
+    # Identificação flexível de ADM/Supervisor
+    eh_supervisor = any(x in st.session_state.operador.lower() for x in ["administrador", "admin", "supervisor"])
     
     # SIDEBAR
     with st.sidebar:
@@ -532,7 +534,7 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: AUDITORIA DO SUPERVISOR (UNIFICADA) ---
+    # --- ABA 3: AUDITORIA DO SUPERVISOR (UNIFICADA E TOTALMENTE LIBERADA) ---
     with aba_supervisor:
         st.title("🔬 Controle de Qualidade e Acuracidade Amostral")
         
@@ -567,7 +569,7 @@ else:
             
             # [PARTE CENTRAL] Lançamento e Bipe de Amostras
             if st.session_state.base_supervisor is None:
-                st.warning("⚠️ Passo pendente: O Supervisor precisa carregar sua planilha de amostragem na seção inferior desta tela.")
+                st.warning("⚠️ Passo pendente: Carregue a sua planilha de amostragem na seção inferior desta tela para habilitar os lançamentos.")
             else:
                 # MAPEAMENTO AUTOMÁTICO DE COLUNAS DA BASE SUPERVISOR
                 colunas_sup = list(st.session_state.base_supervisor.columns)
@@ -584,88 +586,83 @@ else:
                 col_qtd_sup = encontrar_col_sup(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
                 col_id_est_sup = encontrar_col_sup(['idestoquefísico', 'idestoque', 'codestoque'], 0)
 
-                if not eh_supervisor:
-                    st.info("ℹ️ **Modo Leitura:** Você está visualizando o espelho da acuracidade gerado pelo Supervisor. Lançamentos bloqueados.")
-                else:
-                    st.write("✏️ **Painel de Lançamento (Exclusivo ADM - Cruzando Base Supervisor)**")
-                    cs1, cs2 = st.columns([6, 4])
-                    with cs1:
-                        bip_supervisor = st.text_input("💻 Bipar item para Amostragem (Supervisor)", value="", placeholder="Bipe o item da sua planilha de amostragem...", key=f"sup_bip_{st.session_state.contador_reset_sup}")
+                st.write("✏️ **Painel de Lançamento (Cruzando Base de Auditoria Carregada)**")
+                cs1, cs2 = st.columns([6, 4])
+                with cs1:
+                    bip_supervisor = st.text_input("💻 Bipar item para Amostragem (Supervisor)", value="", placeholder="Bipe o item da sua planilha de amostragem...", key=f"sup_bip_{st.session_state.contador_reset_sup}")
+                
+                if bip_supervisor:
+                    busca_sup = str(bip_supervisor).upper().strip()
+                    cod_sup = busca_sup.split(" - ")[-1].strip() if " - " in busca_sup else busca_sup
                     
-                    if bip_supervisor:
-                        busca_sup = str(bip_supervisor).upper().strip()
-                        cod_sup = busca_sup.split(" - ")[-1].strip() if " - " in busca_sup else busca_sup
+                    item_sup = st.session_state.base_supervisor[st.session_state.base_supervisor[col_cod_sup].astype(str).str.upper().str.strip() == cod_sup]
+                    if not item_sup.empty:
+                        desc_sup = item_sup.iloc[0][col_desc_sup]
+                        local_sup = item_sup.iloc[0][col_local_sup] if col_local_sup in item_sup.columns else "Não Informado"
+                        id_est_sup = str(item_sup.iloc[0][col_id_est_sup]).strip() if col_id_est_sup in item_sup.columns else ""
                         
-                        item_sup = st.session_state.base_supervisor[st.session_state.base_supervisor[col_cod_sup].astype(str).str.upper().str.strip() == cod_sup]
-                        if not item_sup.empty:
-                            desc_sup = item_sup.iloc[0][col_desc_sup]
-                            local_sup = item_sup.iloc[0][col_local_sup] if col_local_sup in item_sup.columns else "Não Informado"
-                            id_est_sup = str(item_sup.iloc[0][col_id_est_sup]).strip() if col_id_est_sup in item_sup.columns else ""
-                            
-                            try: qtd_sis_sup = int(pd.to_numeric(item_sup.iloc[0][col_qtd_sup], errors='coerce'))
-                            except: qtd_sis_sup = 0
-                            
-                            st.markdown(f"**Item Selecionado (Base Supervisor):** `{cod_sup}` - {desc_sup} | **Local:** {local_sup}")
-                            
-                            with st.form("form_auditoria_sup", clear_on_submit=True):
-                                col_f1, col_f2, col_f3 = st.columns(3)
-                                with col_f1:
-                                    qtd_aud_sup = st.number_input("Quantidade Real Encontrada", min_value=0, step=1, value=0)
-                                with col_f2:
-                                    etiq_status = st.selectbox("A etiqueta física está correta?", ["Sim", "Não"])
-                                with col_f3:
-                                    local_status = st.selectbox("O material está na localização correta?", ["Sim", "Não"])
-                                    
-                                if st.form_submit_button("💾 Salvar Auditoria de Supervisor", type="primary", use_container_width=True):
-                                    dif_sup = qtd_aud_sup - qtd_sis_sup
-                                    agora_sup = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                    
-                                    cursor = conn.cursor()
-                                    cursor.execute("""
-                                        INSERT INTO auditorias_supervisor (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, qtd_sistema, qtd_auditada, diferenca, etiqueta_correta, localizacao_correta, supervisor, data_hora)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (id_inventario_atual.replace("#",""), id_est_sup, local_sup, cod_sup, desc_sup, qtd_sis_sup, qtd_aud_sup, dif_sup, etiq_status, local_status, st.session_state.operador, agora_sup))
-                                    conn.commit()
-                                    
-                                    st.toast("Auditoria da amostragem salva permanentemente!")
-                                    st.session_state.contador_reset_sup += 1
-                                    st.rerun()
-                        else:
-                            st.error(f"❌ Produto '{cod_sup}' não localizado na Base do Supervisor.")
+                        try: qtd_sis_sup = int(pd.to_numeric(item_sup.iloc[0][col_qtd_sup], errors='coerce'))
+                        except: qtd_sis_sup = 0
+                        
+                        st.markdown(f"**Item Selecionado:** `{cod_sup}` - {desc_sup} | **Local:** {local_sup}")
+                        
+                        with st.form("form_auditoria_sup", clear_on_submit=True):
+                            col_f1, col_f2, col_f3 = st.columns(3)
+                            with col_f1:
+                                qtd_aud_sup = st.number_input("Quantidade Real Encontrada", min_value=0, step=1, value=0)
+                            with col_f2:
+                                etiq_status = st.selectbox("A etiqueta física está correta?", ["Sim", "Não"])
+                            with col_f3:
+                                local_status = st.selectbox("O material está na localização correta?", ["Sim", "Não"])
+                                
+                            if st.form_submit_button("💾 Salvar Auditoria", type="primary", use_container_width=True):
+                                dif_sup = qtd_aud_sup - qtd_sis_sup
+                                agora_sup = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                
+                                cursor = conn.cursor()
+                                cursor.execute("""
+                                    INSERT INTO auditorias_supervisor (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, qtd_sistema, qtd_auditada, diferenca, etiqueta_correta, localizacao_correta, supervisor, data_hora)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (id_inventario_atual.replace("#",""), id_est_sup, local_sup, cod_sup, desc_sup, qtd_sis_sup, qtd_aud_sup, dif_sup, etiq_status, local_status, st.session_state.operador, agora_sup))
+                                conn.commit()
+                                
+                                st.toast("Auditoria da amostragem salva permanentemente!")
+                                st.session_state.contador_reset_sup += 1
+                                st.rerun()
+                    else:
+                        st.error(f"❌ Produto '{cod_sup}' não localizado na sua Base de Auditoria.")
             
             if not df_auditorias.empty:
-                st.write("### 📝 Histórico de Amostras Coletadas pelo Supervisor")
+                st.write("### 📝 Histórico de Amostras Coletadas")
                 st.dataframe(df_auditorias, use_container_width=True, hide_index=True)
                 
-            # [PARTE INFERIOR] Upload da Planilha de Amostragem do Supervisor
+            # [PARTE INFERIOR] Upload da Planilha de Amostragem Totalmente Liberado para o ADM
             st.markdown("---")
-            st.subheader("📤 Carregar Planilha de Auditoria (Supervisor)")
-            if not eh_supervisor:
-                st.error("🔒 Apenas administradores e supervisores podem gerenciar esta base de dados.")
-            else:
-                st.markdown("Suba abaixo o arquivo Excel específico com a amostragem que você utilizará para auditar.")
-                arquivo_supervisor = st.file_uploader(
-                    "Escolha o arquivo Excel para o Supervisor (.xlsx)", 
-                    type=["xlsx"], 
-                    key="sup_unified_excel_loader"
-                )
+            st.subheader("📤 Carregar Planilha de Auditoria / Amostragem")
+            st.markdown("Suba abaixo o arquivo Excel específico com os itens que você quer contar nesta amostragem.")
+            
+            arquivo_supervisor = st.file_uploader(
+                "Escolha o arquivo Excel para Auditoria (.xlsx)", 
+                type=["xlsx"], 
+                key="sup_unified_excel_loader"
+            )
+            
+            if arquivo_supervisor is not None and st.session_state.base_supervisor is None:
+                st.session_state.base_supervisor = pd.read_excel(arquivo_supervisor)
+                st.session_state.nome_arquivo_supervisor = arquivo_supervisor.name
+                st.success(f"✅ Planilha de Auditoria '{arquivo_supervisor.name}' processada e carregada com sucesso!")
+                st.rerun()
                 
-                if arquivo_supervisor is not None and st.session_state.base_supervisor is None:
-                    st.session_state.base_supervisor = pd.read_excel(arquivo_supervisor)
-                    st.session_state.nome_arquivo_supervisor = arquivo_supervisor.name
-                    st.success(f"✅ Base do Supervisor '{arquivo_supervisor.name}' processada e carregada com sucesso!")
+            if st.session_state.base_supervisor is not None:
+                st.info(f"📂 **Base de Auditoria Ativa:** {st.session_state.nome_arquivo_supervisor}")
+                
+                with st.expander("👀 Visualizar prévia dos dados carregados"):
+                    st.dataframe(st.session_state.base_supervisor.head(10), use_container_width=True)
+                    
+                if st.button("🗑️ Remover / Limpar Planilha de Auditoria", type="primary"):
+                    st.session_state.base_supervisor = None
+                    st.session_state.nome_arquivo_supervisor = ""
                     st.rerun()
-                    
-                if st.session_state.base_supervisor is not None:
-                    st.info(f"📂 **Base Ativa carregada:** {st.session_state.nome_arquivo_supervisor}")
-                    
-                    with st.expander("👀 Visualizar prévia dos dados carregados do Supervisor"):
-                        st.dataframe(st.session_state.base_supervisor.head(10), use_container_width=True)
-                        
-                    if st.button("🗑️ Remover / Limpar Planilha do Supervisor", type="primary"):
-                        st.session_state.base_supervisor = None
-                        st.session_state.nome_arquivo_supervisor = ""
-                        st.rerun()
 
     # --- ABA 4: HISTÓRICO DE INVENTÁRIOS ---
     with aba_historico:
