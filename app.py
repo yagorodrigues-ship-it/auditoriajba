@@ -210,7 +210,9 @@ if 'ultimo_item_sucesso' not in st.session_state:
 def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
 
-# --- TELA DE ACESSO ---
+# =====================================================================
+# BLOCÃO 1: TRAVA ISOLADA DE LOGIN (SÓ ABRE SE DESLOGADO)
+# =====================================================================
 if not st.session_state.logged_in:
     conn = conectar_banco()
     
@@ -306,13 +308,15 @@ if not st.session_state.logged_in:
             st.rerun()
     conn.close()
 
-# --- TELA LOGADA DO SISTEMA ---
+# =====================================================================
+# BLOCÃO 2: AMBIENTE LOGADO (A TELA DE LOGIN NÃO CONSEGUE MAIS ENTRAR AQUI)
+# =====================================================================
 else:
     conn = conectar_banco()
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
     eh_supervisor = any(x in st.session_state.operador.lower() for x in ["administrador", "admin", "supervisor"])
     
-    # SIDEBAR
+    # 1. SIDEBAR (BARRA LATERAL)
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         if st.button("🚪 Sair da Conta", use_container_width=True):
@@ -323,11 +327,10 @@ else:
             
         st.markdown("---")
         
-        # Interface condicional da Barra Lateral dependendo da aba onde o Supervisor está navegando
+        # Interface reativa dinâmica baseada na aba selecionada pelo Supervisor
         if eh_supervisor and st.session_state.aba_atual_ativa == 2:
             st.subheader("⚙️ Painel Supervisor")
             
-            # Puxa o status dinâmico do banco para a amostragem amostral corrente
             cursor = conn.cursor()
             cursor.execute("SELECT DISTINCT status_auditoria FROM auditorias_supervisor WHERE inventario_id = ?", (df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else "0",))
             row_status = cursor.fetchone()
@@ -349,7 +352,7 @@ else:
                         conn.commit()
                         st.rerun()
         else:
-            # Painel Convencional para Funcionários
+            # Layout Tradicional para Equipe de Contagem
             st.write("📂 **Carregar Base de Dados (Funcionários)**")
             arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed", key="func_excel_loader")
             if arquivo_excel is not None and st.session_state.base_sistema is None:
@@ -388,7 +391,7 @@ else:
                     conn.commit()
                     st.rerun()
 
-        # --- MAPEAMENTO DE COLUNAS (BASE FUNCIONÁRIOS) ---
+        # --- PROCESSAMENTO AUTOMÁTICO DE PROGRESSO DA BASE ---
         col_cod, col_desc, col_local, col_unidade, col_qtd, col_ativo_base, col_id_estoque = "", "", "", "", "", "", ""
         if st.session_state.base_sistema is not None:
             colunas_reais = list(st.session_state.base_sistema.columns)
@@ -414,7 +417,6 @@ else:
             if col_ativo_base == "Não Encontrado":
                 col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo'], -1)
 
-        # --- PROGRESSO LATERAL ---
         total_itens_base = 0
         total_contados = 0
         total_pendentes = 0
@@ -454,20 +456,19 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    # INTERFACE DE NAVEGAÇÃO POR ABAS
+    # 2. PAINEL PRINCIPAL (CONTRUTOR DE ABAS COESAS)
     id_inventario_atual = df_inventarios.iloc[0]['id'] if not df_inventarios.empty else None
     
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Auditoria Supervisor", "📁 Histórico", "📄 Base de Estoque", "🏆 Desempenho"]
     tab_objeto = st.tabs(abas)
     
-    # Mapeia a aba ativa na sessão para alternar as regras e travas da barra lateral reativamente
-    for i, tab in enumerate(tab_objeto):
-        with tab:
-            if st.session_state.aba_atual_ativa != i:
-                st.session_state.aba_atual_ativa = i
+    # Gerencia a aba ativa reativamente sem vazar estados
+    for idx_tab, click_tab in enumerate(tab_objeto):
+        with click_tab:
+            if st.session_state.aba_atual_ativa != idx_tab:
+                st.session_state.aba_atual_ativa = idx_tab
                 st.rerun()
 
-    # Instancia ponteiro específico da aba para organizar a renderização sequencial
     aba_contar, aba_atual, aba_supervisor, aba_historico, aba_base, aba_graficos = tab_objeto
     
     # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS) ---
@@ -558,7 +559,7 @@ else:
                 else:
                     st.error("❌ Código não localizado.")
 
-# --- ABA 2: CONTAGEM ATUAL ---
+    # --- ABA 2: CONTAGEM ATUAL ---
     with aba_atual:
         df_contagens_mutaveis = pd.read_sql_query(f"SELECT * FROM contagens WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn) if id_inventario_atual else pd.DataFrame()
         if id_inventario_atual:
@@ -595,7 +596,7 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: AUDITORIA DO SUPERVISOR (CORREÇÃO DE HTML VAZADO) ---
+    # --- ABA 3: AUDITORIA DO SUPERVISOR ---
     with aba_supervisor:
         st.title("🔬 Controle de Qualidade e Acuracidade Amostral")
         
@@ -604,13 +605,12 @@ else:
         else:
             df_auditorias = pd.read_sql_query(f"SELECT * FROM auditorias_supervisor WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn)
             
-            # Puxa o status isolado da amostragem amostral do supervisor
             cursor = conn.cursor()
             cursor.execute("SELECT DISTINCT status_auditoria FROM auditorias_supervisor WHERE inventario_id = ?", (id_inventario_atual.replace('#',''),))
             res_st = cursor.fetchone()
             status_auditoria_atual = res_st[0] if res_st else "Aberto"
 
-            # [PARTE SUPERIOR] Relatório Avançado de Controle de Qualidade pós-Fechamento Amostral
+            # [PARTE SUPERIOR] Renderização estruturada em HTML sem quebras ou escapes textuais
             if status_auditoria_atual == "Fechado":
                 st.markdown("### 📋 Relatório Executivo de Controle de Qualidade (Auditoria Amostral Finalizada)")
                 if df_auditorias.empty:
@@ -638,7 +638,6 @@ else:
                     
                     df_resumo_fechamento = pd.DataFrame(resumo_fechamento)
                     
-                    # CORREÇÃO DEFINITIVA DO HTML: Código unificado e estruturado sem escapes visuais
                     html_tabela = """
                     <table class="tabela-fechamento">
                         <thead>
@@ -666,7 +665,6 @@ else:
                     st.markdown(html_tabela, unsafe_allow_html=True)
                     st.markdown("---")
 
-            # Indicadores de Acuracidade Gerais (Métricas Dinâmicas em Cards)
             if not df_auditorias.empty:
                 total_sup = len(df_auditorias)
                 certos_qtd = len(df_auditorias[df_auditorias['diferenca'] == 0])
@@ -690,7 +688,7 @@ else:
             else:
                 st.info("💡 Nenhuma amostragem de acuracidade coletada até o momento para este inventário.")
             
-            # [PARTE CENTRAL]: Lançamento de Bipes Amostrais
+            # [PARTE CENTRAL]: Lançamento de Amostras
             if st.session_state.base_supervisor is None:
                 st.warning("⚠️ Passo pendente: Carregue a sua planilha de amostragem na seção inferior desta tela para habilitar os bipes do ADM.")
             elif status_auditoria_atual == "Fechado":
@@ -760,7 +758,7 @@ else:
                 st.write("### 📝 Histórico de Amostras Coletadas")
                 st.dataframe(df_auditorias, use_container_width=True, hide_index=True)
                 
-            # [PARTE INFERIOR]: Módulo Unificado de Upload de Arquivo do Supervisor
+            # [PARTE INFERIOR]: Controle de Planilha Amostral
             st.markdown("---")
             st.subheader("O que Eu vou contar: Carregar Upload de Auditoria")
             
