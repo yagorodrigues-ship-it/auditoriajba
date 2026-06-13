@@ -92,10 +92,11 @@ def inicializar_banco():
 
 inicializar_banco()
 
-# --- FUNÇÃO AUXILIAR PARA EXPORTAR EXCEL ---
+# --- FUNÇÃO AUXILIAR PARA EXPORTAR EXCEL (CORRIGIDA COM OPENPYXL) ---
 def converter_para_excel(df):
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+    # Mudança de engine para openpyxl para eliminar o erro de falta de biblioteca
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Relatorio')
     return output.getvalue()
 
@@ -291,7 +292,7 @@ else:
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor ORDER BY data DESC, id DESC", conn)
     
-    # CONTROLE DE NÍVEL ADMIN DEFINITIVO PARA O YAGO RODRIGUES
+    # VALIDAÇÃO DO MEU PERFIL ADMIN (YAGO RODRIGUES)
     nome_usuario_logado_limpo = st.session_state.operador.lower()
     eh_supervisor = any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"])
     
@@ -365,11 +366,7 @@ else:
             col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
 
         # --- PROGRESSO LATERAL ---
-        total_itens_base = 0
-        total_contados = 0
-        total_pendentes = 0
-        progresso = 0.0
-
+        total_itens_base, total_contados, total_pendentes, progresso = 0, 0, 0, 0.0
         if st.session_state.base_sistema is not None and id_inventario_atual is not None:
             total_itens_base = len(st.session_state.base_sistema)
             df_contagens_atuais_side = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
@@ -386,11 +383,7 @@ else:
         st.write("**PROGRESSO DA CONTAGEM**")
         st.progress(progresso)
 
-    if st.session_state.ultimo_item_sucesso:
-        st.success(st.session_state.ultimo_item_sucesso)
-        st.session_state.ultimo_item_sucesso = ""
-
-    # ORGANIZAÇÃO DAS ABAS COMPLETA
+    # ABAS DO PAINEL PRINCIPAL
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho"]
     aba_contar, aba_atual, aba_supervisor, aba_acuracidade, aba_historico_geral, aba_base, aba_graficos = st.tabs(abas)
     
@@ -487,9 +480,9 @@ else:
                     </div>
                 """, unsafe_allow_html=True)
                 
-                # EXPORTAÇÃO EXCEL DA CONTAGEM ATUAL LIBERADA PARA TODOS
+                # EXPORTAÇÃO EXCEL CORRIGIDA PARA TODOS UTILIZANDO O MOTOR OPENPYXL
                 excel_atual = converter_para_excel(df_contagens_mutaveis)
-                st.download_button(label="📥 Exportar Lançamentos Atuais para Excel", data=excel_atual, file_name=f"contagem_{id_inventario_atual}.xlsx", mime="application/vnd.ms-excel")
+                st.download_button(label="📥 Exportar Lançamentos Atuais para Excel", data=excel_atual, file_name=f"contagem_{id_inventario_atual}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 st.write("")
 
                 ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
@@ -502,7 +495,7 @@ else:
         st.title("🔬 Controle de Qualidade Amostral do Supervisor")
         
         if not eh_supervisor:
-            st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor.")
+            st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor (Acesso Liberado para Yago Rodrigues).")
         else:
             st.subheader("📁 Controle de Inventários do Supervisor")
             col_sel, col_btn = st.columns([7, 3])
@@ -642,7 +635,7 @@ else:
                     st.session_state.nome_arquivo_supervisor = ""
                     st.rerun()
 
-    # --- ABA 4: ACURACIDADE ESTOQUE (COM OPÇÃO DE EXCLUSÃO PARA O ADM YAGO RODRIGUES) ---
+    # --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         
@@ -683,7 +676,7 @@ else:
             df_planilha_final = pd.DataFrame(linhas_planilha_acuracidade)
             st.dataframe(df_planilha_final, use_container_width=True, hide_index=True)
             
-            # LIBERAÇÃO DE EXCLUSÃO DE DADOS DA ACURACIDADE EXCLUSIVA PARA O ADMIN
+            # FILTRO EXCLUSIVO DO ADMIN PARA EXPURGAR REGISTROS ESPECÍFICOS DE MPLICAS
             if eh_supervisor:
                 with st.expander("⚙️ Painel do Administrador - Deletar Métricas por Código de Estoque"):
                     lista_estoques_audita = list(df_planilha_final["CÓDIGO ESTOQUE AUDITADO"].unique())
@@ -697,9 +690,10 @@ else:
 
             st.write("")
             excel_acuracidade = converter_para_excel(df_planilha_final)
-            st.download_button(label="📥 Exportar Planilha de Acuracidade para Excel", data=excel_acuracidade, file_name="acuracidade_depositos.xlsx", mime="application/vnd.ms-excel")
+            st.download_button(label="📥 Exportar Planilha de Acuracidade para Excel", data=excel_acuracidade, file_name="acuracidade_depositos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         st.markdown("---")
+        # APENAS O HISTÓRICO DAS AUDITORIAS DO SUPERVISOR CONFORME SOLICITADO
         st.write("### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
         if df_inventarios_sup.empty:
             st.info("Nenhum histórico amostral arquivado.")
@@ -712,7 +706,7 @@ else:
                     with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
                         if not df_hist_sup.empty:
                             excel_sup_hist = converter_para_excel(df_hist_sup)
-                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.ms-excel", key=f"dl_sup_{inv_s['id']}")
+                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
                             st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
                 with c_del:
                     if eh_supervisor:
@@ -724,7 +718,7 @@ else:
                             st.success("Pasta deletada!")
                             st.rerun()
 
-    # --- ABA 5: HISTÓRICO GERAL (ARQUIVO OPERACIONAL DOS FUNCIONÁRIOS REATIVADO COM EXCLUSÃO PARA O ADM YAGO) ---
+    # --- ABA 5: HISTÓRICO GERAL (ISOLADA CONFORME ERAS ANTERIORES) ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
         st.write("Abaixo consta a listagem completa de contagens e lançamentos realizados pelas equipes operacionais em campo:")
@@ -740,7 +734,7 @@ else:
                     with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data Inicial: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} itens lançados)"):
                         if not df_hist_inv.empty:
                             excel_geral_hist = converter_para_excel(df_hist_inv)
-                            st.download_button(label="📥 Baixar Lançamentos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.ms-excel", key=f"dl_ger_{inv['id']}")
+                            st.download_button(label="📥 Baixar Lançamentos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}")
                             ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
                             st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
                 with c_del_g:
