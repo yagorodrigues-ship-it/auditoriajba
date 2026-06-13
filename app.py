@@ -92,6 +92,13 @@ def inicializar_banco():
 
 inicializar_banco()
 
+# --- FUNÇÃO AUXILIAR PARA EXPORTAR EXCEL ---
+def converter_para_excel(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Relatorio')
+    return output.getvalue()
+
 # --- ESTILIZAÇÃO PERSONALIZADA ---
 st.markdown("""
     <style>
@@ -180,8 +187,6 @@ if 'nome_arquivo_excel' not in st.session_state:
     st.session_state.nome_arquivo_excel = ""
 if 'nome_arquivo_supervisor' not in st.session_state:
     st.session_state.nome_arquivo_supervisor = ""
-if 'pagina_atual' not in st.session_state:
-    st.session_state.pagina_atual = 1
 if 'operador' not in st.session_state:
     st.session_state.operador = ""
 if 'tela_acesso' not in st.session_state:
@@ -286,11 +291,10 @@ else:
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor ORDER BY data DESC, id DESC", conn)
     
-    # LIBERAÇÃO DEFINITIVA DO ADMIN: Validação para Yago Rodrigues + Chaves padrões de hierarquia
+    # CONTROLE DE NÍVEL ADMIN DEFINITIVO PARA O YAGO RODRIGUES
     nome_usuario_logado_limpo = st.session_state.operador.lower()
     eh_supervisor = any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"])
     
-    # Escopo inicializado seguro para as tabelas correntes
     id_inventario_atual_inicial = df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else ""
     df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual_inicial,)) if id_inventario_atual_inicial else pd.DataFrame()
     
@@ -343,7 +347,7 @@ else:
                 st.rerun()
 
         # --- MAPEAMENTO DE COLUNAS ---
-        col_cod, col_desc, col_local, col_unidade, col_qtd, col_ativo_base, col_id_estoque = "", "", "", "", "", "", ""
+        col_cod, col_desc, col_local, col_unidade, col_qtd, col_id_estoque = "", "", "", "", "", ""
         if st.session_state.base_sistema is not None:
             colunas_reais = list(st.session_state.base_sistema.columns)
             def encontrar_coluna(opcoes, default_idx):
@@ -359,14 +363,6 @@ else:
             col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
             col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
-            
-            col_ativo_base = "Não Encontrado"
-            for col in colunas_reais:
-                if col.strip().lower() == "ativo":
-                    col_ativo_base = col
-                    break
-            if col_ativo_base == "Não Encontrado":
-                col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo'], -1)
 
         # --- PROGRESSO LATERAL ---
         total_itens_base = 0
@@ -394,7 +390,7 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    # ORGANIZAÇÃO DAS ABAS EXATAMENTE COMO SOLICITADO
+    # ORGANIZAÇÃO DAS ABAS COMPLETA
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho"]
     aba_contar, aba_atual, aba_supervisor, aba_acuracidade, aba_historico_geral, aba_base, aba_graficos = st.tabs(abas)
     
@@ -491,6 +487,11 @@ else:
                     </div>
                 """, unsafe_allow_html=True)
                 
+                # EXPORTAÇÃO EXCEL DA CONTAGEM ATUAL LIBERADA PARA TODOS
+                excel_atual = converter_para_excel(df_contagens_mutaveis)
+                st.download_button(label="📥 Exportar Lançamentos Atuais para Excel", data=excel_atual, file_name=f"contagem_{id_inventario_atual}.xlsx", mime="application/vnd.ms-excel")
+                st.write("")
+
                 ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
                 st.dataframe(df_contagens_mutaveis[ordem_colunas_print], use_container_width=True, hide_index=True)
         else:
@@ -501,7 +502,7 @@ else:
         st.title("🔬 Controle de Qualidade Amostral do Supervisor")
         
         if not eh_supervisor:
-            st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor (Acesso Liberado para Yago Rodrigues).")
+            st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor.")
         else:
             st.subheader("📁 Controle de Inventários do Supervisor")
             col_sel, col_btn = st.columns([7, 3])
@@ -641,7 +642,7 @@ else:
                     st.session_state.nome_arquivo_supervisor = ""
                     st.rerun()
 
-    # --- ABA 4: ACURACIDADE ESTOQUE (APENAS INDICADORES VISUAIS COM BOLAS DE CORES DO SUPERVISOR) ---
+    # --- ABA 4: ACURACIDADE ESTOQUE (COM OPÇÃO DE EXCLUSÃO PARA O ADM YAGO RODRIGUES) ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         
@@ -665,7 +666,6 @@ else:
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
                 pct_local = (certos_local / total_itens_dep) * 100
                 
-                # ADIÇÃO DAS BOLINHAS COLORIDAS: Verde para 100% (Sem erros), Vermelha para qualquer falha encontrada
                 bola_saldo = f"🟢 {pct_saldo:.1f}%" if pct_saldo == 100 else f"🔴 {pct_saldo:.1f}%"
                 bola_etiq = f"🟢 {pct_etiq:.1f}%" if pct_etiq == 100 else f"🔴 {pct_etiq:.1f}%"
                 bola_local = f"🟢 {pct_local:.1f}%" if pct_local == 100 else f"🔴 {pct_local:.1f}%"
@@ -683,6 +683,22 @@ else:
             df_planilha_final = pd.DataFrame(linhas_planilha_acuracidade)
             st.dataframe(df_planilha_final, use_container_width=True, hide_index=True)
             
+            # LIBERAÇÃO DE EXCLUSÃO DE DADOS DA ACURACIDADE EXCLUSIVA PARA O ADMIN
+            if eh_supervisor:
+                with st.expander("⚙️ Painel do Administrador - Deletar Métricas por Código de Estoque"):
+                    lista_estoques_audita = list(df_planilha_final["CÓDIGO ESTOQUE AUDITADO"].unique())
+                    est_para_deletar = st.selectbox("Escolha o Código do Estoque para expurgar do banco", lista_estoques_audita, key="del_est_acuracidade_box")
+                    if st.button("🚨 Confirmar Exclusão do Estoque", type="primary", use_container_width=True):
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM auditorias_supervisor WHERE id_estoque = ?", (est_para_deletar,))
+                        conn.commit()
+                        st.success(f"✅ Todos os lançamentos do estoque {est_para_deletar} foram deletados!")
+                        st.rerun()
+
+            st.write("")
+            excel_acuracidade = converter_para_excel(df_planilha_final)
+            st.download_button(label="📥 Exportar Planilha de Acuracidade para Excel", data=excel_acuracidade, file_name="acuracidade_depositos.xlsx", mime="application/vnd.ms-excel")
+
         st.markdown("---")
         st.write("### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
         if df_inventarios_sup.empty:
@@ -690,11 +706,25 @@ else:
         else:
             for idx, inv_s in df_inventarios_sup.iterrows():
                 df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
-                with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
-                    if not df_hist_sup.empty:
-                        st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
+                
+                c_exp, c_del = st.columns([8, 2])
+                with c_exp:
+                    with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
+                        if not df_hist_sup.empty:
+                            excel_sup_hist = converter_para_excel(df_hist_sup)
+                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.ms-excel", key=f"dl_sup_{inv_s['id']}")
+                            st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
+                with c_del:
+                    if eh_supervisor:
+                        if st.button("🗑️ Deletar Pasta", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
+                            cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
+                            conn.commit()
+                            st.success("Pasta deletada!")
+                            st.rerun()
 
-    # --- ABA 5: HISTÓRICO GERAL (ARQUIVO GERAL DE MOVIMENTAÇÕES DOS FUNCIONÁRIOS REATIVADO) ---
+    # --- ABA 5: HISTÓRICO GERAL (ARQUIVO OPERACIONAL DOS FUNCIONÁRIOS REATIVADO COM EXCLUSÃO PARA O ADM YAGO) ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
         st.write("Abaixo consta a listagem completa de contagens e lançamentos realizados pelas equipes operacionais em campo:")
@@ -704,10 +734,24 @@ else:
         else:
             for idx, inv in df_inventarios.iterrows():
                 df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv['id'].replace('#',''),))
-                with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data Inicial: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} itens lançados)"):
-                    if not df_hist_inv.empty:
-                        ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
-                        st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
+                
+                c_exp_g, c_del_g = st.columns([8, 2])
+                with c_exp_g:
+                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data Inicial: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} itens lançados)"):
+                        if not df_hist_inv.empty:
+                            excel_geral_hist = converter_para_excel(df_hist_inv)
+                            st.download_button(label="📥 Baixar Lançamentos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.ms-excel", key=f"dl_ger_{inv['id']}")
+                            ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
+                            st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
+                with c_del_g:
+                    if eh_supervisor:
+                        if st.button("🗑️ Deletar Pasta", key=f"del_folder_ger_{inv['id']}", use_container_width=True):
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
+                            cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
+                            conn.commit()
+                            st.success("Pasta operacional excluída!")
+                            st.rerun()
 
     # --- ABA 6: BASE DE ESTOQUE ---
     with aba_base:
