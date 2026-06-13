@@ -211,7 +211,7 @@ def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
 
 # =====================================================================
-# BLOCÃO 1: TRAVA ISOLADA DE LOGIN (SÓ ABRE SE DESLOGADO)
+# ROTA 1: FLUXO DE LOGIN (EXCLUSIVO PARA USUÁRIO NÃO LOGADO)
 # =====================================================================
 if not st.session_state.logged_in:
     conn = conectar_banco()
@@ -309,14 +309,14 @@ if not st.session_state.logged_in:
     conn.close()
 
 # =====================================================================
-# BLOCÃO 2: AMBIENTE LOGADO (A TELA DE LOGIN NÃO CONSEGUE MAIS ENTRAR AQUI)
+# ROTA 2: AMBIENTE LOGADO (A TELA DE LOGIN ESTÁ COMPLETAMENTE RETIRADA DAQUI)
 # =====================================================================
 else:
     conn = conectar_banco()
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
-    eh_supervisor = any(x in st.session_state.operador.lower() for x in ["administrador", "admin", "supervisor"])
-    
-    # 1. SIDEBAR (BARRA LATERAL)
+    eh_supervisor = any(x in st.session_state.operador.lower() for x in ["administrador", "admin", "supervisor", "tel"])
+
+    # BARRA LATERAL (SIDEBAR)
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         if st.button("🚪 Sair da Conta", use_container_width=True):
@@ -327,7 +327,6 @@ else:
             
         st.markdown("---")
         
-        # Interface reativa dinâmica baseada na aba selecionada pelo Supervisor
         if eh_supervisor and st.session_state.aba_atual_ativa == 2:
             st.subheader("⚙️ Painel Supervisor")
             
@@ -352,7 +351,6 @@ else:
                         conn.commit()
                         st.rerun()
         else:
-            # Layout Tradicional para Equipe de Contagem
             st.write("📂 **Carregar Base de Dados (Funcionários)**")
             arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed", key="func_excel_loader")
             if arquivo_excel is not None and st.session_state.base_sistema is None:
@@ -391,7 +389,7 @@ else:
                     conn.commit()
                     st.rerun()
 
-        # --- PROCESSAMENTO AUTOMÁTICO DE PROGRESSO DA BASE ---
+        # --- MAPEAMENTO DE COLUNAS ---
         col_cod, col_desc, col_local, col_unidade, col_qtd, col_ativo_base, col_id_estoque = "", "", "", "", "", "", ""
         if st.session_state.base_sistema is not None:
             colunas_reais = list(st.session_state.base_sistema.columns)
@@ -417,6 +415,7 @@ else:
             if col_ativo_base == "Não Encontrado":
                 col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo'], -1)
 
+        # PROGRESSO LATERAL
         total_itens_base = 0
         total_contados = 0
         total_pendentes = 0
@@ -456,23 +455,15 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    # 2. PAINEL PRINCIPAL (CONTRUTOR DE ABAS COESAS)
-    id_inventario_atual = df_inventarios.iloc[0]['id'] if not df_inventarios.empty else None
-    
+    # PAINEL GERAL DE ABAS
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Auditoria Supervisor", "📁 Histórico", "📄 Base de Estoque", "🏆 Desempenho"]
-    tab_objeto = st.tabs(abas)
     
-    # Gerencia a aba ativa reativamente sem vazar estados
-    for idx_tab, click_tab in enumerate(tab_objeto):
-        with click_tab:
-            if st.session_state.aba_atual_ativa != idx_tab:
-                st.session_state.aba_atual_ativa = idx_tab
-                st.rerun()
+    # ATENÇÃO: Mudança estrutural para evitar loops infinitos de rerun com a barra lateral
+    aba_selecionada_nome = st.radio("Navegação do Painel", abas, index=st.session_state.aba_atual_ativa, horizontal=True, label_visibility="collapsed")
+    st.session_state.aba_atual_ativa = abas.index(aba_selecionada_nome)
 
-    aba_contar, aba_atual, aba_supervisor, aba_historico, aba_base, aba_graficos = tab_objeto
-    
-    # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS) ---
-    with aba_contar:
+    # --- ABA 1: CONTAR ITEM ---
+    if st.session_state.aba_atual_ativa == 0:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
         elif inventario_selecionado_obj['status'] == "Fechado":
@@ -501,8 +492,8 @@ else:
                     id_estoque_val = str(item.iloc[0][col_id_estoque]).strip() if col_id_estoque in item.columns else ""
                     
                     try:
-                        qtd_sis = int(pd.to_numeric(item.iloc[0][col_qtd], errors='coerce'))
-                        if pd.isna(qtd_sis): qtd_sis = 0
+                        st_qtd = int(pd.to_numeric(item.iloc[0][col_qtd], errors='coerce'))
+                        qtd_sis = 0 if pd.isna(st_qtd) else st_qtd
                     except: qtd_sis = 0
                     
                     ativos_da_base_lista = [str(x).upper().strip() for x in item[col_ativo_base].tolist() if col_ativo_base in item.columns]
@@ -537,18 +528,15 @@ else:
                                 lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
                                 
                                 qtd_sistema_calculada = qtd_sis
-                                if ativos_da_base_lista:
-                                    if ativo_l in ativos_da_base_lista:
-                                        linha_especifica = item[item[col_ativo_base].astype(str).str.upper().str.strip() == ativo_l]
-                                        try: qtd_sistema_calculada = int(pd.to_numeric(linha_especifica.iloc[0][col_qtd], errors='coerce'))
-                                        except: qtd_sistema_calculada = 1
-                                    else:
-                                        qtd_sistema_calculada = 0
+                                if ativos_da_base_lista and ativo_l in ativos_da_base_lista:
+                                    linha_especifica = item[item[col_ativo_base].astype(str).str.upper().str.strip() == ativo_l]
+                                    try: qtd_sistema_calculada = int(pd.to_numeric(linha_especifica.iloc[0][col_qtd], errors='coerce'))
+                                    except: qtd_sistema_calculada = 1
                                         
                                 dif_c = qtd_fisica - qtd_sistema_calculada
                                 cursor = conn.cursor()
                                 cursor.execute("""
-                                    INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
+                                    INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, layman_time, data_hora, lote)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """, (id_inventario_atual.replace("#",""), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_val))
                                 conn.commit()
@@ -560,7 +548,7 @@ else:
                     st.error("❌ Código não localizado.")
 
     # --- ABA 2: CONTAGEM ATUAL ---
-    with aba_atual:
+    elif st.session_state.aba_atual_ativa == 1:
         df_contagens_mutaveis = pd.read_sql_query(f"SELECT * FROM contagens WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn) if id_inventario_atual else pd.DataFrame()
         if id_inventario_atual:
             st.subheader(f"Painel Operacional – {id_inventario_atual} ({inventario_selecionado_obj['nome']})")
@@ -591,13 +579,13 @@ else:
                     </div>
                 """, unsafe_allow_html=True)
                 
-                ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
+                ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'layman_time', 'data_hora']
                 st.dataframe(df_contagens_mutaveis[ordem_colunas_print], use_container_width=True, hide_index=True)
         else:
             st.info("Nenhum inventário selecionado.")
 
     # --- ABA 3: AUDITORIA DO SUPERVISOR ---
-    with aba_supervisor:
+    elif st.session_state.aba_atual_ativa == 2:
         st.title("🔬 Controle de Qualidade e Acuracidade Amostral")
         
         if id_inventario_atual is None:
@@ -610,7 +598,6 @@ else:
             res_st = cursor.fetchone()
             status_auditoria_atual = res_st[0] if res_st else "Aberto"
 
-            # [PARTE SUPERIOR] Renderização estruturada em HTML sem quebras ou escapes textuais
             if status_auditoria_atual == "Fechado":
                 st.markdown("### 📋 Relatório Executivo de Controle de Qualidade (Auditoria Amostral Finalizada)")
                 if df_auditorias.empty:
@@ -688,7 +675,6 @@ else:
             else:
                 st.info("💡 Nenhuma amostragem de acuracidade coletada até o momento para este inventário.")
             
-            # [PARTE CENTRAL]: Lançamento de Amostras
             if st.session_state.base_supervisor is None:
                 st.warning("⚠️ Passo pendente: Carregue a sua planilha de amostragem na seção inferior desta tela para habilitar os bipes do ADM.")
             elif status_auditoria_atual == "Fechado":
@@ -758,7 +744,7 @@ else:
                 st.write("### 📝 Histórico de Amostras Coletadas")
                 st.dataframe(df_auditorias, use_container_width=True, hide_index=True)
                 
-            # [PARTE INFERIOR]: Controle de Planilha Amostral
+            # Módulo de Upload do Supervisor
             st.markdown("---")
             st.subheader("O que Eu vou contar: Carregar Upload de Auditoria")
             
@@ -787,13 +773,13 @@ else:
                     st.rerun()
 
     # --- ABA 4: HISTÓRICO DE INVENTÁRIOS ---
-    with aba_historico:
+    elif st.session_state.aba_atual_ativa == 3:
         st.write("### 📁 Histórico de Inventários Arquivados")
         for idx, inv in df_inventarios.iterrows():
             df_hist_inv = pd.read_sql_query(f"SELECT * FROM contagens WHERE inventario_id = '{inv['id'].replace('#','')}' ORDER BY id DESC", conn)
             with st.expander(f"📁 {inv['id']} – {inv['nome']} | {inv['data']} | {len(df_hist_inv)} itens"):
                 if not df_hist_inv.empty:
-                    ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
+                    ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'layman_time', 'data_hora']
                     st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
                     
                     c_dl, c_del = st.columns([4, 2])
@@ -811,14 +797,14 @@ else:
                                 st.rerun()
 
     # --- ABA 5: BASE DE ESTOQUE ---
-    with aba_base:
+    elif st.session_state.aba_atual_ativa == 4:
         if st.session_state.base_sistema is not None:
             st.dataframe(st.session_state.base_sistema, use_container_width=True)
         else:
             st.info("Nenhuma base carregada.")
 
     # --- ABA 6: DESEMPENHO ---
-    with aba_graficos:
+    elif st.session_state.aba_atual_ativa == 5:
         st.write("### 🏆 Ranking de Lançamentos por Operador")
         df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(id) as [Lançamentos Feitos] FROM contagens GROUP BY operador", conn)
         if not df_ops.empty:
