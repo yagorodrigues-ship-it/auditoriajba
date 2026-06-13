@@ -402,10 +402,10 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    # ABAS DO PAINEL PRINCIPAL (Adicionado a nova aba de Upload dedicada)
+    # ABAS DO PAINEL PRINCIPAL
     df_contagens_mutaveis = pd.read_sql_query(f"SELECT * FROM contagens WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn) if id_inventario_atual else pd.DataFrame()
     
-     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Auditoria Supervisor", "📤 Upload Base Supervisor", "📁 Histórico", "📄 Base de Estoque", "🏆 Desempenho"]
+    abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Auditoria Supervisor", "📤 Upload Base Supervisor", "📁 Histórico", "📄 Base de Estoque", "🏆 Desempenho"]
     aba_contar, aba_atual, aba_supervisor, aba_upload_sup, aba_historico, aba_base, aba_graficos = st.tabs(abas)
     
     # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS) ---
@@ -588,7 +588,7 @@ else:
                 st.write("✏️ **Painel de Lançamento (Exclusivo ADM - Cruzando Base Supervisor)**")
                 cs1, cs2 = st.columns([6, 4])
                 with cs1:
-                    bip_supervisor = st.text_input("💻 Bipar item para Amostragem (Supervisor)", value="", placeholder="Bipe o item da sua planilha de amostragem...", key=f"sup_bip_{st.session_state.contador_reset_sup}")
+                    bip_supervisor = st.text_input("💻 Bipar item para Amostragem (Supervisor)", value="", placeholder="Bipe the item of your sampling spreadsheet...", key=f"sup_bip_{st.session_state.contador_reset_sup}")
                 
                 if bip_supervisor:
                     busca_sup = str(bip_supervisor).upper().strip()
@@ -635,7 +635,7 @@ else:
                 st.write("### 📝 Histórico de Amostras Coletadas pelo Supervisor")
                 st.dataframe(df_auditorias, use_container_width=True, hide_index=True)
 
-    # --- ABA 4: UPLOAD EXCLUSIVO DA BASE DO SUPERVISOR (NOVA ABA ISOLADA) ---
+    # --- ABA 4: UPLOAD EXCLUSIVO DA BASE DO SUPERVISOR ---
     with aba_upload_sup:
         st.title("📤 Painel de Upload - Amostragem do Supervisor")
         
@@ -661,7 +661,6 @@ else:
             if st.session_state.base_supervisor is not None:
                 st.info(f"📂 **Base Ativa carregada:** {st.session_state.nome_arquivo_supervisor}")
                 
-                # Exibe um preview da planilha carregada pelo supervisor para checagem simples
                 with st.expander("👀 Visualizar prévia dos dados carregados"):
                     st.dataframe(st.session_state.base_supervisor.head(10), use_container_width=True)
                     
