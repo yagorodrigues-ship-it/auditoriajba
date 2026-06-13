@@ -165,8 +165,12 @@ if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'base_sistema' not in st.session_state:
     st.session_state.base_sistema = None
+if 'base_supervisor' not in st.session_state:
+    st.session_state.base_supervisor = None
 if 'nome_arquivo_excel' not in st.session_state:
     st.session_state.nome_arquivo_excel = ""
+if 'nome_arquivo_supervisor' not in st.session_state:
+    st.session_state.nome_arquivo_supervisor = ""
 if 'pagina_atual' not in st.session_state:
     st.session_state.pagina_atual = 1
 if 'operador' not in st.session_state:
@@ -295,8 +299,8 @@ else:
             st.rerun()
             
         st.markdown("---")
-        st.write("📂 **Carregar Base de Dados (Saldo)**")
-        arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed")
+        st.write("📂 **Carregar Base de Dados (Funcionários)**")
+        arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed", key="func_excel_loader")
         if arquivo_excel is not None and st.session_state.base_sistema is None:
             st.session_state.base_sistema = pd.read_excel(arquivo_excel)
             st.session_state.nome_arquivo_excel = arquivo_excel.name
@@ -333,7 +337,7 @@ else:
                 conn.commit()
                 st.rerun()
 
-        # --- MAPEAMENTO DE COLUNAS ---
+        # --- MAPEAMENTO DE COLUNAS (BASE FUNCIONÁRIOS) ---
         col_cod, col_desc, col_local, col_unidade, col_qtd, col_ativo_base, col_id_estoque = "", "", "", "", "", "", ""
         if st.session_state.base_sistema is not None:
             colunas_reais = list(st.session_state.base_sistema.columns)
@@ -359,7 +363,7 @@ else:
             if col_ativo_base == "Não Encontrado":
                 col_ativo_base = encontrar_coluna(['ativo', 'patrimonio', 'numativo'], -1)
 
-        # --- CÁLCULO DE PROGRESSO DINÂMICO ---
+        # --- PROGRESSO LATERAL ---
         total_itens_base = 0
         total_contados = 0
         total_pendentes = 0
@@ -373,11 +377,10 @@ else:
             for idx, c_row in df_contagens_atuais.iterrows():
                 match_base = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == str(c_row['cod_produto']).upper().strip()]
                 if not match_base.empty:
-                    ativos_validos_da_base = [str(x).upper().strip() for x in match_base[col_ativo_base].tolist() if col_ativo_base in match_base.columns]
-                    ativos_validos_da_base = [x for x in ativos_validos_da_base if x not in ["NAN", "SIM", "", "0", "0.0"]]
-                    
-                    if map_ativos_base_lista := ativos_validos_da_base:
-                        if str(c_row['ativo']).upper().strip() in map_ativos_base_lista:
+                    at_esp = [str(x).upper().strip() for x in match_base[col_ativo_base].tolist() if col_ativo_base in match_base.columns]
+                    at_esp = [x for x in at_esp if x not in ["NAN", "SIM", "", "0", "0.0"]]
+                    if at_esp:
+                        if str(c_row['ativo']).upper().strip() in at_esp:
                             contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
                     else:
                         contados_validos_set.add(str(c_row['cod_produto']).upper().strip())
@@ -493,7 +496,7 @@ else:
                 else:
                     st.error("❌ Código não localizado.")
 
-    # --- ABA 2: CONTAGEM ATUAL (PAINEL GERAL) ---
+    # --- ABA 2: CONTAGEM ATUAL ---
     with aba_atual:
         if id_inventario_atual:
             st.subheader(f"Painel Operacional – {id_inventario_atual} ({inventario_selecionado_obj['nome']})")
@@ -529,17 +532,39 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: AUDITORIA DO SUPERVISOR (MODO RESTRITO ÀS ALTERAÇÕES) ---
+    # --- ABA 3: AUDITORIA DO SUPERVISOR (COM UPLOAD EXCLUSIVO E ISOLADO) ---
     with aba_supervisor:
-        if id_inventario_atual is None or st.session_state.base_sistema is None:
-            st.warning("⚠️ Carregue a base de saldo e selecione o inventário na barra lateral.")
+        st.title("🔬 Controle de Qualidade e Acuracidade Amostral")
+        
+        # VERIFICAÇÃO DE PERFIL PARA EXIBIÇÃO DO PAINEL DE ARQUIVO DO ADM
+        eh_supervisor = st.session_state.operador in ["Administrador Tel", "admin"]
+        
+        # --- NOVO BOX DE UPLOAD INTERNO DA ABA DO SUPERVISOR ---
+        if eh_supervisor:
+            st.markdown("### 📤 Carregar Base de Dados Exclusiva do Supervisor")
+            arquivo_supervisor = st.file_uploader("Suba a planilha Excel para a amostragem do supervisor (.xlsx)", type=["xlsx"], key="sup_excel_loader", label_visibility="collapsed")
+            if arquivo_supervisor is not None and st.session_state.base_supervisor is None:
+                st.session_state.base_supervisor = pd.read_excel(arquivo_supervisor)
+                st.session_state.nome_arquivo_supervisor = arquivo_supervisor.name
+                st.success(f"✅ Base do Supervisor '{arquivo_supervisor.name}' carregada com sucesso!")
+                st.rerun()
+            if st.session_state.base_supervisor is not None:
+                st.caption(f"📁 Arquivo ativo do Supervisor: **{st.session_state.nome_arquivo_supervisor}**")
+                if st.button("🔄 Substituir/Limpar Base do Supervisor"):
+                    st.session_state.base_supervisor = None
+                    st.session_state.nome_arquivo_supervisor = ""
+                    st.rerun()
+            st.markdown("---")
+
+        if id_inventario_atual is None:
+            st.warning("⚠️ Selecione o inventário na barra lateral.")
+        elif st.session_state.base_supervisor is None:
+            st.warning("⚠️ Passo pendente: O Supervisor precisa carregar sua planilha de amostragem exclusiva acima.")
         else:
-            st.title("🔬 Controle de Qualidade e Acuracidade Amostral")
-            
-            # Puxar dados salvos do supervisor
+            # Puxar dados salvos das auditorias amostrais do banco SQLite
             df_auditorias = pd.read_sql_query(f"SELECT * FROM auditorias_supervisor WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn)
             
-            # Renderização de Indicadores de Acuracidade Visível para Todos
+            # Renderização de Indicadores de Acuracidade
             if not df_auditorias.empty:
                 total_sup = len(df_auditorias)
                 certos_qtd = len(df_auditorias[df_auditorias['diferenca'] == 0])
@@ -563,31 +588,44 @@ else:
             else:
                 st.info("💡 Nenhuma amostragem de acuracidade coletada até o momento para este inventário.")
             
-            # TRAVA DE SEGURANÇA E ALTERAÇÃO: Bloqueia a inserção se o usuário logado não for o supervisor/admin
-            eh_supervisor = st.session_state.operador in ["Administrador Tel", "admin"]
-            
+            # MAPEAMENTO AUTOMÁTICO DE COLUNAS DA PLANILHA EXCLUSIVA DO SUPERVISOR
+            colunas_sup = list(st.session_state.base_supervisor.columns)
+            def encontrar_col_sup(opcoes, default_idx):
+                for opcao in opcoes:
+                    for col in colunas_sup:
+                        if opcao.lower().replace(" ", "").replace(".", "") in col.lower().replace(" ", "").replace(".", ""):
+                            return col
+                return colunas_sup[default_idx] if default_idx < len(colunas_sup) else colunas_sup[0]
+
+            col_cod_sup = encontrar_col_sup(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
+            col_desc_sup = encontrar_col_sup(['descproduto', 'descricao', 'desc'], 1)
+            col_local_sup = encontrar_col_sup(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
+            col_qtd_sup = encontrar_col_sup(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
+            col_id_est_sup = encontrar_col_sup(['idestoquefísico', 'idestoque', 'codestoque'], 0)
+
             if not eh_supervisor:
                 st.info("ℹ️ **Modo Leitura:** Você está visualizando o espelho da acuracidade gerado pelo Supervisor. Lançamentos bloqueados.")
             else:
-                st.write("✏️ **Painel de Lançamento (Exclusivo ADM)**")
+                st.write("✏️ **Painel de Lançamento (Exclusivo ADM - Cruzando Base Supervisor)**")
                 cs1, cs2 = st.columns([6, 4])
                 with cs1:
-                    bip_supervisor = st.text_input("💻 Bipar item para Amostragem (Supervisor)", value="", placeholder="Bipe o item escolhido a dedo...", key=f"sup_bip_{st.session_state.contador_reset_sup}")
+                    bip_supervisor = st.text_input("💻 Bipar item para Amostragem (Supervisor)", value="", placeholder="Bipe o item da sua planilha de amostragem...", key=f"sup_bip_{st.session_state.contador_reset_sup}")
                 
                 if bip_supervisor:
                     busca_sup = str(bip_supervisor).upper().strip()
                     cod_sup = busca_sup.split(" - ")[-1].strip() if " - " in busca_sup else busca_sup
                     
-                    item_sup = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == cod_sup]
+                    # CONSULTA EXCLUSIVA NA PLANILHA DO SUPERVISOR
+                    item_sup = st.session_state.base_supervisor[st.session_state.base_supervisor[col_cod_sup].astype(str).str.upper().str.strip() == cod_sup]
                     if not item_sup.empty:
-                        desc_sup = item_sup.iloc[0][col_desc]
-                        local_sup = item_sup.iloc[0][col_local] if col_local in item_sup.columns else "Não Informado"
-                        id_est_sup = str(item_sup.iloc[0][col_id_estoque]).strip() if col_id_estoque in item_sup.columns else ""
+                        desc_sup = item_sup.iloc[0][col_desc_sup]
+                        local_sup = item_sup.iloc[0][col_local_sup] if col_local_sup in item_sup.columns else "Não Informado"
+                        id_est_sup = str(item_sup.iloc[0][col_id_est_sup]).strip() if col_id_est_sup in item_sup.columns else ""
                         
-                        try: qtd_sis_sup = int(pd.to_numeric(item_sup.iloc[0][col_qtd], errors='coerce'))
+                        try: qtd_sis_sup = int(pd.to_numeric(item_sup.iloc[0][col_qtd_sup], errors='coerce'))
                         except: qtd_sis_sup = 0
                         
-                        st.markdown(f"**Item Selecionado:** `{cod_sup}` - {desc_sup} | **Local em Cadastro:** {local_sup}")
+                        st.markdown(f"**Item Selecionado (Base Supervisor):** `{cod_sup}` - {desc_sup} | **Local:** {local_sup}")
                         
                         with st.form("form_auditoria_sup", clear_on_submit=True):
                             col_f1, col_f2, col_f3 = st.columns(3)
@@ -613,9 +651,9 @@ else:
                                 st.session_state.contador_reset_sup += 1
                                 st.rerun()
                     else:
-                        st.error("❌ Produto não localizado na base de estoque.")
+                        st.error(f"❌ Produto '{cod_sup}' não localizado na Base do Supervisor.")
             
-            # Exibe a tabela de amostras de forma pública (Modo Leitura para todos os perfis)
+            # Exibe a tabela de amostras coletadas
             if not df_auditorias.empty:
                 st.write("### 📝 Histórico de Amostras Coletadas pelo Supervisor")
                 st.dataframe(df_auditorias, use_container_width=True, hide_index=True)
