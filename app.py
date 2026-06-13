@@ -128,7 +128,7 @@ if 'pagina_atual' not in st.session_state:
 if 'operador' not in st.session_state:
     st.session_state.operador = ""
 
-# Estado dinâmico que armazena a string de entrada para gerenciar resets forçados
+# Gerenciamento reativo do input de pesquisa para evitar travamento de bipes
 if 'valor_bipado' not in st.session_state:
     st.session_state.valor_bipado = ""
 
@@ -220,7 +220,7 @@ else:
             col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
             
-            # ALTERAÇÃO: Prioridade total na busca exata do nome "Ativo" ignorando outras variações parciais primeiro
+            # Priorização estrita da coluna nominal exata "Ativo"
             col_ativo_base = "Não Encontrado"
             for col in colunas_reais:
                 if col.strip().lower() == "ativo":
@@ -295,7 +295,7 @@ else:
             else:
                 c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
                 with c_busca:
-                    # Input de pesquisa agora utiliza e atualiza estritamente o estado global controlado 'valor_bipado'
+                    # Input amarrado de forma estrita à chave controlada da sessão para o reset pós-confirmação
                     codigo_input = st.text_input(
                         "💻 Código do Produto (etiqueta ou manual)", 
                         value=st.session_state.valor_bipado, 
@@ -346,7 +346,7 @@ else:
                         if map_reais_ativos_lista := ativos_da_base_lista:
                             st.info(f"📋 **Nota de Sistema:** Este item possui ativos mapeados no saldo da coluna '{col_ativo_base}'. Ativos válidos: {', '.join(map_reais_ativos_lista)}")
                         else:
-                            st.caption(f"ℹ️ **Nota:** Nossos sistemas não localizaram registros válidos de ativos para esta linha no campo '{col_ativo_base}' do Excel.")
+                            st.caption(f"ℹ️ **Nota:** Linhas de ativo zeradas ou ausentes para este item no campo '{col_ativo_base}' do Excel (Campo Opcional).")
                         
                         st.markdown(f'<div class="card-sistema"><div class="bloco-titulo">QTD SISTEMA</div><div style="font-size:32px; font-weight:bold; color:#1f2c3f;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                         
@@ -392,7 +392,7 @@ else:
                                     
                                     st.toast(f"Lançamento processado!")
                                     
-                                    # ALTERAÇÃO CRUCIAL: Zera a variável de estado que preenche o input para liberar o próximo bip limpo
+                                    # CORREÇÃO DO FLUXO AUTO-RESET: Zera o estado reativo da string de bipagem
                                     st.session_state.valor_bipado = ""
                                     st.rerun()
                     else:
