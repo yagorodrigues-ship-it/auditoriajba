@@ -347,7 +347,7 @@ else:
                 conn.commit()
                 st.rerun()
 
-        # --- MAPEAMENTO DE COLUNAS (BASE FUNCIONÁRIOS) ---
+        # --- MAPEAMENTO DE COLUNAS (PADRONIZAÇÃO SOLICITADA) ---
         col_cod, col_desc, col_local, col_unidade, col_qtd, col_ativo_base, col_id_estoque = "", "", "", "", "", "", ""
         if st.session_state.base_sistema is not None:
             colunas_reais = list(st.session_state.base_sistema.columns)
@@ -363,7 +363,9 @@ else:
             col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
             col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-            col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoque', 'codestoque'], 0)
+            
+            # Padronização Estrita: Busca estruturada por "id. estoq. físico" primeiro para travar o ID do depósito
+            col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
             
             col_ativo_base = "Não Encontrado"
             for col in colunas_reais:
@@ -402,7 +404,7 @@ else:
 
         st.markdown("---")
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">📋 ITENS NA BASE</div><div class="card-lateral-valor">{total_itens_base}</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">¼ LANÇAMENTOS FEITOS</div><div class="card-lateral-valor">{total_contados}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">✅ LANÇAMENTOS FEITOS</div><div class="card-lateral-valor">{total_contados}</div></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">⏳ PENDENTES REAIS</div><div class="card-lateral-valor">{total_pendentes}</div></div>', unsafe_allow_html=True)
         st.write("**PROGRESSO DA CONTAGEM**")
         st.progress(progresso)
@@ -541,7 +543,7 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: AUDITORIA DO SUPERVISOR (MODIFICADA) ---
+    # --- ABA 3: AUDITORIA DO SUPERVISOR ---
     with aba_supervisor:
         st.title("🔬 Controle de Qualidade e Acuracidade Amostral")
         
@@ -550,7 +552,7 @@ else:
         else:
             df_auditorias = pd.read_sql_query(f"SELECT * FROM auditorias_supervisor WHERE inventario_id = '{id_inventario_atual.replace('#','')}' ORDER BY id DESC", conn)
             
-            # --- [NOVA MODIFICAÇÃO]: PASTA DAS AUDITORIAS QUE VOU ENCERRAR (NO TOPO) ---
+            # --- PASTA DAS AUDITORIAS QUE VOU ENCERRAR (NO TOPO) ---
             st.markdown(f"""
                 <div class="pasta-encerramento">
                     <h4 style="margin: 0; color: #c0392b;">📂 Pasta de Encerramento Automático</h4>
@@ -595,7 +597,7 @@ else:
             if st.session_state.base_supervisor is None:
                 st.warning("⚠️ Passo pendente: Carregue a sua planilha de amostragem na seção inferior desta tela para habilitar os lançamentos.")
             else:
-                # MAPEAMENTO AUTOMÁTICO DE COLUNAS DA BASE SUPERVISOR
+                # --- NOVO MAPEAMENTO DE COLUNAS DA BASE SUPERVISOR (PADRONIZAÇÃO SOLICITADA) ---
                 colunas_sup = list(st.session_state.base_supervisor.columns)
                 def encontrar_col_sup(opcoes, default_idx):
                     for opcao in opcoes:
@@ -608,7 +610,9 @@ else:
                 col_desc_sup = encontrar_col_sup(['descproduto', 'descricao', 'desc'], 1)
                 col_local_sup = encontrar_col_sup(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
                 col_qtd_sup = encontrar_col_sup(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-                col_id_est_sup = encontrar_col_sup(['idestoquefísico', 'idestoque', 'codestoque'], 0)
+                
+                # Padronização Estrita na planilha do supervisor para encontrar o ID do depósito
+                col_id_est_sup = encontrar_col_sup(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
 
                 st.write("✏️ **Painel de Lançamento (Cruzando Base de Auditoria Carregada)**")
                 cs1, cs2 = st.columns([6, 4])
@@ -656,7 +660,7 @@ else:
                     else:
                         st.error(f"❌ Produto '{cod_sup}' não localizado na sua Base de Auditoria.")
             
-            # --- HISTÓRICO DE AMOSTRAS EMBAIXO DA PASTA ---
+            # HISTÓRICO DE AMOSTRAS EMBAIXO DA PASTA
             if not df_auditorias.empty:
                 st.write("### 📝 Histórico de Amostras Coletadas")
                 st.dataframe(df_auditorias, use_container_width=True, hide_index=True)
