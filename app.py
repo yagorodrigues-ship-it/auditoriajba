@@ -128,9 +128,11 @@ if 'pagina_atual' not in st.session_state:
 if 'operador' not in st.session_state:
     st.session_state.operador = ""
 
-# Gerenciamento reativo do input de pesquisa para evitar travamento de bipes
-if 'valor_bipado' not in st.session_state:
-    st.session_state.valor_bipado = ""
+# Contadores de controle para forçar limpeza visual estrita de inputs
+if 'contador_reset' not in st.session_state:
+    st.session_state.contador_reset = 0
+if 'ultimo_item_sucesso' not in st.session_state:
+    st.session_state.ultimo_item_sucesso = ""
 
 # --- TELA DE LOGIN ---
 if not st.session_state.logged_in:
@@ -220,7 +222,7 @@ else:
             col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
             
-            # Priorização estrita da coluna nominal exata "Ativo"
+            # Priorização estrita da coluna exata "Ativo"
             col_ativo_base = "Não Encontrado"
             for col in colunas_reais:
                 if col.strip().lower() == "ativo":
@@ -272,6 +274,11 @@ else:
     st.title("📦 Painel Geral de Auditoria")
     st.caption("Tel Telecomunicações · Painel de Auditoria Ativa")
     
+    # Exibe confirmação visual de sucesso do item anterior se aplicável
+    if st.session_state.ultimo_item_sucesso:
+        st.success(st.session_state.ultimo_item_sucesso)
+        st.session_state.ultimo_item_sucesso = ""
+
     aba_contar, aba_atual, aba_historico, aba_base, aba_graficos = st.tabs([
         "🔍 Contar Item", 
         "📊 Contagem Atual", 
@@ -295,25 +302,24 @@ else:
             else:
                 c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
                 with c_busca:
-                    # Input amarrado de forma estrita à chave controlada da sessão para o reset pós-confirmação
+                    # ALTERAÇÃO: Chave dinâmica baseada no contador_reset força o campo a renascer vazio após cada rerun de sucesso
                     codigo_input = st.text_input(
                         "💻 Código do Produto (etiqueta ou manual)", 
-                        value=st.session_state.valor_bipado, 
+                        value="", 
                         placeholder="Ex: TEAT0139Z — Enter para buscar", 
-                        key="input_bip_chave"
+                        key=f"input_bip_dinamico_{st.session_state.contador_reset}"
                     )
-                    st.session_state.valor_bipado = codigo_input
                 with c_filtro:
-                    st.selectbox("📍 Estoque Físico", ["Todos"], key="sel_est_fisico")
+                    st.selectbox("📍 Estoque Físico", ["Todos"], key=f"sel_est_fisico_{st.session_state.contador_reset}")
                 with c_limpar:
                     st.write("") 
                     if st.button("🗑️ Limpar", use_container_width=True, key="clear_btn"):
-                        st.session_state.valor_bipado = ""
+                        st.session_state.contador_reset += 1
                         st.rerun()
                 
-                if st.session_state.valor_bipado:
+                if codigo_input:
                     serie_codigos = df_exemplo[col_cod].astype(str).str.upper().str.strip()
-                    item = df_exemplo[serie_codigos == str(st.session_state.valor_bipado).upper().strip()]
+                    item = df_exemplo[serie_codigos == str(codigo_input).upper().strip()]
                     
                     if not item.empty:
                         unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
@@ -332,7 +338,7 @@ else:
 
                         b1, b2, b3, b4 = st.columns(4)
                         with b1:
-                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{st.session_state.valor_bipado.upper()}</div></div>', unsafe_allow_html=True)
+                            st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_input.upper()}</div></div>', unsafe_allow_html=True)
                         with b2:
                             st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
                         with b3:
@@ -387,13 +393,12 @@ else:
                                     cursor.execute("""
                                         INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (id_inventario_atual.replace("#",""), 1118, local_val, st.session_state.valor_bipado.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
+                                    """, (id_inventario_atual.replace("#",""), 1118, local_val, codigo_input.upper().strip(), desc_val, unid_val, qtd_sistema_calculada, qtd_fisica, dif_calculada, ativo_digitado_limpo, observacao, st.session_state.operador, agora, lote_val))
                                     conn.commit()
                                     
-                                    st.toast(f"Lançamento processado!")
-                                    
-                                    # CORREÇÃO DO FLUXO AUTO-RESET: Zera o estado reativo da string de bipagem
-                                    st.session_state.valor_bipado = ""
+                                    # GUARDA MENSAGEM E FORÇA RESET ABSOLUTO DA INTERFACE
+                                    st.session_state.ultimo_item_sucesso = f"✅ Sucesso: O item '{codigo_input.upper().strip()}' foi registrado com {qtd_fisica} unidade(s)!"
+                                    st.session_state.contador_reset += 1
                                     st.rerun()
                     else:
                         st.error("Código do produto não localizado na base de dados (Saldo).")
