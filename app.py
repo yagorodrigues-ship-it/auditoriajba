@@ -528,14 +528,12 @@ else:
                         nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                         if st.form_submit_button("Confirmar Criação", type="primary") and nome_sup_inv:
                             cursor = conn.cursor()
-                            
-                            # CORREÇÃO CRUCIAL CONTRA INTEGRITYERROR NO SUPERVISOR:
                             cursor.execute("SELECT id FROM inventarios_supervisor")
                             linhas_sup_ids = cursor.fetchall()
                             maior_id_sup = 0
                             for r_id in linhas_sup_ids:
                                 try:
-                                    val_num = int(r_id[0].replace('SUP-#', ''))
+                                    val_num = int(r_id[0].replace('SUP-##' if 'SUP-##' in r_id[0] else 'SUP-#', ''))
                                     if val_num > maior_id_sup:
                                         maior_id_sup = val_num
                                 except:
