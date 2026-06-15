@@ -310,7 +310,6 @@ else:
     eh_supervisor = any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"])
     
     id_inventario_atual_inicial = df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else ""
-    df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual_inicial,)) if id_inventario_atual_inicial else pd.DataFrame()
     
     # SIDEBAR
     with st.sidebar:
@@ -383,11 +382,17 @@ else:
             col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
             col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
 
-        # --- PROGRESSO LATERAL ---
+        # --- PROGRESSO LATERAL (FILTRADO POR OPERADOR PARA NÃO CONFUNDIR) ---
         total_itens_base, total_contados, total_pendentes, progresso = 0, 0, 0, 0.0
         if st.session_state.base_sistema is not None and id_inventario_atual is not None:
             total_itens_base = len(st.session_state.base_sistema)
-            df_contagens_atuais_side = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
+            
+            # Mudança crucial: a barra lateral do funcionário só conta o progresso DELE
+            if eh_supervisor:
+                df_contagens_atuais_side = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
+            else:
+                df_contagens_atuais_side = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND operador = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.operador))
+                
             contados_validos_set = set(df_contagens_atuais_side['cod_produto'].astype(str).str.upper().str.strip().tolist())
             total_contados = len(df_contagens_atuais_side)
             total_pendentes = max(0, total_itens_base - len(contados_validos_set))
@@ -396,9 +401,9 @@ else:
 
         st.markdown("---")
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">📋 ITENS NA BASE</div><div class="card-lateral-valor">{total_itens_base}</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">✅ LANÇAMENTOS FEITOS</div><div class="card-lateral-valor">{total_contados}</div></div>', unsafe_allow_html=True)
-        st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">⏳ PENDENTES REAIS</div><div class="card-lateral-valor">{total_pendentes}</div></div>', unsafe_allow_html=True)
-        st.write("**PROGRESSO DA CONTAGEM**")
+        st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">✅ SEUS LANÇAMENTOS</div><div class="card-lateral-valor">{total_contados}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">⏳ SUAS PENDÊNCIAS</div><div class="card-lateral-valor">{total_pendentes}</div></div>', unsafe_allow_html=True)
+        st.write("**SEU PROGRESSO**")
         st.progress(progresso)
 
     if st.session_state.ultimo_item_sucesso:
@@ -476,12 +481,24 @@ else:
                 else:
                     st.error("❌ Código não localizado.")
 
-    # --- ABA 2: CONTAGEM ATUAL ---
+    # --- ABA 2: CONTAGEM ATUAL (ISOLADA POR OPERADOR CONCORRENTE) ---
     with aba_atual:
         if id_inventario_atual:
             st.subheader(f"Painel Operacional – {id_inventario_atual} ({inventario_selecionado_obj['nome']})")
+            
+            # BLINDAGEM ANTI-CONCORRÊNCIA: 
+            # Funcionários enxergam estritamente o seu login. O Supervisor pode optar por ver o global.
+            modo_visao = "Apenas Minhas Contagens"
+            if eh_supervisor:
+                modo_visao = st.radio("Filtro de Visualização (Exclusivo Supervisor):", ["Apenas Minhas Contagens", "Ver Tudo (Todos os Operadores Simultâneos)"], horizontal=True)
+
+            if modo_visao == "Apenas Minhas Contagens":
+                df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND operador = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''), st.session_state.operador))
+            else:
+                df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''),))
+
             if df_contagens_mutaveis.empty:
-                st.info("Nenhum item foi auditado neste inventário corrente.")
+                st.info("Nenhum item foi lançado por você neste inventário corrente ainda.")
             else:
                 total_auditado = len(df_contagens_mutaveis)
                 itens_divergentes = len(df_contagens_mutaveis[df_contagens_mutaveis['diferenca'] != 0])
@@ -494,16 +511,16 @@ else:
                 with c1: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">📦 ITENS CONTADOS</div><div class="bloco-valor">{total_auditado}</div></div>', unsafe_allow_html=True)
                 with c2: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">⚠️ COM DIVERGÊNCIA</div><div class="bloco-valor">{itens_divergentes}</div></div>', unsafe_allow_html=True)
                 with c3: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">🔢 QTD TOTAL CONTADA</div><div class="bloco-valor">{soma_contada}</div></div>', unsafe_allow_html=True)
-                with c4: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">🗄️ QTD TOTAL SISTEMA</div><div class="bloco-valor">{soma_sistema} <span style="font-size:14px; color:#e74c3c;">(↓ {abs(diferenca_acumulada)})</span></div></div>', unsafe_allow_html=True)
+                with c4: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">🗄️ QTD TOTAL SISTEMA</div><div class="bloco-valor">{soma_sistema} <span style="font-size:14px; color:#e74c3c;">(Dif: {diferenca_acumulada})</span></div></div>', unsafe_allow_html=True)
                 
                 st.markdown(f"""
                     <div class="alerta-divergencia">
-                        <strong>⚠️ {itens_divergentes} item(ns) apresentando divergência ou inconformidade ({porcentagem_divergencia:.0f}%)</strong>
+                        <strong>⚠️ {itens_divergentes} item(ns) apresentando divergência nesta visão ({porcentagem_divergencia:.0f}%)</strong>
                     </div>
                 """, unsafe_allow_html=True)
                 
                 excel_atual = converter_para_excel(df_contagens_mutaveis)
-                st.download_button(label="📥 Exportar Lançamentos Atuais para Excel", data=excel_atual, file_name=f"contagem_{id_inventario_atual}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                st.download_button(label="📥 Exportar Lançamentos Filtrados para Excel", data=excel_atual, file_name=f"contagem_{id_inventario_atual}_{st.session_state.operador}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 st.write("")
 
                 ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
@@ -679,7 +696,7 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in group.columns else ""
+                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
