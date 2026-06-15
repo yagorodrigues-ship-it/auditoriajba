@@ -92,6 +92,19 @@ def inicializar_banco():
 
 inicializar_banco()
 
+# --- CARREGAMENTO SEGURO DOS INVENTÁRIOS (PREVINE NAMEERROR) ---
+conn_init = conectar_banco()
+try:
+    df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn_init)
+except:
+    df_inventarios = pd.DataFrame(columns=['id', 'nome', 'data', 'status'])
+
+try:
+    df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor ORDER BY data DESC, id DESC", conn_init)
+except:
+    df_inventarios_sup = pd.DataFrame(columns=['id', 'nome', 'data', 'status'])
+conn_init.close()
+
 # --- FUNÇÃO AUXILIAR PARA EXPORTAR EXCEL ---
 def converter_para_excel(df):
     output = io.BytesIO()
@@ -288,6 +301,8 @@ if not st.session_state.logged_in:
 # --- TELA LOGADA DO SISTEMA ---
 else:
     conn = conectar_banco()
+    
+    # Atualiza os dataframes em tempo real após o login
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor ORDER BY data DESC, id DESC", conn)
     
@@ -330,7 +345,6 @@ else:
             with st.form("form_novo", clear_on_submit=True):
                 novo_nome = st.text_input("Nome do Inventário")
                 if st.form_submit_button("Criar", type="primary") and novo_nome:
-                    # CORREÇÃO COMPLETA: Busca e conversão limpa em Pandas nativo (Evita o bug do catch:)
                     if not df_inventarios.empty:
                         df_limpo_calc = df_inventarios['id'].str.replace('#', '', regex=False).astype(int)
                         maior_id = df_limpo_calc.max()
@@ -523,7 +537,6 @@ else:
                     with st.form("form_novo_sup_interno", clear_on_submit=True):
                         nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                         if st.form_submit_button("Confirmar Criação", type="primary") and nome_sup_inv:
-                            # CORREÇÃO COMPLETA CONTRA O BUG DO CATCH (LINHA 544):
                             if not df_inventarios_sup.empty:
                                 df_limpo_sup_calc = df_inventarios_sup['id'].str.replace('SUP-#', '', regex=False).astype(int)
                                 maior_id_sup = df_limpo_sup_calc.max()
@@ -666,7 +679,7 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
+                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in group.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
