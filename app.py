@@ -5,7 +5,7 @@ import sqlite3
 import io
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
-st.set_page_config(page_title="Contagem de Estoque Físico", layout="wide")
+st.set_page_config(page_title="Contagem de Estoque Físico - JBA", layout="wide")
 
 # --- BANCO DE DADOS PERMANENTE (SQLITE) ---
 def conectar_banco():
@@ -92,10 +92,9 @@ def inicializar_banco():
 
 inicializar_banco()
 
-# --- FUNÇÃO AUXILIAR PARA EXPORTAR EXCEL (CORRIGIDA COM OPENPYXL) ---
+# --- FUNÇÃO AUXILIAR PARA EXPORTAR EXCEL ---
 def converter_para_excel(df):
     output = io.BytesIO()
-    # Mudança de engine para openpyxl para eliminar o erro de falta de biblioteca
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Relatorio')
     return output.getvalue()
@@ -207,7 +206,7 @@ def limpar_documento(doc):
 if not st.session_state.logged_in:
     conn = conectar_banco()
     if st.session_state.tela_acesso == "login":
-        st.title("🔒 Acesso ao Sistema de Estoque")
+        st.title("🔒 Acesso ao Sistema de Estoque JBA")
         with st.form("login_form"):
             identificador = st.text_input("CPF (somente números) ou E-mail")
             senha = st.text_input("Senha", type="password")
@@ -292,7 +291,6 @@ else:
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor ORDER BY data DESC, id DESC", conn)
     
-    # VALIDAÇÃO DO MEU PERFIL ADMIN (YAGO RODRIGUES)
     nome_usuario_logado_limpo = st.session_state.operador.lower()
     eh_supervisor = any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"])
     
@@ -333,10 +331,23 @@ else:
                 novo_nome = st.text_input("Nome do Inventário")
                 if st.form_submit_button("Criar", type="primary") and novo_nome:
                     cursor = conn.cursor()
-                    cursor.execute("SELECT COUNT(*) FROM inventarios")
-                    novo_id = f"#{cursor.fetchone()[0] + 39}"
+                    
+                    # CORREÇÃO CRUCIAL CONTRA INTEGRITYERROR: 
+                    # Em vez de contar linhas, busca o maior ID numérico atual para somar +1
+                    cursor.execute("SELECT id FROM inventarios")
+                    linhas_ids = cursor.fetchall()
+                    maior_id = 38
+                    for r_id in linhas_ids:
+                        try:
+                            val_num = int(r_id[0].replace('#', ''))
+                            if val_num > maior_id:
+                                maior_id = val_num
+                        except:
+                            pass
+                    
+                    novo_id = f"#{maior_id + 1}"
                     hoje = datetime.date.today().strftime("%Y-%m-%d")
-                    cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, ?)", (novo_id, novo_nome, hoje, "Aberto"))
+                    cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, hoje))
                     conn.commit()
                     st.rerun()
 
@@ -382,6 +393,10 @@ else:
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">⏳ PENDENTES REAIS</div><div class="card-lateral-valor">{total_pendentes}</div></div>', unsafe_allow_html=True)
         st.write("**PROGRESSO DA CONTAGEM**")
         st.progress(progresso)
+
+    if st.session_state.ultimo_item_sucesso:
+        st.success(st.session_state.ultimo_item_sucesso)
+        st.session_state.ultimo_item_sucesso = ""
 
     # ABAS DO PAINEL PRINCIPAL
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho"]
@@ -480,7 +495,6 @@ else:
                     </div>
                 """, unsafe_allow_html=True)
                 
-                # EXPORTAÇÃO EXCEL CORRIGIDA PARA TODOS UTILIZANDO O MOTOR OPENPYXL
                 excel_atual = converter_para_excel(df_contagens_mutaveis)
                 st.download_button(label="📥 Exportar Lançamentos Atuais para Excel", data=excel_atual, file_name=f"contagem_{id_inventario_atual}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 st.write("")
@@ -517,8 +531,20 @@ else:
                         nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                         if st.form_submit_button("Confirmar Criação", type="primary") and nome_sup_inv:
                             cursor = conn.cursor()
-                            cursor.execute("SELECT COUNT(*) FROM inventarios_supervisor")
-                            novo_id_sup = f"SUP-#{cursor.fetchone()[0] + 1}"
+                            
+                            # CORREÇÃO CRUCIAL CONTRA INTEGRITYERROR NO SUPERVISOR TAMBÉM:
+                            cursor.execute("SELECT id FROM inventarios_supervisor")
+                            linhas_sup_ids = cursor.fetchall()
+                            maior_id_sup = 0
+                            for r_id in linhas_sup_ids:
+                                try:
+                                    val_num = int(r_id[0].replace('SUP-#', ''))
+                                    if val_num > maior_id_sup:
+                                        maior_id_sup = val_num
+                                catch:
+                                    pass
+                            
+                            novo_id_sup = f"SUP-#{maior_id_sup + 1}"
                             hoje_sup = datetime.date.today().strftime("%Y-%m-%d")
                             cursor.execute("INSERT INTO inventarios_supervisor (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id_sup, nome_sup_inv, hoje_sup))
                             conn.commit()
@@ -676,7 +702,6 @@ else:
             df_planilha_final = pd.DataFrame(linhas_planilha_acuracidade)
             st.dataframe(df_planilha_final, use_container_width=True, hide_index=True)
             
-            # FILTRO EXCLUSIVO DO ADMIN PARA EXPURGAR REGISTROS ESPECÍFICOS DE MPLICAS
             if eh_supervisor:
                 with st.expander("⚙️ Painel do Administrador - Deletar Métricas por Código de Estoque"):
                     lista_estoques_audita = list(df_planilha_final["CÓDIGO ESTOQUE AUDITADO"].unique())
@@ -693,7 +718,6 @@ else:
             st.download_button(label="📥 Exportar Planilha de Acuracidade para Excel", data=excel_acuracidade, file_name="acuracidade_depositos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         st.markdown("---")
-        # APENAS O HISTÓRICO DAS AUDITORIAS DO SUPERVISOR CONFORME SOLICITADO
         st.write("### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
         if df_inventarios_sup.empty:
             st.info("Nenhum histórico amostral arquivado.")
@@ -718,7 +742,7 @@ else:
                             st.success("Pasta deletada!")
                             st.rerun()
 
-    # --- ABA 5: HISTÓRICO GERAL (ISOLADA CONFORME ERAS ANTERIORES) ---
+    # --- ABA 5: HISTÓRICO GERAL ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
         st.write("Abaixo consta a listagem completa de contagens e lançamentos realizados pelas equipes operacionais em campo:")
