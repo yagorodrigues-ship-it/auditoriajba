@@ -331,9 +331,6 @@ else:
                 novo_nome = st.text_input("Nome do Inventário")
                 if st.form_submit_button("Criar", type="primary") and novo_nome:
                     cursor = conn.cursor()
-                    
-                    # CORREÇÃO CRUCIAL CONTRA INTEGRITYERROR: 
-                    # Em vez de contar linhas, busca o maior ID numérico atual para somar +1
                     cursor.execute("SELECT id FROM inventarios")
                     linhas_ids = cursor.fetchall()
                     maior_id = 38
@@ -532,7 +529,7 @@ else:
                         if st.form_submit_button("Confirmar Criação", type="primary") and nome_sup_inv:
                             cursor = conn.cursor()
                             
-                            # CORREÇÃO CRUCIAL CONTRA INTEGRITYERROR NO SUPERVISOR TAMBÉM:
+                            # CORREÇÃO CRUCIAL CONTRA INTEGRITYERROR NO SUPERVISOR:
                             cursor.execute("SELECT id FROM inventarios_supervisor")
                             linhas_sup_ids = cursor.fetchall()
                             maior_id_sup = 0
@@ -541,7 +538,7 @@ else:
                                     val_num = int(r_id[0].replace('SUP-#', ''))
                                     if val_num > maior_id_sup:
                                         maior_id_sup = val_num
-                                catch:
+                                except:
                                     pass
                             
                             novo_id_sup = f"SUP-#{maior_id_sup + 1}"
