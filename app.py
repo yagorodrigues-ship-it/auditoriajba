@@ -330,20 +330,16 @@ else:
             with st.form("form_novo", clear_on_submit=True):
                 novo_nome = st.text_input("Nome do Inventário")
                 if st.form_submit_button("Criar", type="primary") and novo_nome:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT id FROM inventarios")
-                    linhas_ids = cursor.fetchall()
-                    maior_id = 38
-                    for r_id in linhas_ids:
-                        try:
-                            val_num = int(r_id[0].replace('#', ''))
-                            if val_num > maior_id:
-                                maior_id = val_num
-                        except:
-                            pass
-                    
+                    # CORREÇÃO COMPLETA: Busca e conversão limpa em Pandas nativo (Evita o bug do catch:)
+                    if not df_inventarios.empty:
+                        df_limpo_calc = df_inventarios['id'].str.replace('#', '', regex=False).astype(int)
+                        maior_id = df_limpo_calc.max()
+                    else:
+                        maior_id = 38
+                        
                     novo_id = f"#{maior_id + 1}"
                     hoje = datetime.date.today().strftime("%Y-%m-%d")
+                    cursor = conn.cursor()
                     cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, hoje))
                     conn.commit()
                     st.rerun()
@@ -527,20 +523,16 @@ else:
                     with st.form("form_novo_sup_interno", clear_on_submit=True):
                         nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                         if st.form_submit_button("Confirmar Criação", type="primary") and nome_sup_inv:
-                            cursor = conn.cursor()
-                            cursor.execute("SELECT id FROM inventarios_supervisor")
-                            linhas_sup_ids = cursor.fetchall()
-                            maior_id_sup = 0
-                            for r_id in linhas_sup_ids:
-                                try:
-                                    val_num = int(r_id[0].replace('SUP-##' if 'SUP-##' in r_id[0] else 'SUP-#', ''))
-                                    if val_num > maior_id_sup:
-                                        maior_id_sup = val_num
-                                except:
-                                    pass
+                            # CORREÇÃO COMPLETA CONTRA O BUG DO CATCH (LINHA 544):
+                            if not df_inventarios_sup.empty:
+                                df_limpo_sup_calc = df_inventarios_sup['id'].str.replace('SUP-#', '', regex=False).astype(int)
+                                maior_id_sup = df_limpo_sup_calc.max()
+                            else:
+                                maior_id_sup = 0
                             
                             novo_id_sup = f"SUP-#{maior_id_sup + 1}"
                             hoje_sup = datetime.date.today().strftime("%Y-%m-%d")
+                            cursor = conn.cursor()
                             cursor.execute("INSERT INTO inventarios_supervisor (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id_sup, nome_sup_inv, hoje_sup))
                             conn.commit()
                             st.rerun()
