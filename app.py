@@ -324,8 +324,6 @@ if not st.session_state.logged_in:
         if st.button("◀ Voltar"):
             st.session_state.tela_acesso = "login"
             st.rerun()
-            
-    # --- CORREÇÃO DO NAMEERROR E ADIÇÃO DO LINK DE RECUPERAÇÃO DINÂMICO ---
     elif st.session_state.tela_acesso == "recuperar":
         st.title("🔑 Solicitação de Link de Redefinição")
         with st.form("rec_form"):
@@ -339,7 +337,6 @@ if not st.session_state.logged_in:
                 row = cursor.fetchone()
                 
                 if row:
-                    # Gera um token em Base64 baseado no e-mail para injetar na URL de forma limpa e segura
                     token_cripto = base64.b64encode(row[1].encode('utf-8')).decode('utf-8')
                     link_final = f"https://inventariojba.streamlit.app/?recuperar=true&token={token_cripto}"
                     
@@ -671,7 +668,7 @@ else:
                         m3.metric("📍 LOCALIZAÇÃO OK", f"{(certos_local / total_sup)*100:.1f}%")
                         m4.metric("📋 AMOSTRAS BIPIADAS", f"{total_sup} itens")
 
-                    # --- AUDITORIA DE 3ª CONTAGEM ---
+                    # --- CORREÇÃO DA VARIÁVEL DA 3ª CONTAGEM ---
                     st.write("### 🔄 Auditoria de Divergências (Módulo ADM de 3ª Contagem)")
                     df_geral_funcionarios_analise = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
                     
@@ -907,7 +904,7 @@ else:
                             st.success("Pasta operacional excluída!")
                             st.rerun()
 
-    # --- ABA 6: BASE DE ESTOQUE ---
+    # --- ABA 6: BASE DE ESTOQUE (CORREÇÃO DA EXPRESSÃO EM PANDAS DA LINHA 927) ---
     with aba_base:
         if st.session_state.base_sistema is not None:
             st.subheader("📄 Espelho Base de Saldo do Upload")
@@ -924,7 +921,8 @@ else:
             df_base_visual = st.session_state.base_sistema.copy()
             df_base_visual["Status de Contagem"] = df_base_visual[col_cod].apply(calcular_status_linha)
             
-            colunas_ordenadas = ["Status de Contagem"] + [c for col in df_base_visual.columns if col != "Status de Contagem"]
+            # CORREÇÃO CIRÚRGICA DO NAMEERROR DA IMAGEM: c foi substituído pelo col correspondente ao laço
+            colunas_ordenadas = ["Status de Contagem"] + [col for col in df_base_visual.columns if col != "Status de Contagem"]
             st.dataframe(df_base_visual[colunas_ordenadas], use_container_width=True, hide_index=True)
         else:
             st.info("Nenhuma base carregada na barra lateral.")
