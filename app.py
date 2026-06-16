@@ -3,6 +3,7 @@ import pandas as pd
 import datetime
 import sqlite3
 import io
+import base64
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Contagem de Estoque Físico - JBA", layout="wide")
@@ -88,6 +89,14 @@ def inicializar_banco():
         )
     """)
     
+    # Criar administrador padrão se a tabela estiver vazia
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    if cursor.fetchone()[0] == 0:
+        cursor.execute("""
+            INSERT INTO usuarios (nome, cpf, email, senha) 
+            VALUES (?, ?, ?, ?)
+        """, ("Administrador Tel", "00000000000", "admin@tel.com.br", "123"))
+        
     conn.commit()
     conn.close()
 
@@ -134,6 +143,15 @@ st.markdown("""
         border: 1px solid #d4e6f1;
         text-align: left;
         margin-bottom: 10px;
+    }
+    .bloco-info-link {
+        background-color: #fef9e7;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #f9e79f;
+        text-align: center;
+        margin-top: 15px;
+        margin-bottom: 15px;
     }
     .bloco-titulo {
         color: #7f8c8d;
@@ -216,6 +234,38 @@ if 'ultimo_item_sucesso' not in st.session_state:
 def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
 
+# --- CAPTURA DE PARÂMETROS DE URL (ABRIR NOVA JANELA VIA LINK) ---
+query_params = st.query_params
+
+if "recuperar" in query_params and "token" in query_params:
+    st.title("🔑 Redefinição de Senha Seguro JBA")
+    try:
+        email_token = base64.b64decode(query_params["token"]).decode('utf-8')
+    except:
+        email_token = ""
+
+    if not email_token:
+        st.error("❌ Link inválido ou corrompido.")
+    else:
+        st.info(f"Alterando a senha da conta vinculada ao e-mail: **{email_token}**")
+        with st.form("form_nova_senha_janela"):
+            nova_senha_f = st.text_input("Digite a Nova Senha", type="password")
+            confirma_senha_f = st.text_input("Confirme a Nova Senha", type="password")
+            
+            if st.form_submit_button("Confirmar e Atualizar Senha", type="primary", use_container_width=True):
+                if not nova_senha_f:
+                    st.error("⚠️ Digite uma senha válida.")
+                elif nova_senha_f != confirma_senha_f:
+                    st.error("❌ As senhas digitadas não conferem.")
+                else:
+                    conn = conectar_banco()
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
+                    conn.commit()
+                    conn.close()
+                    st.success("🎉 Senha atualizada com sucesso! Você já pode fechar esta aba e fazer o login na tela principal.")
+    st.stop()
+
 # --- TELA DE ACESSO ---
 if not st.session_state.logged_in:
     conn = conectar_banco()
@@ -274,22 +324,40 @@ if not st.session_state.logged_in:
         if st.button("◀ Voltar"):
             st.session_state.tela_acesso = "login"
             st.rerun()
+            
+    # --- CORREÇÃO DO NAMEERROR E ADIÇÃO DO LINK DE RECUPERAÇÃO DINÂMICO ---
     elif st.session_state.tela_acesso == "recuperar":
-        st.title("🔑 Redefinição de Senha")
+        st.title("🔑 Solicitação de Link de Redefinição")
         with st.form("rec_form"):
-            validador = st.text_input("Informe seu E-mail ou CPF cadastrado")
-            nova_senha_rec = st.text_input("Nova Senha", type="password")
-            btn_rec = st.form_submit_button("Alterar Senha", type="primary", use_container_width=True)
+            validador = st.text_input("Informe o seu E-mail cadastrado")
+            btn_rec = st.form_submit_button("Gerar Link de Alteração de Senha", type="primary", use_container_width=True)
+            
             if btn_rec:
                 v_limpo = validador.strip()
-                v_doc = limpar_documento(v_limpo)
                 cursor = conn.cursor()
-                cursor.execute("UPDATE usuarios SET senha = ? WHERE id = ?", (nova_senha_rec, row[0]))
-                conn.commit()
-                st.success("✅ Senha alterada!")
-                st.session_state.tela_acesso = "login"
-                st.rerun()
-        if st.button("◀ Voltar"):
+                cursor.execute("SELECT id, email FROM usuarios WHERE email = ?", (v_limpo,))
+                row = cursor.fetchone()
+                
+                if row:
+                    # Gera um token em Base64 baseado no e-mail para injetar na URL de forma limpa e segura
+                    token_cripto = base64.b64encode(row[1].encode('utf-8')).decode('utf-8')
+                    link_final = f"https://inventariojba.streamlit.app/?recuperar=true&token={token_cripto}"
+                    
+                    st.markdown(f"""
+                        <div class="bloco-info-link">
+                            <p style="margin:0; color:#b7950b; font-weight:bold; font-size:15px;">📧 Link de Segurança Gerado com Sucesso!</p>
+                            <p style="margin:5px 0 15px 0; color:#7d6608; font-size:13px;">Como o sistema roda em nuvem isolada, clique no botão vermelho abaixo para abrir a nova janela de redefinição de senha automática no seu navegador.</p>
+                            <a href="{link_final}" target="_blank" style="text-decoration:none;">
+                                <button style="background-color:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">
+                                    🔗 Abrir Janela de Nova Senha
+                                </button>
+                            </a>
+                        </div>
+                    """, unsafe_allow_html=True)
+                else:
+                    st.error("❌ E-mail não localizado no banco de dados do sistema.")
+                    
+        if st.button("◀ Voltar para Tela de Login"):
             st.session_state.tela_acesso = "login"
             st.rerun()
     conn.close()
@@ -318,12 +386,12 @@ else:
                         return col
             return colunas_reais[default_idx] if default_idx < len(colunas_reais) else colunas_reais[0]
 
-            col_cod = encontrar_coluna(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
-            col_desc = encontrar_coluna(['descproduto', 'descricao', 'desc'], 1)
-            col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
-            col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
-            col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-            col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
+        col_cod = encontrar_coluna(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
+        col_desc = encontrar_coluna(['descproduto', 'descricao', 'desc'], 1)
+        col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
+        col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
+        col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
+        col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
 
     # SIDEBAR
     with st.sidebar:
@@ -533,16 +601,15 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: PAINEL SUPERVISOR (CORREÇÃO DE RESET DO FORMULÁRIO INTERNO) ---
+    # --- ABA 3: PAINEL SUPERVISOR ---
     with aba_supervisor:
         st.title("🔬 Controle de Qualidade Amostral do Supervisor")
         
         if not eh_supervisor:
-            st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor.")
+            st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor (Acesso Liberado para Yago Rodrigues).")
         else:
             st.subheader("📁 Controle de Inventários do Supervisor")
             
-            # --- [NOVA CORREÇÃO DE FORMULÁRIO]: Seleção baseada em Chave Dinâmica Única ---
             if df_inventarios_sup.empty:
                 st.info("Nenhum inventário de amostragem aberto. Crie um ao lado.")
                 id_inv_sup_atual = None
@@ -550,8 +617,6 @@ else:
                 index_default_combo = 0
             else:
                 lista_inv_sup = [f"{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios_sup.iterrows()]
-                
-                # Procura se existe algum inventário aberto para focar por padrão na montagem da tela
                 index_default_combo = 0
                 for idx_c, txt_c in enumerate(lista_inv_sup):
                     if "(Aberto)" in txt_c:
@@ -562,7 +627,6 @@ else:
                 id_inv_sup_atual = inv_sup_selected.split(" – ")[0]
                 inv_sup_selecionado_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
             
-            # Botão de Criação posicionado ao lado do Seletor
             col_vazio, col_btn_pop = st.columns([7, 3])
             with col_btn_pop:
                 with st.popover("➕ Novo Inventário Supervisor", use_container_width=True):
