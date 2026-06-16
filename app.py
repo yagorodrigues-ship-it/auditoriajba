@@ -284,16 +284,11 @@ if not st.session_state.logged_in:
                 v_limpo = validador.strip()
                 v_doc = limpar_documento(v_limpo)
                 cursor = conn.cursor()
-                cursor.execute("SELECT id FROM usuarios WHERE email = ? OR cpf = ?", (v_limpo, v_doc))
-                row = cursor.fetchone()
-                if row and nova_senha_rec:
-                    cursor.execute("UPDATE usuarios SET senha = ? WHERE id = ?", (nova_senha_rec, row[0]))
-                    conn.commit()
-                    st.success("✅ Senha alterada!")
-                    st.session_state.tela_acesso = "login"
-                    st.rerun()
-                else:
-                    st.error("❌ Identificador inválido.")
+                cursor.execute("UPDATE usuarios SET senha = ? WHERE id = ?", (nova_senha_rec, row[0]))
+                conn.commit()
+                st.success("✅ Senha alterada!")
+                st.session_state.tela_acesso = "login"
+                st.rerun()
         if st.button("◀ Voltar"):
             st.session_state.tela_acesso = "login"
             st.rerun()
@@ -323,12 +318,12 @@ else:
                         return col
             return colunas_reais[default_idx] if default_idx < len(colunas_reais) else colunas_reais[0]
 
-        col_cod = encontrar_coluna(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
-        col_desc = encontrar_coluna(['descproduto', 'descricao', 'desc'], 1)
-        col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
-        col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
-        col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-        col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
+            col_cod = encontrar_coluna(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
+            col_desc = encontrar_coluna(['descproduto', 'descricao', 'desc'], 1)
+            col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
+            col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
+            col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
+            col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
 
     # SIDEBAR
     with st.sidebar:
@@ -375,7 +370,7 @@ else:
                     conn.commit()
                     st.rerun()
 
-        # --- [PROMPT ATUAL]: TRAVA COMPLETA DE FECHAMENTO 100% ---
+        # --- TRAVA COMPLETA DE FECHAMENTO 100% ---
         if inventario_selecionado_obj is not None and inventario_selecionado_obj['status'] == "Aberto":
             itens_esquecidos_lista = []
             if st.session_state.base_sistema is not None:
@@ -397,7 +392,7 @@ else:
                 st.error(f"❌ Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
                 if eh_supervisor:
                     st.warning("👤 Yago Rodrigues detectado. Deseja forçar o encerramento?")
-                    if st.button("⚠️ Forçar Fechamento Incomplete (ADMIN)", use_container_width=True, type="primary"):
+                    if st.button("⚠️ Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
                         cursor = conn.cursor()
                         cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (id_inventario_atual,))
                         conn.commit()
@@ -538,7 +533,7 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: PAINEL SUPERVISOR (COM SISTEMA DE 3ª CONTAGEM PARA DIVERGÊNCIAS) ---
+    # --- ABA 3: PAINEL SUPERVISOR (CORREÇÃO DE RESET DO FORMULÁRIO INTERNO) ---
     with aba_supervisor:
         st.title("🔬 Controle de Qualidade Amostral do Supervisor")
         
@@ -546,22 +541,32 @@ else:
             st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor.")
         else:
             st.subheader("📁 Controle de Inventários do Supervisor")
-            col_sel, col_btn = st.columns([7, 3])
             
-            with col_sel:
-                if df_inventarios_sup.empty:
-                    st.info("Nenhum inventário de amostragem aberto. Crie um ao lado.")
-                    id_inv_sup_atual = None
-                    inv_sup_selecionado_obj = None
-                else:
-                    lista_inv_sup = [f"{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios_sup.iterrows()]
-                    inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup, key="sel_box_sup_local")
-                    id_inv_sup_atual = inv_sup_selected.split(" – ")[0]
-                    inv_sup_selecionado_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
+            # --- [NOVA CORREÇÃO DE FORMULÁRIO]: Seleção baseada em Chave Dinâmica Única ---
+            if df_inventarios_sup.empty:
+                st.info("Nenhum inventário de amostragem aberto. Crie um ao lado.")
+                id_inv_sup_atual = None
+                inv_sup_selecionado_obj = None
+                index_default_combo = 0
+            else:
+                lista_inv_sup = [f"{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios_sup.iterrows()]
+                
+                # Procura se existe algum inventário aberto para focar por padrão na montagem da tela
+                index_default_combo = 0
+                for idx_c, txt_c in enumerate(lista_inv_sup):
+                    if "(Aberto)" in txt_c:
+                        index_default_combo = idx_c
+                        break
+                        
+                inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup, index=index_default_combo, key="sel_box_sup_local_v2")
+                id_inv_sup_atual = inv_sup_selected.split(" – ")[0]
+                inv_sup_selecionado_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
             
-            with col_btn:
+            # Botão de Criação posicionado ao lado do Seletor
+            col_vazio, col_btn_pop = st.columns([7, 3])
+            with col_btn_pop:
                 with st.popover("➕ Novo Inventário Supervisor", use_container_width=True):
-                    with st.form("form_novo_sup_interno", clear_on_submit=True):
+                    with st.form("form_novo_sup_interno_v2", clear_on_submit=True):
                         nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                         if st.form_submit_button("Confirmar Criação", type="primary") and nome_sup_inv:
                             if not df_inventarios_sup.empty:
@@ -577,12 +582,12 @@ else:
                             conn.commit()
                             st.rerun()
                             
-                if inv_sup_selecionado_obj is not None and inv_sup_selecionado_obj['status'] == "Aberto":
-                    if st.button("🔒 Fechar Inventário Supervisor", use_container_width=True, type="primary", key="btn_close_sup_interno"):
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE inventarios_supervisor SET status = 'Fechado' WHERE id = ?", (id_inv_sup_atual,))
-                        conn.commit()
-                        st.rerun()
+            if inv_sup_selecionado_obj is not None and inv_sup_selecionado_obj['status'] == "Aberto":
+                if st.button("🔒 Fechar Inventário Supervisor", use_container_width=True, type="primary", key="btn_close_sup_interno"):
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE inventarios_supervisor SET status = 'Fechado' WHERE id = ?", (id_inv_sup_atual,))
+                    conn.commit()
+                    st.rerun()
 
             st.markdown("---")
 
@@ -602,7 +607,7 @@ else:
                         m3.metric("📍 LOCALIZAÇÃO OK", f"{(certos_local / total_sup)*100:.1f}%")
                         m4.metric("📋 AMOSTRAS BIPIADAS", f"{total_sup} itens")
 
-                    # --- [NOVA SOLICITAÇÃO]: ABERTURA DE 3ª CONTAGEM PARA DIVERGÊNCIAS ---
+                    # --- AUDITORIA DE 3ª CONTAGEM ---
                     st.write("### 🔄 Auditoria de Divergências (Módulo ADM de 3ª Contagem)")
                     df_geral_funcionarios_analise = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
                     
@@ -618,7 +623,6 @@ else:
                                 local_3 = st.selectbox("Localização Correta?", ["Sim", "Não"], key="local3")
                                 
                                 if st.form_submit_button("🔄 Gravar 3ª Contagem Definitiva", type="primary"):
-                                    # Puxar dados da base para salvar o espelho
                                     match_linha = df_itens_com_erro[df_itens_com_erro['cod_produto'] == material_recontar].iloc[0]
                                     dif_3 = q_real_3 - int(match_linha['qtd_sistema'])
                                     
@@ -626,12 +630,12 @@ else:
                                     cursor.execute("""
                                         INSERT INTO auditorias_supervisor (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, qtd_sistema, qtd_auditada, diferenca, etiqueta_correta, localizacao_correta, supervisor, data_hora, recontagem_3)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sim')
-                                    """, (id_inv_sup_atual, match_line['id_estoque'] if 'id_estoque' in match_linha else "N/I", match_linha['desc_estoque'], material_recontar, match_linha['desc_produto'], int(match_linha['qtd_sistema']), q_real_3, dif_3, etiq_3, local_status, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                                    """, (id_inv_sup_atual, match_linha['id_estoque'] if 'id_estoque' in match_linha else "N/I", match_linha['desc_estoque'], material_recontar, match_linha['desc_produto'], int(match_linha['qtd_sistema']), q_real_3, dif_3, etiq_3, local_3, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
                                     conn.commit()
                                     st.success("✅ 3ª Contagem gravada com sucesso como Auditoria Soberana!")
                                     st.rerun()
                         else:
-                            st.success("🎉 Nenhuma divergência operacional encontrada até o momento para acionar a 3ª contagem.")
+                            st.success("🎉 Nenhuma divergência operacional encontrada até o momento.")
 
                     st.markdown("---")
                     if st.session_state.base_supervisor is not None:
@@ -772,6 +776,7 @@ else:
         else:
             for idx, inv_s in df_inventarios_sup.iterrows():
                 df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
+                
                 c_exp, c_del = st.columns([8, 2])
                 with c_exp:
                     with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
@@ -789,7 +794,7 @@ else:
                             st.success("Pasta deletada!")
                             st.rerun()
 
-    # --- ABA 5: HISTÓRICO GERAL (COM PASTA EXCLUSIVA DE ITENS ESQUECIDOS) ---
+    # --- ABA 5: HISTÓRICO GERAL ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
         if df_inventarios.empty:
@@ -838,18 +843,14 @@ else:
                             st.success("Pasta operacional excluída!")
                             st.rerun()
 
-    # --- ABA 6: BASE DE ESTOQUE (COM COLUNA DE STATUS VISUAL DO UPLOAD) ---
+    # --- ABA 6: BASE DE ESTOQUE ---
     with aba_base:
         if st.session_state.base_sistema is not None:
             st.subheader("📄 Espelho Base de Saldo do Upload")
             
-            # Puxar itens contados no inventário atual para marcar o status visual
             df_lancados_reais = pd.read_sql_query("SELECT cod_produto, operador FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
-            
-            # Criar dicionário de mapeamento {codigo: operador}
             mapa_contados = dict(zip(df_lancados_reais['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_reais['operador']))
             
-            # Gerar coluna de status dinâmica para quem fez o upload acompanhar (Pedido)
             def calcular_status_linha(linha_cod):
                 cod_chave = str(linha_cod).upper().strip()
                 if cod_chave in mapa_contados:
@@ -859,9 +860,8 @@ else:
             df_base_visual = st.session_state.base_sistema.copy()
             df_base_visual["Status de Contagem"] = df_base_visual[col_cod].apply(calcular_status_linha)
             
-            # Mover a nova coluna de status para a primeira posição para facilitar a conferência
             colunas_ordenadas = ["Status de Contagem"] + [c for col in df_base_visual.columns if col != "Status de Contagem"]
-            st.dataframe(df_base_visual, use_container_width=True)
+            st.dataframe(df_base_visual[colunas_ordenadas], use_container_width=True, hide_index=True)
         else:
             st.info("Nenhuma base carregada na barra lateral.")
 
