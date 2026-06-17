@@ -133,7 +133,7 @@ def converter_para_excel(df):
         df.to_excel(writer, index=False, sheet_name='Relatorio')
     return output.getvalue()
 
-# --- ESTILIZAÇÃO PERSONALIZADA (ATUALIZADA) ---
+# --- ESTILIZAÇÃO PERSONALIZADA ---
 st.markdown("""
     <style>
     div.stButton > button:first-child[kind="primary"] {
@@ -242,6 +242,10 @@ if 'contador_reset_sup' not in st.session_state:
 if 'ultimo_item_sucesso' not in st.session_state:
     st.session_state.ultimo_item_sucesso = ""
 
+# Estado de paginação para o Histórico Geral
+if 'pagina_historico' not in st.session_state:
+    st.session_state.pagina_historico = 0
+
 def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
 
@@ -274,7 +278,7 @@ if "recuperar" in query_params and "token" in query_params:
                     cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
                     conn.commit()
                     conn.close()
-                    st.success("🎉 Senha updated com sucesso! Você já pode fechar esta aba e fazer o login na tela principal.")
+                    st.success("🎉 Senha atualizada com sucesso! Você já pode fechar esta aba e fazer o login na tela principal.")
     st.stop()
 
 # --- TELA DE ACESSO ---
@@ -349,7 +353,8 @@ if not st.session_state.logged_in:
                 
                 if row:
                     token_cripto = base64.b64encode(row[1].encode('utf-8')).decode('utf-8')
-                    link_final = f"https://inventariojba.streamlit.app/?recuperar=true&token={token_cripto}"
+                    # --- AJUSTE: ATUALIZADO PARA O NOVO LINK AMIGÁVEL DA JBA ---
+                    link_final = f"https://auditoriajba.streamlit.app/?recuperar=true&token={token_cripto}"
                     
                     st.markdown(f"""
                         <div class="bloco-info-link">
@@ -501,7 +506,6 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    # ABAS PRINCIPAIS - Alinhadas sem diferenciação de cor
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho"]
     aba_contar, aba_atual, aba_supervisor, aba_acuracidade, aba_historico_geral, aba_base, aba_graficos = st.tabs(abas)
     
@@ -902,59 +906,113 @@ else:
                             st.success("Pasta deletada!")
                             st.rerun()
 
-    # --- ABA 5: HISTÓRICO GERAL ---
+    # --- ABA 5: HISTÓRICO GERAL (ATUALIZADA COM FILTRO DE DATA E PAGINAÇÃO DE 15 PASTAS) ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
+        
+        # Bloco de Filtro de Datas no Topo da aba
+        st.write("### 📅 Filtrar Pastas por Período de Abertura")
+        c_dt1, c_dt2 = st.columns(2)
+        with c_dt1:
+            data_inicio_filtro = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=90), key="hist_dt_ini")
+        with c_dt2:
+            data_fim_filtro = st.date_input("Data Final", datetime.date.today() + datetime.timedelta(days=1), key="hist_dt_fim")
+            
+        st.markdown("---")
+        
         if df_inventarios.empty:
             st.info("Nenhum inventário operacional registrado no banco de dados.")
         else:
-            for idx, inv in df_inventarios.iterrows():
-                id_inv_proc = inv['id'].replace('#','')
-                df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inv_proc,))
+            # Converter a coluna de data para datetime para fazer a filtragem segura
+            df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
+            
+            # Aplicar filtro por intervalo selecionado
+            df_inventarios_filtrados = df_inventarios[
+                (df_inventarios['datetime_parsed'] >= data_inicio_filtro) & 
+                (df_inventarios['datetime_parsed'] <= data_fim_filtro)
+            ]
+            
+            if df_inventarios_filtrados.empty:
+                st.warning("⚠️ Nenhum inventário foi localizado dentro do intervalo de datas selecionado.")
+            else:
+                # Lógica matemática de paginação (15 itens por página)
+                tamanho_pagina = 15
+                total_itens = len(df_inventarios_filtrados)
+                total_paginas = (total_itens - 1) // tamanho_pagina + 1
                 
-                c_exp_g, c_del_g = st.columns([8, 2])
-                with c_exp_g:
-                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} contados)"):
-                        if not df_hist_inv.empty:
-                            excel_geral_hist = converter_para_excel(df_hist_inv)
-                            st.download_button(label="📥 Baixar Lançamentos Feitos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}")
-                            
-                            colunas_existentes_hist = list(df_hist_inv.columns)
-                            ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
-                            if 'lote' in colunas_existentes_hist:
-                                ordem_colunas_print.append('lote')
+                # Previne estouro se o filtro encolher a lista drasticamente
+                if st.session_state.pagina_historico >= total_paginas:
+                    st.session_state.pagina_historico = 0
+                    
+                inicio_idx = st.session_state.pagina_historico * tamanho_pagina
+                fim_idx = inicio_idx + tamanho_pagina
+                
+                df_pagina_atual = df_inventarios_filtrados.iloc[inicio_idx:fim_idx]
+                
+                st.write(f"Exibindo do **{inicio_idx + 1}º** ao **{min(fim_idx, total_itens)}º** inventário (Total de {total_itens} pastas encontradas).")
+                
+                # Renderizar apenas os 15 inventários da página atual
+                for idx, inv in df_pagina_atual.iterrows():
+                    id_inv_proc = inv['id'].replace('#','')
+                    df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inv_proc,))
+                    
+                    c_exp_g, c_del_g = st.columns([8, 2])
+                    with c_exp_g:
+                        with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} contados)"):
+                            if not df_hist_inv.empty:
+                                excel_geral_hist = converter_para_excel(df_hist_inv)
+                                st.download_button(label="📥 Baixar Lançamentos Feitos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}")
                                 
-                            st.write("**📋 Itens Efetivamente Contados:**")
-                            st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
-                            
-                        if st.session_state.base_sistema is not None:
-                            set_contados_global = set(df_hist_inv['cod_produto'].astype(str).str.upper().str.strip().tolist())
-                            esquecidos_linhas = []
-                            for _, row_b in st.session_state.base_sistema.iterrows():
-                                c_atual = str(row_b[col_cod]).upper().strip()
-                                if c_atual not in set_contados_global:
-                                    esquecidos_linhas.append({
-                                        "Código Produto": c_atual,
-                                        "Descrição Produto": row_b[col_desc],
-                                        "Localização Prevista": row_b[col_local] if col_local in row_b else "N/I"
-                                    })
-                            
-                            st.write("---")
-                            st.write(f"**❌ Itens Não Contados (Esquecidos/Pendentes): {len(esquecidos_linhas)} itens**")
-                            if len(esquecidos_linhas) > 0:
-                                df_esquecidos_print = pd.DataFrame(esquecidos_linhas)
-                                st.dataframe(df_esquecidos_print, use_container_width=True, hide_index=True)
-                            else:
-                                st.success("🎯 Inventário Perfeito! 100% mapeado.")
-                with c_del_g:
-                    if eh_supervisor:
-                        if st.button("🗑️ Deletar Pasta", key=f"del_folder_ger_{inv['id']}", use_container_width=True):
-                            cursor = conn.cursor()
-                            cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
-                            cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
-                            conn.commit()
-                            st.success("Pasta operacional excluída!")
-                            st.rerun()
+                                colunas_existentes_hist = list(df_hist_inv.columns)
+                                ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
+                                if 'lote' in colunas_existentes_hist:
+                                    ordem_colunas_print.append('lote')
+                                    
+                                st.write("**📋 Itens Efetivamente Contados:**")
+                                st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
+                                
+                            if st.session_state.base_sistema is not None:
+                                set_contados_global = set(df_hist_inv['cod_produto'].astype(str).str.upper().str.strip().tolist())
+                                esquecidos_linhas = []
+                                for _, row_b in st.session_state.base_sistema.iterrows():
+                                    c_atual = str(row_b[col_cod]).upper().strip()
+                                    if c_atual not in set_contados_global:
+                                        esquecidos_linhas.append({
+                                            "Código Produto": c_atual,
+                                            "Descrição Produto": row_b[col_desc],
+                                            "Localização Prevista": row_b[col_local] if col_local in row_b else "N/I"
+                                        })
+                                
+                                st.write("---")
+                                st.write(f"**❌ Itens Não Contados (Esquecidos/Pendentes): {len(esquecidos_linhas)} itens**")
+                                if len(esquecidos_linhas) > 0:
+                                    df_esquecidos_print = pd.DataFrame(esquecidos_linhas)
+                                    st.dataframe(df_esquecidos_print, use_container_width=True, hide_index=True)
+                                else:
+                                    st.success("🎯 Inventário Perfeito! 100% mapeado.")
+                    with c_del_g:
+                        if eh_supervisor:
+                            if st.button("🗑️ Deletar Pasta", key=f"del_folder_ger_{inv['id']}", use_container_width=True):
+                                cursor = conn.cursor()
+                                cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
+                                cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
+                                conn.commit()
+                                st.success("Pasta operacional excluída!")
+                                st.rerun()
+                                
+                # Controles de Navegação da Paginação (Abaixo das 15 pastas)
+                st.markdown("---")
+                col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
+                with col_pag1:
+                    if st.button("◀ Anterior", use_container_width=True, disabled=(st.session_state.pagina_historico == 0)):
+                        st.session_state.pagina_historico -= 1
+                        st.rerun()
+                with col_pag_texto:
+                    st.markdown(f"<p style='text-align: center; margin-top: 7px;'>Página <strong>{st.session_state.pagina_historico + 1}</strong> de <strong>{total_paginas}</strong></p>", unsafe_allow_html=True)
+                with col_pag2:
+                    if st.button("Próximo ▶", use_container_width=True, disabled=(st.session_state.pagina_historico >= total_paginas - 1)):
+                        st.session_state.pagina_historico += 1
+                        st.rerun()
 
     # --- ABA 6: BASE DE ESTOQUE ---
     with aba_base:
@@ -1089,7 +1147,6 @@ else:
         st.write("**📋 Lista Completa de Controle de Validade Temporal:**")
         st.dataframe(df_desempenho_final, use_container_width=True, hide_index=True)
         
-        # --- AJUSTE: GRÁFICO DE RANKING OPERACIONAL NO FINAL DA ABA ---
         st.markdown("---")
         st.write("### 🏆 Ranking de Lançamentos por Operador")
         df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(id) as [Lançamentos Feitos] FROM contagens GROUP BY operador", conn)
