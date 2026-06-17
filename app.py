@@ -264,7 +264,7 @@ if "recuperar" in query_params and "token" in query_params:
                     cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
                     conn.commit()
                     conn.close()
-                    st.success("🎉 Senha updated com sucesso! Você já pode fechar esta aba e fazer o login na tela principal.")
+                    st.success("🎉 Senha atualizada com sucesso! Você já pode fechar esta aba e fazer o login na tela principal.")
     st.stop()
 
 # --- TELA DE ACESSO ---
@@ -605,7 +605,7 @@ else:
         if not eh_supervisor:
             st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor (Acesso Liberado para Yago Rodrigues).")
         else:
-            # --- AJUSTE: BLOCO DE SELEÇÃO E GERENCIAMENTO DE PASTAS DE INVENTÁRIO DO SUPERVISOR NO TOPO ---
+            # --- SELEÇÃO E GERENCIAMENTO DE PASTAS DO SUPERVISOR NO TOPO ---
             st.subheader("📁 Controle de Inventários do Supervisor")
             
             if df_inventarios_sup.empty:
@@ -653,17 +653,16 @@ else:
 
             st.markdown("---")
 
-            # --- AJUSTE: UPLOAD DA PLANILHA E MÓDULOS DE CONTAGEM MANIFESTADOS ACIMA DO RELATÓRIO ---
+            # --- UPLOAD DA PLANILHA E FORMULÁRIOS DE CONTAGEM MANIFESTADOS ACIMA DO RELATÓRIO ---
             st.subheader("📤 Upload da Planilha de Amostragem do Supervisor")
             arquivo_supervisor = st.file_uploader("Suba a planilha Excel para a amostragem do supervisor (.xlsx)", type=["xlsx"], key="sup_unified_excel_loader_final")
             
             if arquivo_supervisor is not None:
                 try:
                     df_temp_check = pd.read_excel(arquivo_supervisor)
-                    # Normalizar os nomes das colunas para encontrar 'ativo' de forma robusta
+                    # Normalizar cabeçalhos para conferência robusta
                     colunas_norm = [str(c).strip().lower().replace("º", "").replace("ó", "o") for c in df_temp_check.columns]
                     
-                    # Procura variação de colunas de ativo
                     tem_ativo = any(x in colunas_norm for x in ['ativo', 'n ativo', 'numero ativo', 'cod ativo'])
                     
                     if not tem_ativo:
@@ -693,7 +692,6 @@ else:
                 df_auditorias_atual = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inv_sup_atual,))
                 
                 if inv_sup_selecionado_obj['status'] == "Aberto":
-                    # Módulo de Entrada/Bipagem Manual do Supervisor
                     if st.session_state.base_supervisor is not None:
                         colunas_sup = list(st.session_state.base_supervisor.columns)
                         def encontrar_col_sup(opcoes, default_idx):
@@ -730,7 +728,7 @@ else:
                                     with col_f2: etiq_status = st.selectbox("A etiqueta física está correta?", ["Sim", "Não"])
                                     with col_f3: local_status = st.selectbox("O material está na localização correta?", ["Sim", "Não"])
                                     
-                                    # AJUSTE: Campo do Ativo Obrigatório no Formulário Manual do Supervisor
+                                    # Ativo Obrigatório no Form do Supervisor
                                     ativo_sup_input = st.text_input("🔢 Número do Ativo (Obrigatório)", key="ativo_manual_sup_form")
                                         
                                     if st.form_submit_button("💾 Salvar Auditoria", type="primary", use_container_width=True):
@@ -748,7 +746,7 @@ else:
                                             st.session_state.contador_reset_sup += 1
                                             st.rerun()
 
-                    # Módulo ADM de 3ª Contagem
+                    # Auditoria de 3ª Contagem
                     st.write("### 🔄 Auditoria de Divergências (Módulo ADM de 3ª Contagem)")
                     df_geral_funcionarios_analise = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
                     
@@ -762,7 +760,7 @@ else:
                                 q_real_3 = st.number_input("Quantidade Real Constatada (3ª Contagem ADM)", min_value=0, step=1)
                                 etiq_3 = st.selectbox("Etiqueta Correta?", ["Sim", "Não"], key="etiq3")
                                 local_3 = st.selectbox("Localização Correta?", ["Sim", "Não"], key="local3")
-                                # AJUSTE: Ativo obrigatório também na 3ª contagem
+                                # Ativo obrigatório na 3ª contagem
                                 ativo_3_input = st.text_input("🔢 Número do Ativo (Obrigatório)", key="ativo_3cont_form")
                                 
                                 if st.form_submit_button("🔄 Gravar 3ª Contagem Definitiva", type="primary"):
@@ -786,7 +784,7 @@ else:
 
                     st.markdown("---")
                     
-                    # --- AJUSTE: RELATÓRIO AMOSTRAL ATIVO EXIBIDO LOGO ABAIXO ---
+                    # --- RELATÓRIO AMOSTRAL EXIBIDO ABAIXO DOS FORMULÁRIOS E UPLOAD ---
                     st.write("### 🔐 Relatório de Fechamento Amostral Ativo")
                     if not df_auditorias_atual.empty:
                         total_sup = len(df_auditorias_atual)
