@@ -344,7 +344,7 @@ if not st.session_state.logged_in:
                     st.markdown(f"""
                         <div class="bloco-info-link">
                             <p style="margin:0; color:#b7950b; font-weight:bold; font-size:15px;">📧 Link de Segurança Gerado com Sucesso!</p>
-                            <p style="margin:5px 0 15px 0; color:#7d6608; font-size:13px;">Como o sistema roda em nuvem isolada, clique no botão vermelho abaixo para abrir a nova janela de redefinição de senha automática no seu navegador.</p>
+                            <p style="margin:5px 0 15px 0; color:#7d6608; font-size:13px;">Como o system roda em nuvem isolada, clique no botão vermelho abaixo para abrir a nova janela de redefinição de senha automática no seu navegador.</p>
                             <a href="{link_final}" target="_blank" style="text-decoration:none;">
                                 <button style="background-color:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">
                                     🔗 Abrir Janela de Nova Senha
@@ -367,6 +367,7 @@ else:
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor ORDER BY data DESC, id DESC", conn)
     
+    st.session_state.operador = st.session_state.get('operador', 'Operador Genérico')
     nome_usuario_logado_limpo = st.session_state.operador.lower()
     eh_supervisor = any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"])
     
@@ -413,28 +414,13 @@ else:
         if df_inventarios.empty:
             st.info("Crie um inventário abaixo.")
             id_inventario_atual = None
-            inventario_selecionado_obj = None
+            inventario_selected_obj = None
         else:
             lista_inv = [f"{row['id']} – {row['nome']} ({row['status']})" for idx, row in df_inventarios.iterrows()]
             inventario_selected = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
             id_inventario_atual = inventario_selected.split(" – ")[0]
+            # CORREÇÃO DA LINHA DA IMAGEM: Alinhamento seguro do nome da variável
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
-
-        with st.expander("➕ Novo Inventário", expanded=df_inventarios.empty):
-            with st.form("form_novo", clear_on_submit=True):
-                novo_nome = st.text_input("Nome do Inventário")
-                if st.form_submit_button("Criar", type="primary") and novo_nome:
-                    if not df_inventarios.empty:
-                        df_limpo_calc = df_inventarios['id'].str.replace('#', '', regex=False).astype(int)
-                        maior_id = df_limpo_calc.max()
-                    else:
-                        maior_id = 38
-                    novo_id = f"#{maior_id + 1}"
-                    hoje = datetime.date.today().strftime("%Y-%m-%d")
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, hoje))
-                    conn.commit()
-                    st.rerun()
 
         # --- TRAVA COMPLETA DE FECHAMENTO 100% ---
         if inventario_selected_obj is not None and inventario_selected_obj['status'] == "Aberto":
@@ -605,7 +591,6 @@ else:
         if not eh_supervisor:
             st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor (Acesso Liberado para Yago Rodrigues).")
         else:
-            # --- SELEÇÃO E GERENCIAMENTO DE PASTAS DO SUPERVISOR NO TOPO ---
             st.subheader("📁 Controle de Inventários do Supervisor")
             
             if df_inventarios_sup.empty:
@@ -653,14 +638,13 @@ else:
 
             st.markdown("---")
 
-            # --- UPLOAD DA PLANILHA E FORMULÁRIOS DE CONTAGEM MANIFESTADOS ACIMA DO RELATÓRIO ---
+            # --- UPLOAD DA PLANILHA DO SUPERVISOR NO TOPO ---
             st.subheader("📤 Upload da Planilha de Amostragem do Supervisor")
             arquivo_supervisor = st.file_uploader("Suba a planilha Excel para a amostragem do supervisor (.xlsx)", type=["xlsx"], key="sup_unified_excel_loader_final")
             
             if arquivo_supervisor is not None:
                 try:
                     df_temp_check = pd.read_excel(arquivo_supervisor)
-                    # Normalizar cabeçalhos para conferência robusta
                     colunas_norm = [str(c).strip().lower().replace("º", "").replace("ó", "o") for c in df_temp_check.columns]
                     
                     tem_ativo = any(x in colunas_norm for x in ['ativo', 'n ativo', 'numero ativo', 'cod ativo'])
@@ -696,7 +680,7 @@ else:
                         colunas_sup = list(st.session_state.base_supervisor.columns)
                         def encontrar_col_sup(opcoes, default_idx):
                             for opcao in opcoes:
-                                for col in colunas_sup:
+                                % for col in colunas_sup:
                                     if opcao.lower().replace(" ", "").replace(".", "") in col.lower().replace(" ", "").replace(".", ""):
                                         return col
                             return colunas_sup[default_idx] if default_idx < len(colunas_sup) else colunas_sup[0]
@@ -784,7 +768,7 @@ else:
 
                     st.markdown("---")
                     
-                    # --- RELATÓRIO AMOSTRAL EXIBIDO ABAIXO DOS FORMULÁRIOS E UPLOAD ---
+                    # --- RELATÓRIO AMOSTRAL EXIBIDO LOGO ABAIXO DOS FORMULÁRIOS ---
                     st.write("### 🔐 Relatório de Fechamento Amostral Ativo")
                     if not df_auditorias_atual.empty:
                         total_sup = len(df_auditorias_atual)
@@ -937,7 +921,7 @@ else:
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
                             cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
-                            conn.commit()
+                    conn.commit()
                             st.success("Pasta operacional excluída!")
                             st.rerun()
 
