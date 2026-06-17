@@ -90,6 +90,16 @@ def inicializar_banco():
         )
     """)
     
+    # --- MIGRACAO AUTOMATICA: GARANTE QUE A COLUNA LOTE EXISTA SE O BANCO FOR ANTIGO ---
+    try:
+        cursor.execute("PRAGMA table_info(contagens)")
+        colunas_existentes = [coluna[1] for coluna in cursor.fetchall()]
+        if 'lote' not in colunas_existentes:
+            cursor.execute("ALTER TABLE contagens ADD COLUMN lote TEXT DEFAULT ''")
+            conn.commit()
+    except Exception as e:
+        pass
+
     # Criar administrador padrão se a tabela estiver vazia
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
@@ -594,7 +604,12 @@ else:
                 st.download_button(label="📥 Exportar Lançamentos Filtrados para Excel", data=excel_atual, file_name=f"contagem_{id_inventario_atual}_{st.session_state.operador}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 st.write("")
 
+                # Verificação de segurança para as colunas antes de renderizar
+                colunas_existentes_contagens = list(df_contagens_mutaveis.columns)
                 ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
+                if 'lote' in colunas_existentes_contagens:
+                    ordem_colunas_print.append('lote')
+                
                 st.dataframe(df_contagens_mutaveis[ordem_colunas_print], use_container_width=True, hide_index=True)
         else:
             st.info("Nenhum inventário selecionado.")
@@ -695,7 +710,6 @@ else:
                         colunas_sup = list(st.session_state.base_supervisor.columns)
                         def encontrar_col_sup(opcoes, default_idx):
                             for opcao in opcoes:
-                                # CORREÇÃO DA LINHA DA IMAGEM: Removido o símbolo de '%' perdido que causava erro de sintaxe
                                 for col in colunas_sup:
                                     if opcao.lower().replace(" ", "").replace(".", "") in col.lower().replace(" ", "").replace(".", ""):
                                         return col
@@ -728,7 +742,6 @@ else:
                                     with col_f2: etiq_status = st.selectbox("A etiqueta física está correta?", ["Sim", "Não"])
                                     with col_f3: local_status = st.selectbox("O material está na localização correta?", ["Sim", "Não"])
                                     
-                                    # Ativo Obrigatório no Form do Supervisor
                                     ativo_sup_input = st.text_input("🔢 Número do Ativo (Obrigatório)", key="ativo_manual_sup_form")
                                         
                                     if st.form_submit_button("💾 Salvar Auditoria", type="primary", use_container_width=True):
@@ -760,7 +773,6 @@ else:
                                 q_real_3 = st.number_input("Quantidade Real Constatada (3ª Contagem ADM)", min_value=0, step=1)
                                 etiq_3 = st.selectbox("Etiqueta Correta?", ["Sim", "Não"], key="etiq3")
                                 local_3 = st.selectbox("Localização Correta?", ["Sim", "Não"], key="local3")
-                                # Ativo obrigatório na 3ª contagem
                                 ativo_3_input = st.text_input("🔢 Número do Ativo (Obrigatório)", key="ativo_3cont_form")
                                 
                                 if st.form_submit_button("🔄 Gravar 3ª Contagem Definitiva", type="primary"):
@@ -784,7 +796,6 @@ else:
 
                     st.markdown("---")
                     
-                    # --- RELATÓRIO AMOSTRAL EXIBIDO LOGO ABAIXO DOS FORMULÁRIOS ---
                     st.write("### 🔐 Relatório de Fechamento Amostral Ativo")
                     if not df_auditorias_atual.empty:
                         total_sup = len(df_auditorias_atual)
@@ -908,7 +919,12 @@ else:
                         if not df_hist_inv.empty:
                             excel_geral_hist = converter_para_excel(df_hist_inv)
                             st.download_button(label="📥 Baixar Lançamentos Feitos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}")
+                            
+                            colunas_existentes_hist = list(df_hist_inv.columns)
                             ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
+                            if 'lote' in colunas_existentes_hist:
+                                ordem_colunas_print.append('lote')
+                                
                             st.write("**📋 Itens Efetivamente Contados:**")
                             st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
                             
@@ -937,7 +953,6 @@ else:
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
                             cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
-                            # CORREÇÃO INDENTAÇÃO: Alinhado para rodar a query inteira antes de recarregar
                             conn.commit()
                             st.success("Pasta operacional excluída!")
                             st.rerun()
