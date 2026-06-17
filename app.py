@@ -133,7 +133,7 @@ def converter_para_excel(df):
         df.to_excel(writer, index=False, sheet_name='Relatorio')
     return output.getvalue()
 
-# --- ESTILIZAÇÃO PERSONALIZADA ---
+# --- ESTILIZAÇÃO PERSONALIZADA (ATUALIZADA) ---
 st.markdown("""
     <style>
     div.stButton > button:first-child[kind="primary"] {
@@ -274,7 +274,7 @@ if "recuperar" in query_params and "token" in query_params:
                     cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
                     conn.commit()
                     conn.close()
-                    st.success("🎉 Senha atualizada com sucesso! Você já pode fechar esta aba e fazer o login na tela principal.")
+                    st.success("🎉 Senha updated com sucesso! Você já pode fechar esta aba e fazer o login na tela principal.")
     st.stop()
 
 # --- TELA DE ACESSO ---
@@ -283,7 +283,7 @@ if not st.session_state.logged_in:
     if st.session_state.tela_acesso == "login":
         st.title("🔒 Acesso ao Sistema de Estoque JBA")
         with st.form("login_form"):
-            identificador = st.text_input("CPF (somente números) or E-mail")
+            identificador = st.text_input("CPF (somente números) ou E-mail")
             senha = st.text_input("Senha", type="password")
             botao_login = st.form_submit_button("Entrar no Sistema", type="primary", use_container_width=True)
             if botao_login:
@@ -501,6 +501,7 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
+    # ABAS PRINCIPAIS - Alinhadas sem diferenciação de cor
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho"]
     aba_contar, aba_atual, aba_supervisor, aba_acuracidade, aba_historico_geral, aba_base, aba_graficos = st.tabs(abas)
     
@@ -838,7 +839,7 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in group.columns else ""
+                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
@@ -877,7 +878,7 @@ else:
             st.download_button(label="📥 Exportar Planilha de Acuracidade para Excel", data=excel_acuracidade, file_name="acuracidade_depositos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         st.markdown("---")
-        st.write("### ### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
+        st.write("### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
         if df_inventarios_sup.empty:
             st.info("Nenhum histórico amostral arquivado.")
         else:
@@ -917,8 +918,10 @@ else:
                         if not df_hist_inv.empty:
                             excel_geral_hist = converter_para_excel(df_hist_inv)
                             st.download_button(label="📥 Baixar Lançamentos Feitos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}")
+                            
+                            colunas_existentes_hist = list(df_hist_inv.columns)
                             ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
-                            if 'lote' in df_hist_inv.columns:
+                            if 'lote' in colunas_existentes_hist:
                                 ordem_colunas_print.append('lote')
                                 
                             st.write("**📋 Itens Efetivamente Contados:**")
@@ -978,11 +981,10 @@ else:
         else:
             st.info("Nenhuma base carregada na barra lateral.")
 
-    # --- ABA 7: DESEMPENHO (ATUALIZADA) ---
+    # --- ABA 7: DESEMPENHO ---
     with aba_graficos:
         st.title("🏆 Desempenho e Auditoria de Prazos por Estoque")
         
-        # Lista Fixa de Estoques fornecida
         lista_estoques_fixa = [
             {"id": "1077", "desc": "JBA - CLASSE D"},
             {"id": "1078", "desc": "JBA - COPA E COZINHA"},
@@ -1022,7 +1024,6 @@ else:
             {"id": "3546", "desc": "JBA - CELULARES"}
         ]
         
-        # Buscar as últimas datas de contagem agregadas do banco de dados
         df_ultimas_contagens = pd.read_sql_query("""
             SELECT id_estoque, MAX(data_hora) as ultima_data 
             FROM contagens 
@@ -1046,7 +1047,6 @@ else:
             
             if ultima_data_str:
                 try:
-                    # Formato padrao guardado no app: 'YYYY-MM-DD HH:MM:SS'
                     dt_contagem = datetime.datetime.strptime(ultima_data_str, "%Y-%m-%d %H:%M:%S")
                     dias_passados = (hoje_dt - dt_contagem).days
                     data_formatada = dt_contagem.strftime("%d/%m/%Y %H:%M")
@@ -1057,7 +1057,6 @@ else:
                 dias_passados = 999
                 data_formatada = "Nunca Contado"
                 
-            # Classificação de Status
             if dias_passados <= 7:
                 status_final = "🟢 Bom"
                 bom_count += 1
@@ -1078,7 +1077,6 @@ else:
             
         df_desempenho_final = pd.DataFrame(linhas_desempenho)
         
-        # Cartões de Visão Geral (KPIs)
         kpi1, kpi2, kpi3 = st.columns(3)
         with kpi1:
             st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">ESTOQUES EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
@@ -1090,5 +1088,12 @@ else:
         st.write("")
         st.write("**📋 Lista Completa de Controle de Validade Temporal:**")
         st.dataframe(df_desempenho_final, use_container_width=True, hide_index=True)
+        
+        # --- AJUSTE: GRÁFICO DE RANKING OPERACIONAL NO FINAL DA ABA ---
+        st.markdown("---")
+        st.write("### 🏆 Ranking de Lançamentos por Operador")
+        df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(id) as [Lançamentos Feitos] FROM contagens GROUP BY operador", conn)
+        if not df_ops.empty:
+            st.bar_chart(data=df_ops, x='Operador', y='Lançamentos Feitos', color="#d35400")
             
     conn.close()
