@@ -283,7 +283,7 @@ if not st.session_state.logged_in:
     if st.session_state.tela_acesso == "login":
         st.title("🔒 Acesso ao Sistema de Estoque JBA")
         with st.form("login_form"):
-            identificador = st.text_input("CPF (somente números) ou E-mail")
+            identificador = st.text_input("CPF (somente números) or E-mail")
             senha = st.text_input("Senha", type="password")
             botao_login = st.form_submit_button("Entrar no Sistema", type="primary", use_container_width=True)
             if botao_login:
@@ -649,7 +649,7 @@ else:
                                 df_limpo_sup_calc = df_inventarios_sup['id'].str.replace('SUP-#', '', regex=False).astype(int)
                                 maior_id_sup = df_limpo_sup_calc.max()
                             else:
-                                mayor_id_sup = 0
+                                maior_id_sup = 0
                             
                             novo_id_sup = f"SUP-#{maior_id_sup + 1}"
                             hoje_sup = datetime.date.today().strftime("%Y-%m-%d")
@@ -838,7 +838,7 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
+                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in group.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
@@ -958,8 +958,6 @@ else:
         if st.session_state.base_sistema is not None:
             st.subheader("📄 Espelho Base de Saldo do Upload")
             
-            # --- CORREÇÃO CONTRA NAMEERROR DA IMAGEM ---
-            # Adicionada validação de segurança caso o inventário atual ainda não esteja definido
             if id_inventario_atual:
                 df_lancados_reais = pd.read_sql_query("SELECT cod_produto, operador FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
                 mapa_contados = dict(zip(df_lancados_reais['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_reais['operador']))
@@ -980,11 +978,117 @@ else:
         else:
             st.info("Nenhuma base carregada na barra lateral.")
 
-    # --- ABA 7: DESEMPENHO ---
+    # --- ABA 7: DESEMPENHO (ATUALIZADA) ---
     with aba_graficos:
-        st.write("### 🏆 Ranking de Lançamentos por Operador")
-        df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(id) as [Lançamentos Feitos] FROM contagens GROUP BY operador", conn)
-        if not df_ops.empty:
-            st.bar_chart(data=df_ops, x='Operador', y='Lançamentos Feitos', color="#d35400")
+        st.title("🏆 Desempenho e Auditoria de Prazos por Estoque")
+        
+        # Lista Fixa de Estoques fornecida
+        lista_estoques_fixa = [
+            {"id": "1077", "desc": "JBA - CLASSE D"},
+            {"id": "1078", "desc": "JBA - COPA E COZINHA"},
+            {"id": "1080", "desc": "JBA - DADOS - CLIENTE"},
+            {"id": "1082", "desc": "JBA - VIVO VITA - CLIENTE"},
+            {"id": "1084", "desc": "JBA - EPI-EPC"},
+            {"id": "1086", "desc": "JBA - EQUIPAMENTOS"},
+            {"id": "1088", "desc": "JBA - FERRAMENTAL"},
+            {"id": "1089", "desc": "JBA - KIT FERRAMENTAL CONTRATACOES"},
+            {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"},
+            {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
+            {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"},
+            {"id": "1106", "desc": "JBA - MOBILIARIO"},
+            {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"},
+            {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
+            {"id": "1118", "desc": "JBA - PROPRIO GERAL"},
+            {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
+            {"id": "1124", "desc": "JBA - PROPRIO TIM"},
+            {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
+            {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"},
+            {"id": "1149", "desc": "JBA - UNIFORME"},
+            {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"},
+            {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
+            {"id": "2185", "desc": "JBA - PROPRIO FATURA B PLANTA EXTERNA - BDI"},
+            {"id": "2188", "desc": "1071 - IMPLANTACAO JBA CLIENTE RESERVADO"},
+            {"id": "2189", "desc": "JBA - DEFEITO"},
+            {"id": "2190", "desc": "JBA - DEPARTAMENTO T.I"},
+            {"id": "2194", "desc": "JBA - KITS FERRAMENTAL - DEVOLUCAO"},
+            {"id": "2197", "desc": "JBA - EQUIPAMENTOS TI"},
+            {"id": "2641", "desc": "1259 - IMPLANTACAO JBA - MATERIAL REUTILIZACAO"},
+            {"id": "2643", "desc": "1724 - MANUTENCAO JBA - MATERIAL REUTILIZACAO"},
+            {"id": "2725", "desc": "JBA - RESERVA TIM"},
+            {"id": "2983", "desc": "JBA - FORNECEDORES P/ MANUTENCAO - RECARGA"},
+            {"id": "3193", "desc": "JBA - PROPRIO MATERIAL REAPROVEITAVEL"},
+            {"id": "3395", "desc": "LPA - FTTX - CLIENTE"},
+            {"id": "3484", "desc": "JBA - CELULARES DEFEITO"},
+            {"id": "3546", "desc": "JBA - CELULARES"}
+        ]
+        
+        # Buscar as últimas datas de contagem agregadas do banco de dados
+        df_ultimas_contagens = pd.read_sql_query("""
+            SELECT id_estoque, MAX(data_hora) as ultima_data 
+            FROM contagens 
+            GROUP BY id_estoque
+        """, conn)
+        
+        mapa_datas = dict(zip(df_ultimas_contagens['id_estoque'].astype(str).str.strip(), df_ultimas_contagens['ultima_data']))
+        
+        hoje_dt = datetime.datetime.now()
+        linhas_desempenho = []
+        
+        criticos_count = 0
+        auditar_count = 0
+        bom_count = 0
+        
+        for est in lista_estoques_fixa:
+            est_id = est["id"]
+            est_desc = est["desc"]
+            
+            ultima_data_str = mapa_datas.get(est_id, None)
+            
+            if ultima_data_str:
+                try:
+                    # Formato padrao guardado no app: 'YYYY-MM-DD HH:MM:SS'
+                    dt_contagem = datetime.datetime.strptime(ultima_data_str, "%Y-%m-%d %H:%M:%S")
+                    dias_passados = (hoje_dt - dt_contagem).days
+                    data_formatada = dt_contagem.strftime("%d/%m/%Y %H:%M")
+                except:
+                    dias_passados = 999
+                    data_formatada = "Sem histórico válido"
+            else:
+                dias_passados = 999
+                data_formatada = "Nunca Contado"
+                
+            # Classificação de Status
+            if dias_passados <= 7:
+                status_final = "🟢 Bom"
+                bom_count += 1
+            elif dias_passados <= 14:
+                status_final = "🟡 Necessário auditar"
+                auditar_count += 1
+            else:
+                status_final = "🔴 Crítico"
+                criticos_count += 1
+                
+            linhas_desempenho.append({
+                "Id. Estoque": est_id,
+                "Descrição do Estoque Físico": est_desc,
+                "Última Contagem Realizada": data_formatada,
+                "Dias sem Contar": dias_passados if dias_passados != 999 else "—",
+                "Status de Criticidade": status_final
+            })
+            
+        df_desempenho_final = pd.DataFrame(linhas_desempenho)
+        
+        # Cartões de Visão Geral (KPIs)
+        kpi1, kpi2, kpi3 = st.columns(3)
+        with kpi1:
+            st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">ESTOQUES EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
+        with kpi2:
+            st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #f1c40f;"><div class="bloco-titulo">NECESSÁRIO AUDITAR</div><div class="bloco-valor" style="color: #f39c12;">{auditar_count}</div></div>', unsafe_allow_html=True)
+        with kpi3:
+            st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 ESTADO CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
+            
+        st.write("")
+        st.write("**📋 Lista Completa de Controle de Validade Temporal:**")
+        st.dataframe(df_desempenho_final, use_container_width=True, hide_index=True)
             
     conn.close()
