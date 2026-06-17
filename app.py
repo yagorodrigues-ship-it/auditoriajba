@@ -90,7 +90,7 @@ def inicializar_banco():
         )
     """)
     
-    # --- MIGRACAO AUTOMATICA: GARANTE QUE A COLUNA LOTE EXISTA SE O BANCO FOR ANTIGO ---
+    # --- MIGRACAO AUTOMATICA ---
     try:
         cursor.execute("PRAGMA table_info(contagens)")
         colunas_existentes = [coluna[1] for coluna in cursor.fetchall()]
@@ -100,7 +100,7 @@ def inicializar_banco():
     except Exception as e:
         pass
 
-    # Criar administrador padrão se a tabela estiver vazia
+    # Criar administrador padrão
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
@@ -183,15 +183,6 @@ st.markdown("""
         margin-top: 15px;
         margin-bottom: 25px;
     }
-    .alerta-divergencia {
-        background-color: #fef5e7;
-        border: 1px solid #f9e79f;
-        border-left: 5px solid #f39c12;
-        padding: 15px;
-        border-radius: 4px;
-        margin-top: 10px;
-        margin-bottom: 20px;
-    }
     .card-lateral {
         background-color: #1a233a;
         padding: 12px;
@@ -242,16 +233,17 @@ if 'contador_reset_sup' not in st.session_state:
 if 'ultimo_item_sucesso' not in st.session_state:
     st.session_state.ultimo_item_sucesso = ""
 
-# Estado de paginação para o Histórico Geral
+# Estados de paginação independentes
 if 'pagina_historico' not in st.session_state:
     st.session_state.pagina_historico = 0
+if 'pagina_historico_sup' not in st.session_state:
+    st.session_state.pagina_historico_sup = 0
 
 def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
 
-# --- CAPTURA DE PARÂMETROS DE URL ---
+# --- RECOVERY URL PARAMETERS ---
 query_params = st.query_params
-
 if "recuperar" in query_params and "token" in query_params:
     st.title("🔑 Redefinição de Senha Seguro JBA")
     try:
@@ -278,7 +270,7 @@ if "recuperar" in query_params and "token" in query_params:
                     cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
                     conn.commit()
                     conn.close()
-                    st.success("🎉 Senha atualizada com sucesso! Você já pode fechar esta aba e fazer o login na tela principal.")
+                    st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
     st.stop()
 
 # --- TELA DE ACESSO ---
@@ -353,13 +345,12 @@ if not st.session_state.logged_in:
                 
                 if row:
                     token_cripto = base64.b64encode(row[1].encode('utf-8')).decode('utf-8')
-                    # --- AJUSTE: ATUALIZADO PARA O NOVO LINK AMIGÁVEL DA JBA ---
                     link_final = f"https://auditoriajba.streamlit.app/?recuperar=true&token={token_cripto}"
                     
                     st.markdown(f"""
                         <div class="bloco-info-link">
                             <p style="margin:0; color:#b7950b; font-weight:bold; font-size:15px;">📧 Link de Segurança Gerado com Sucesso!</p>
-                            <p style="margin:5px 0 15px 0; color:#7d6608; font-size:13px;">Como o sistema roda em nuvem isolada, clique no botão vermelho abaixo para abrir a nova janela de redefinição de senha automática no seu navegador.</p>
+                            <p style="margin:5px 0 15px 0; color:#7d6608; font-size:13px;">Clique no botão vermelho abaixo para abrir a nova janela de redefinição de senha.</p>
                             <a href="{link_final}" target="_blank" style="text-decoration:none;">
                                 <button style="background-color:#e74c3c; color:white; border:none; padding:10px 20px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">
                                     🔗 Abrir Janela de Nova Senha
@@ -368,7 +359,7 @@ if not st.session_state.logged_in:
                         </div>
                     """, unsafe_allow_html=True)
                 else:
-                    st.error("❌ E-mail não localizado no banco de dados do sistema.")
+                    st.error("❌ E-mail não localizado no banco de dados.")
                     
         if st.button("◀ Voltar para Tela de Login"):
             st.session_state.tela_acesso = "login"
@@ -387,7 +378,6 @@ else:
     eh_supervisor = any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"])
     
     id_inventario_atual_inicial = df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else ""
-    df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual_inicial,)) if id_inventario_atual_inicial else pd.DataFrame()
     
     # --- MAPEAMENTO E DEPARA DE COLUNAS ANTECIPADO ---
     col_cod, col_desc, col_local, col_unidade, col_qtd, col_id_estoque = "", "", "", "", "", ""
@@ -452,7 +442,7 @@ else:
                     conn.commit()
                     st.rerun()
 
-        # --- TRAVA COMPLETA DE FECHAMENTO 100% ---
+        # TRAVA 100% CONCLUÍDO
         if inventario_selected_obj is not None and inventario_selected_obj['status'] == "Aberto":
             itens_esquecidos_lista = []
             if st.session_state.base_sistema is not None:
@@ -480,7 +470,7 @@ else:
                         conn.commit()
                         st.rerun()
 
-        # --- PROGRESSO LATERAL ---
+        # PROGRESSO LATERAL
         total_itens_base, total_contados, total_pendentes, progresso = 0, 0, 0, 0.0
         if st.session_state.base_sistema is not None and id_inventario_atual is not None:
             total_itens_base = len(st.session_state.base_sistema)
@@ -602,8 +592,8 @@ else:
                 c1, c2, c3, c4 = st.columns(4)
                 with c1: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">📦 ITENS CONTADOS</div><div class="bloco-valor">{total_auditado}</div></div>', unsafe_allow_html=True)
                 with c2: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">⚠️ COM DIVERGÊNCIA</div><div class="bloco-valor">{itens_divergentes}</div></div>', unsafe_allow_html=True)
-                with c3: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">🔢 QTD TOTAL CONTADA</div><div class="bloco-valor">{soma_contada}</div></div>', unsafe_allow_html=True)
-                with c4: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">🗄️ QTD TOTAL SISTEMA</div><div class="bloco-valor">{soma_sistema} <span style="font-size:14px; color:#e74c3c;">(Dif: {diferenca_acumulada})</span></div></div>', unsafe_allow_html=True)
+                with c3: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">QUANTIDADE CONTADA</div><div class="bloco-valor">{soma_contada}</div></div>', unsafe_allow_html=True)
+                with c4: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">QUANTIDADE SISTEMA</div><div class="bloco-valor">{soma_sistema} <span style="font-size:14px; color:#e74c3c;">(Dif: {diferenca_acumulada})</span></div></div>', unsafe_allow_html=True)
                 
                 excel_atual = converter_para_excel(df_contagens_mutaveis)
                 st.download_button(label="📥 Exportar Lançamentos Filtrados para Excel", data=excel_atual, file_name=f"contagem_{id_inventario_atual}_{st.session_state.operador}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -623,7 +613,7 @@ else:
         st.title("🔬 Controle de Qualidade Amostral do Supervisor")
         
         if not eh_supervisor:
-            st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor (Acesso Liberado para Yago Rodrigues).")
+            st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor.")
         else:
             st.subheader("📁 Controle de Inventários do Supervisor")
             
@@ -640,14 +630,14 @@ else:
                         index_default_combo = idx_c
                         break
                         
-                inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup, index=index_default_combo, key="sel_box_sup_local_v2")
+                inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup, index=index_default_combo, key="sel_box_sup_local_v3")
                 id_inv_sup_atual = inv_sup_selected.split(" – ")[0]
                 inv_sup_selecionado_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
             
             col_vazio, col_btn_pop = st.columns([7, 3])
             with col_btn_pop:
                 with st.popover("➕ Novo Inventário Supervisor", use_container_width=True):
-                    with st.form("form_novo_sup_interno_v2", clear_on_submit=True):
+                    with st.form("form_novo_sup_interno_v3", clear_on_submit=True):
                         nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                         if st.form_submit_button("Confirmar Criação", type="primary") and nome_sup_inv:
                             if not df_inventarios_sup.empty:
@@ -673,20 +663,19 @@ else:
             st.markdown("---")
 
             st.subheader("📤 Upload da Planilha de Amostragem do Supervisor")
-            arquivo_supervisor = st.file_uploader("Suba a planilha Excel para a amostragem do supervisor (.xlsx)", type=["xlsx"], key="sup_unified_excel_loader_final")
+            arquivo_supervisor = st.file_uploader("Suba a planilha Excel para a amostragem do supervisor (.xlsx)", type=["xlsx"], key="sup_unified_excel_loader_v3")
             
             if arquivo_supervisor is not None:
                 try:
                     df_temp_check = pd.read_excel(arquivo_supervisor)
                     colunas_norm = [str(c).strip().lower().replace("º", "").replace("ó", "o") for c in df_temp_check.columns]
-                    
                     tem_ativo = any(x in colunas_norm for x in ['ativo', 'n ativo', 'numero ativo', 'cod ativo'])
                     
                     if not tem_ativo:
-                        st.error("❌ Erro de Validação Estrutural: A coluna 'Ativo' não foi encontrada na planilha enviada! Corrija o arquivo Excel para prosseguir.")
+                        st.error("❌ Erro: Coluna 'Ativo' não encontrada na planilha!")
                         st.session_state.base_supervisor = None
                     elif df_temp_check.iloc[:, [i for i, c in enumerate(colunas_norm) if c in ['ativo', 'n ativo', 'numero ativo', 'cod ativo']][0]].isnull().any():
-                        st.error("⚠️ Fechamento e Carregamento Bloqueados: Foram encontrados itens com a coluna 'Ativo' em branco na planilha. O preenchimento é obrigatório!")
+                        st.error("⚠️ Erro: Coluna 'Ativo' possui valores em branco na planilha.")
                         st.session_state.base_supervisor = None
                     else:
                         if st.session_state.base_supervisor is None:
@@ -745,12 +734,12 @@ else:
                                     with col_f2: etiq_status = st.selectbox("A etiqueta física está correta?", ["Sim", "Não"])
                                     with col_f3: local_status = st.selectbox("O material está na localização correta?", ["Sim", "Não"])
                                     
-                                    ativo_sup_input = st.text_input("🔢 Número do Ativo (Obrigatório)", key="ativo_manual_sup_form")
+                                    ativo_sup_input = st.text_input("🔢 Número do Ativo (Obrigatório)")
                                         
                                     if st.form_submit_button("💾 Salvar Auditoria", type="primary", use_container_width=True):
                                         ativo_sup_l = ativo_sup_input.strip().upper()
                                         if not ativo_sup_l:
-                                            st.error("❌ Erro: O preenchimento do Número do Ativo é obrigatório para registrar a auditoria!")
+                                            st.error("❌ Erro: O Número do Ativo é obrigatório!")
                                         else:
                                             dif_sup = qtd_aud_sup - qtd_sis_sup
                                             cursor = conn.cursor()
@@ -762,7 +751,7 @@ else:
                                             st.session_state.contador_reset_sup += 1
                                             st.rerun()
 
-                    # Auditoria de 3ª Contagem
+                    # 3ª Contagem
                     st.write("### 🔄 Auditoria de Divergências (Módulo ADM de 3ª Contagem)")
                     df_geral_funcionarios_analise = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
                     
@@ -776,7 +765,7 @@ else:
                                 q_real_3 = st.number_input("Quantidade Real Constatada (3ª Contagem ADM)", min_value=0, step=1)
                                 etiq_3 = st.selectbox("Etiqueta Correta?", ["Sim", "Não"], key="etiq3")
                                 local_3 = st.selectbox("Localização Correta?", ["Sim", "Não"], key="local3")
-                                ativo_3_input = st.text_input("🔢 Número do Ativo (Obrigatório)", key="ativo_3cont_form")
+                                ativo_3_input = st.text_input("🔢 Número do Ativo (Obrigatório)")
                                 
                                 if st.form_submit_button("🔄 Gravar 3ª Contagem Definitiva", type="primary"):
                                     ativo_3_l = ativo_3_input.strip().upper()
@@ -792,10 +781,10 @@ else:
                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sim', ?)
                                         """, (id_inv_sup_atual, match_linha['id_estoque'] if 'id_estoque' in match_linha else "N/I", match_linha['desc_estoque'], material_recontar, match_linha['desc_produto'], int(match_linha['qtd_sistema']), q_real_3, dif_3, etiq_3, local_3, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ativo_3_l))
                                         conn.commit()
-                                        st.success("✅ 3ª Contagem gravada com sucesso como Auditoria Soberana!")
+                                        st.success("✅ 3ª Contagem gravada com sucesso!")
                                         st.rerun()
                         else:
-                            st.success("🎉 Nenhuma divergência operacional encontrada até o momento.")
+                            st.success("🎉 Nenhuma divergência operacional encontrada.")
 
                     st.markdown("---")
                     
@@ -818,7 +807,6 @@ else:
                     st.markdown(f"""
                         <div class="pasta-secao" style="border-left-color: #27ae60; background-color: #e8f8f5;">
                             <h4 style="margin: 0; color: #1e8449;">🔓 Relatório de Fechamento Amostral Ativo (Código: {id_inv_sup_atual})</h4>
-                            <p style="margin: 5px 0 0 0; font-size: 13px; color: #234d20;">Exibindo o balanço de auditoria consolidado e as 3ª contagens do Supervisor.</p>
                         </div>
                     """, unsafe_allow_html=True)
                     
@@ -827,7 +815,7 @@ else:
                     else:
                         st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-    # --- ABA 4: ACURACIDADE ESTOQUE ---
+# --- ABA 4: ACURACIDADE ESTOQUE (ATUALIZADA COM FILTRO DE DATA E PAGINAÇÃO SOBERANA DE 15 PASTAS) ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -882,35 +870,84 @@ else:
             st.download_button(label="📥 Exportar Planilha de Acuracidade para Excel", data=excel_acuracidade, file_name="acuracidade_depositos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         st.markdown("---")
+        
+        # --- IMPLEMENTADO: FILTRO DE DATA E PAGINAÇÃO PARA O HISTÓRICO DO SUPERVISOR ---
         st.write("### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
+        
         if df_inventarios_sup.empty:
             st.info("Nenhum histórico amostral arquivado.")
         else:
-            for idx, inv_s in df_inventarios_sup.iterrows():
-                df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
+            st.write("#### 📅 Filtrar Pastas do Supervisor por Período de Abertura")
+            c_dt_sup1, c_dt_sup2 = st.columns(2)
+            with c_dt_sup1:
+                dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
+            with c_dt_sup2:
+                dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
                 
-                c_exp, c_del = st.columns([8, 2])
-                with c_exp:
-                    with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
-                        if not df_hist_sup.empty:
-                            excel_sup_hist = converter_para_excel(df_hist_sup)
-                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
-                            st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
-                with c_del:
-                    if eh_supervisor:
-                        if st.button("🗑️ Deletar Pasta", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
-                            cursor = conn.cursor()
-                            cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
-                            cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
-                            conn.commit()
-                            st.success("Pasta deletada!")
-                            st.rerun()
+            # Filtrar as pastas de amostragem por data
+            df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
+            df_sup_filtrados = df_inventarios_sup[
+                (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
+                (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
+            ]
+            
+            if df_sup_filtrados.empty:
+                st.warning("⚠️ Nenhum histórico do supervisor foi localizado neste intervalo de datas.")
+            else:
+                # Lógica matemática de paginação do Supervisor (15 por página)
+                tam_pagina_sup = 15
+                total_itens_sup = len(df_sup_filtrados)
+                total_paginas_sup = (total_itens_sup - 1) // tam_pagina_sup + 1
+                
+                if st.session_state.pagina_historico_sup >= total_paginas_sup:
+                    st.session_state.pagina_historico_sup = 0
+                    
+                idx_ini_sup = st.session_state.pagina_historico_sup * tam_pagina_sup
+                idx_fim_sup = idx_ini_sup + tam_pagina_sup
+                
+                df_pagina_sup_atual = df_sup_filtrados.iloc[idx_ini_sup:idx_fim_sup]
+                
+                st.write(f"Exibindo do **{idx_ini_sup + 1}º** ao **{min(idx_fim_sup, total_itens_sup)}º** inventário amostral (Total de {total_itens_sup} pastas do supervisor).")
+                
+                # Renderiza as 15 pastas da página corrente
+                for idx, inv_s in df_pagina_sup_atual.iterrows():
+                    df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
+                    
+                    c_exp, c_del = st.columns([8, 2])
+                    with c_exp:
+                        with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
+                            if not df_hist_sup.empty:
+                                excel_sup_hist = converter_para_excel(df_hist_sup)
+                                st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
+                                st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
+                    with c_del:
+                        if eh_supervisor:
+                            if st.button("🗑️ Deletar Pasta", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
+                                cursor = conn.cursor()
+                                cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
+                                cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
+                                conn.commit()
+                                st.success("Pasta deletada!")
+                                st.rerun()
+                                
+                # Controles de Navegação da Paginação do Supervisor
+                st.markdown("---")
+                col_p_sup1, col_p_sup_txt, col_p_sup2 = st.columns([2, 6, 2])
+                with col_p_sup1:
+                    if st.button("◀ Anterior (Supervisor)", use_container_width=True, disabled=(st.session_state.pagina_historico_sup == 0)):
+                        st.session_state.pagina_historico_sup -= 1
+                        st.rerun()
+                with col_p_sup_txt:
+                    st.markdown(f"<p style='text-align: center; margin-top: 7px;'>Página <strong>{st.session_state.pagina_historico_sup + 1}</strong> de <strong>{total_paginas_sup}</strong></p>", unsafe_allow_html=True)
+                with col_p_sup2:
+                    if st.button("Próximo (Supervisor) ▶", use_container_width=True, disabled=(st.session_state.pagina_historico_sup >= total_paginas_sup - 1)):
+                        st.session_state.pagina_historico_sup += 1
+                        st.rerun()
 
-    # --- ABA 5: HISTÓRICO GERAL (ATUALIZADA COM FILTRO DE DATA E PAGINAÇÃO DE 15 PASTAS) ---
+    # --- ABA 5: HISTÓRICO GERAL ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
         
-        # Bloco de Filtro de Datas no Topo da aba
         st.write("### 📅 Filtrar Pastas por Período de Abertura")
         c_dt1, c_dt2 = st.columns(2)
         with c_dt1:
@@ -923,10 +960,7 @@ else:
         if df_inventarios.empty:
             st.info("Nenhum inventário operacional registrado no banco de dados.")
         else:
-            # Converter a coluna de data para datetime para fazer a filtragem segura
             df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
-            
-            # Aplicar filtro por intervalo selecionado
             df_inventarios_filtrados = df_inventarios[
                 (df_inventarios['datetime_parsed'] >= data_inicio_filtro) & 
                 (df_inventarios['datetime_parsed'] <= data_fim_filtro)
@@ -935,12 +969,10 @@ else:
             if df_inventarios_filtrados.empty:
                 st.warning("⚠️ Nenhum inventário foi localizado dentro do intervalo de datas selecionado.")
             else:
-                # Lógica matemática de paginação (15 itens por página)
                 tamanho_pagina = 15
                 total_itens = len(df_inventarios_filtrados)
                 total_paginas = (total_itens - 1) // tamanho_pagina + 1
                 
-                # Previne estouro se o filtro encolher a lista drasticamente
                 if st.session_state.pagina_historico >= total_paginas:
                     st.session_state.pagina_historico = 0
                     
@@ -948,10 +980,8 @@ else:
                 fim_idx = inicio_idx + tamanho_pagina
                 
                 df_pagina_atual = df_inventarios_filtrados.iloc[inicio_idx:fim_idx]
+                st.write(f"Exibindo do **{inicio_idx + 1}º** ao **{min(fim_idx, total_itens)}º** inventário (Total de {total_itens} pastas).")
                 
-                st.write(f"Exibindo do **{inicio_idx + 1}º** ao **{min(fim_idx, total_itens)}º** inventário (Total de {total_itens} pastas encontradas).")
-                
-                # Renderizar apenas os 15 inventários da página atual
                 for idx, inv in df_pagina_atual.iterrows():
                     id_inv_proc = inv['id'].replace('#','')
                     df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inv_proc,))
@@ -984,7 +1014,7 @@ else:
                                         })
                                 
                                 st.write("---")
-                                st.write(f"**❌ Itens Não Contados (Esquecidos/Pendentes): {len(esquecidos_linhas)} itens**")
+                                st.write(f"**❌ Itens Não Contados: {len(esquecidos_linhas)} itens**")
                                 if len(esquecidos_linhas) > 0:
                                     df_esquecidos_print = pd.DataFrame(esquecidos_linhas)
                                     st.dataframe(df_esquecidos_print, use_container_width=True, hide_index=True)
@@ -1000,7 +1030,6 @@ else:
                                 st.success("Pasta operacional excluída!")
                                 st.rerun()
                                 
-                # Controles de Navegação da Paginação (Abaixo das 15 pastas)
                 st.markdown("---")
                 col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
                 with col_pag1:
@@ -1044,42 +1073,24 @@ else:
         st.title("🏆 Desempenho e Auditoria de Prazos por Estoque")
         
         lista_estoques_fixa = [
-            {"id": "1077", "desc": "JBA - CLASSE D"},
-            {"id": "1078", "desc": "JBA - COPA E COZINHA"},
-            {"id": "1080", "desc": "JBA - DADOS - CLIENTE"},
-            {"id": "1082", "desc": "JBA - VIVO VITA - CLIENTE"},
-            {"id": "1084", "desc": "JBA - EPI-EPC"},
-            {"id": "1086", "desc": "JBA - EQUIPAMENTOS"},
-            {"id": "1088", "desc": "JBA - FERRAMENTAL"},
-            {"id": "1089", "desc": "JBA - KIT FERRAMENTAL CONTRATACOES"},
-            {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"},
-            {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
-            {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"},
-            {"id": "1106", "desc": "JBA - MOBILIARIO"},
-            {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"},
-            {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
-            {"id": "1118", "desc": "JBA - PROPRIO GERAL"},
-            {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
-            {"id": "1124", "desc": "JBA - PROPRIO TIM"},
-            {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
-            {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"},
-            {"id": "1149", "desc": "JBA - UNIFORME"},
-            {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"},
-            {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
-            {"id": "2185", "desc": "JBA - PROPRIO FATURA B PLANTA EXTERNA - BDI"},
-            {"id": "2188", "desc": "1071 - IMPLANTACAO JBA CLIENTE RESERVADO"},
-            {"id": "2189", "desc": "JBA - DEFEITO"},
-            {"id": "2190", "desc": "JBA - DEPARTAMENTO T.I"},
-            {"id": "2194", "desc": "JBA - KITS FERRAMENTAL - DEVOLUCAO"},
-            {"id": "2197", "desc": "JBA - EQUIPAMENTOS TI"},
-            {"id": "2641", "desc": "1259 - IMPLANTACAO JBA - MATERIAL REUTILIZACAO"},
-            {"id": "2643", "desc": "1724 - MANUTENCAO JBA - MATERIAL REUTILIZACAO"},
-            {"id": "2725", "desc": "JBA - RESERVA TIM"},
-            {"id": "2983", "desc": "JBA - FORNECEDORES P/ MANUTENCAO - RECARGA"},
-            {"id": "3193", "desc": "JBA - PROPRIO MATERIAL REAPROVEITAVEL"},
-            {"id": "3395", "desc": "LPA - FTTX - CLIENTE"},
-            {"id": "3484", "desc": "JBA - CELULARES DEFEITO"},
-            {"id": "3546", "desc": "JBA - CELULARES"}
+            {"id": "1077", "desc": "JBA - CLASSE D"}, {"id": "1078", "desc": "JBA - COPA E COZINHA"},
+            {"id": "1080", "desc": "JBA - DADOS - CLIENTE"}, {"id": "1082", "desc": "JBA - VIVO VITA - CLIENTE"},
+            {"id": "1084", "desc": "JBA - EPI-EPC"}, {"id": "1086", "desc": "JBA - EQUIPAMENTOS"},
+            {"id": "1088", "desc": "JBA - FERRAMENTAL"}, {"id": "1089", "desc": "JBA - KIT FERRAMENTAL CONTRATACOES"},
+            {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
+            {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
+            {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
+            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
+            {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
+            {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
+            {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
+            {"id": "2185", "desc": "JBA - PROPRIO FATURA B PLANTA EXTERNA - BDI"}, {"id": "2188", "desc": "1071 - IMPLANTACAO JBA CLIENTE RESERVADO"},
+            {"id": "2189", "desc": "JBA - DEFEITO"}, {"id": "2190", "desc": "JBA - DEPARTAMENTO T.I"},
+            {"id": "2194", "desc": "JBA - KITS FERRAMENTAL - DEVOLUCAO"}, {"id": "2197", "desc": "JBA - EQUIPAMENTOS TI"},
+            {"id": "2641", "desc": "1259 - IMPLANTACAO JBA - MATERIAL REUTILIZACAO"}, {"id": "2643", "desc": "1724 - MANUTENCAO JBA - MATERIAL REUTILIZACAO"},
+            {"id": "2725", "desc": "JBA - RESERVA TIM"}, {"id": "2983", "desc": "JBA - FORNECEDORES P/ MANUTENCAO - RECARGA"},
+            {"id": "3193", "desc": "JBA - PROPRIO MATERIAL REAPROVEITAVEL"}, {"id": "3395", "desc": "LPA - FTTX - CLIENTE"},
+            {"id": "3484", "desc": "JBA - CELULARES DEFEITO"}, {"id": "3546", "desc": "JBA - CELULARES"}
         ]
         
         df_ultimas_contagens = pd.read_sql_query("""
@@ -1089,18 +1100,13 @@ else:
         """, conn)
         
         mapa_datas = dict(zip(df_ultimas_contagens['id_estoque'].astype(str).str.strip(), df_ultimas_contagens['ultima_data']))
-        
         hoje_dt = datetime.datetime.now()
         linhas_desempenho = []
-        
-        criticos_count = 0
-        auditar_count = 0
-        bom_count = 0
+        criticos_count, auditar_count, bom_count = 0, 0, 0
         
         for est in lista_estoques_fixa:
             est_id = est["id"]
             est_desc = est["desc"]
-            
             ultima_data_str = mapa_datas.get(est_id, None)
             
             if ultima_data_str:
@@ -1110,7 +1116,7 @@ else:
                     data_formatada = dt_contagem.strftime("%d/%m/%Y %H:%M")
                 except:
                     dias_passados = 999
-                    data_formatada = "Sem histórico válido"
+                    data_formatada = "Sem histórico"
             else:
                 dias_passados = 999
                 data_formatada = "Nunca Contado"
@@ -1134,17 +1140,12 @@ else:
             })
             
         df_desempenho_final = pd.DataFrame(linhas_desempenho)
-        
         kpi1, kpi2, kpi3 = st.columns(3)
-        with kpi1:
-            st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">ESTOQUES EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
-        with kpi2:
-            st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #f1c40f;"><div class="bloco-titulo">NECESSÁRIO AUDITAR</div><div class="bloco-valor" style="color: #f39c12;">{auditar_count}</div></div>', unsafe_allow_html=True)
-        with kpi3:
-            st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 ESTADO CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
+        with kpi1: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">ESTOQUES EM DIA</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
+        with kpi2: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #f1c40f;"><div class="bloco-titulo">NECESSÁRIO AUDITAR</div><div class="bloco-valor" style="color: #f39c12;">{auditar_count}</div></div>', unsafe_allow_html=True)
+        with kpi3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
             
         st.write("")
-        st.write("**📋 Lista Completa de Controle de Validade Temporal:**")
         st.dataframe(df_desempenho_final, use_container_width=True, hide_index=True)
         
         st.markdown("---")
