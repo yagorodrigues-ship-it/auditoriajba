@@ -604,7 +604,6 @@ else:
                 st.download_button(label="📥 Exportar Lançamentos Filtrados para Excel", data=excel_atual, file_name=f"contagem_{id_inventario_atual}_{st.session_state.operador}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
                 st.write("")
 
-                # Verificação de segurança para as colunas antes de renderizar
                 colunas_existentes_contagens = list(df_contagens_mutaveis.columns)
                 ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
                 if 'lote' in colunas_existentes_contagens:
@@ -650,7 +649,7 @@ else:
                                 df_limpo_sup_calc = df_inventarios_sup['id'].str.replace('SUP-#', '', regex=False).astype(int)
                                 maior_id_sup = df_limpo_sup_calc.max()
                             else:
-                                maior_id_sup = 0
+                                mayor_id_sup = 0
                             
                             novo_id_sup = f"SUP-#{maior_id_sup + 1}"
                             hoje_sup = datetime.date.today().strftime("%Y-%m-%d")
@@ -668,7 +667,6 @@ else:
 
             st.markdown("---")
 
-            # --- UPLOAD DA PLANILHA DO SUPERVISOR NO TOPO ---
             st.subheader("📤 Upload da Planilha de Amostragem do Supervisor")
             arquivo_supervisor = st.file_uploader("Suba a planilha Excel para a amostragem do supervisor (.xlsx)", type=["xlsx"], key="sup_unified_excel_loader_final")
             
@@ -879,7 +877,7 @@ else:
             st.download_button(label="📥 Exportar Planilha de Acuracidade para Excel", data=excel_acuracidade, file_name="acuracidade_depositos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         st.markdown("---")
-        st.write("### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
+        st.write("### ### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
         if df_inventarios_sup.empty:
             st.info("Nenhum histórico amostral arquivado.")
         else:
@@ -919,10 +917,8 @@ else:
                         if not df_hist_inv.empty:
                             excel_geral_hist = converter_para_excel(df_hist_inv)
                             st.download_button(label="📥 Baixar Lançamentos Feitos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}")
-                            
-                            colunas_existentes_hist = list(df_hist_inv.columns)
                             ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
-                            if 'lote' in colunas_existentes_hist:
+                            if 'lote' in df_hist_inv.columns:
                                 ordem_colunas_print.append('lote')
                                 
                             st.write("**📋 Itens Efetivamente Contados:**")
@@ -962,8 +958,13 @@ else:
         if st.session_state.base_sistema is not None:
             st.subheader("📄 Espelho Base de Saldo do Upload")
             
-            df_lancados_reais = pd.read_sql_query("SELECT cod_produto, operador FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
-            mapa_contados = dict(zip(df_lancados_reais['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_reais['operador']))
+            # --- CORREÇÃO CONTRA NAMEERROR DA IMAGEM ---
+            # Adicionada validação de segurança caso o inventário atual ainda não esteja definido
+            if id_inventario_atual:
+                df_lancados_reais = pd.read_sql_query("SELECT cod_produto, operador FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
+                mapa_contados = dict(zip(df_lancados_reais['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_reais['operador']))
+            else:
+                mapa_contados = {}
             
             def calcular_status_linha(linha_cod):
                 cod_chave = str(linha_cod).upper().strip()
