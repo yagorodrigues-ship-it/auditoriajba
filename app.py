@@ -725,26 +725,35 @@ else:
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
         st.dataframe(df_todas_auditorias_banco, use_container_width=True)
 
-    # --- ABA 5: HISTÓRICO GERAL (FIXADA PARA FILTRAR PASTAS SEGURO POR DATA) ---
+    # --- ABA 5: HISTÓRICO GERAL (FIXADA - EM BRANCO POR PADRÃO) ---
     with abas_render[4]:
         st.title("📁 Arquivo Geral de Movimentações")
+        
+        # --- AJUSTE SOLICITADO: DATAS EM BRANCO POR PADRÃO ---
         c_dt1, c_dt2 = st.columns(2)
-        with c_dt1: data_inicio_filtro = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=90))
-        with c_dt2: data_fim_filtro = st.date_input("Data Final", datetime.date.today() + datetime.timedelta(days=7))
+        with c_dt1: 
+            data_inicio_filtro = st.date_input("Data Inicial (Opcional)", value=None, key="hist_dt_ini_blank")
+        with c_dt2: 
+            data_fim_filtro = st.date_input("Data Final (Opcional)", value=None, key="hist_dt_fim_blank")
+            
+        st.markdown("---")
         
-        # Ajuste na formatação para que a verificação de data coincida milimetricamente com a string do banco de dados
+        # Filtro de Unidade Isolado
         df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
-        df_filtrados = df_inventarios[
-            (df_inventarios['datetime_parsed'] >= data_inicio_filtro) & 
-            (df_inventarios['datetime_parsed'] <= data_fim_filtro) & 
-            (df_inventarios['unidade'] == st.session_state.unidade_selecionada)
-        ]
+        df_filtrados = df_inventarios[df_inventarios['unidade'] == st.session_state.unidade_selecionada]
         
+        # Se o usuário preencher os filtros de data opcionais, o sistema filtra. Caso contrário, ignora.
+        if data_inicio_filtro:
+            df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] >= data_inicio_filtro]
+        if data_fim_filtro:
+            df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] <= data_fim_filtro]
+            
         st.write(f"Total de pastas nesta unidade: {len(df_filtrados)}")
         
         if df_filtrados.empty:
-            st.info("Nenhum inventário registrado no período selecionado.")
+            st.info("Nenhum inventário registrado ou localizado no filtro selecionado.")
         else:
+            # Paginação estruturada de 15 em 15
             tamanho_pagina = 15
             total_itens = len(df_filtrados)
             total_paginas = (total_itens - 1) // tamanho_pagina + 1
@@ -769,7 +778,7 @@ else:
                     else:
                         st.info("Nenhuma contagem feita nesta pasta.")
                         
-            # Controles de paginação
+            # Botões de controle Anterior / Próximo
             st.markdown("---")
             col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
             with col_pag1:
