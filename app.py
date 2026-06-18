@@ -338,77 +338,86 @@ else:
             st.warning("⚠️ **Bloqueado:** Nenhum lote de inventário selecionado ou ativo. Use a barra lateral para criar ou selecionar um lote.")
         elif st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a Base Geral no menu lateral para iniciar as bipagens.")
-        elif inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado":
-            st.error("🔒 Este lote de inventário foi finalizado e fechado.")
         else:
-            st.subheader(f"📝 Lançamento de Contagem Ativa – Lote {id_inventario_atual}")
-            bip_prod = st.text_input("💻 Bipar Código do Produto", key=f"bip_op_{st.session_state.contador_reset}")
-            if bip_prod:
-                prod_l = str(bip_prod).strip().upper()
-                it = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip() == prod_l]
-                if not it.empty:
-                    row = it.iloc[0]
-                    
-                    # Verificação se o item está em fluxo de 2ª Contagem ordenada pelo Supervisor
-                    id_p_limpo = id_inventario_atual.replace('#','')
-                    df_recont_check = pd.read_sql_query("SELECT id, recontagem FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND unidade = ? ORDER BY id DESC LIMIT 1", conn, params=(id_p_limpo, prod_l, st.session_state.unidade_selecionada))
-                    
-                    is_fluxo_recontagem = False
-                    if not df_recont_check.empty and df_recont_check.iloc[0]['recontagem'] == 'Pendente':
-                        is_fluxo_recontagem = True
-                        st.warning("⚠️ **MODO RECONTAGEM:** Este item está na 2ª contagem devido a uma divergência apontada pelo Supervisor.")
-                    
-                    c_b1, c_b2, c_b3, c_b4 = st.columns(4)
-                    c_b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{prod_l}</div></div>', unsafe_allow_html=True)
-                    c_b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO / LOCAL</div><div class="bloco-valor" style="font-size:22px;">{row[c_loc]}</div></div>', unsafe_allow_html=True)
-                    c_b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{row[c_un]}</div></div>', unsafe_allow_html=True)
-                    c_b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. ESTOQUE</div><div class="bloco-valor">{row[c_est]}</div></div>', unsafe_allow_html=True)
-                    
-                    # --- DESCRIÇÃO DO PRODUTO DESTACADA EXATAMENTE COMO OS CARDS SUPERIORES ---
-                    st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
-                    
-                    tem_ativo_na_base = False
-                    if c_atv_b in it.columns:
-                        val_at = str(row[c_atv_b]).strip()
-                        if val_at and val_at.lower() != "nan" and val_at != "": tem_ativo_na_base = True
-
-                    with st.form("f_salva_contagem", clear_on_submit=True):
-                        q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
-                        if tem_ativo_na_base:
-                            n_ativ = st.text_input("🔢 Número do Ativo (OBRIGATÓRIO)")
-                        else:
-                            n_ativ = st.text_input("🔢 Número do Ativo (Opcional)")
-                        obs = st.text_input("Observação")
+            id_p_limpo = id_inventario_atual.replace('#','')
+            
+            # --- CORREÇÃO DO BLOQUEIO DA IMAGEM image_d4feb9.png ---
+            # Verifica se existem segundas contagens ainda ativas ('Pendente') criadas pelo supervisor neste lote
+            df_recont_totais = pd.read_sql_query(
+                "SELECT COUNT(*) as total_p FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", 
+                conn, params=(id_p_limpo, st.session_state.unidade_selecionada)
+            )
+            tem_recontagem_ativa = int(df_recont_totais.iloc[0]['total_p']) > 0
+            
+            # Se o lote estiver Fechado E não houver nenhuma recontagem ativa pendente, bloqueia a tela.
+            # Caso o lote esteja fechado mas HÁ recontagem pendente, o sistema ignora o bloqueio e permite bipar!
+            if inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado" and not tem_recontagem_ativa:
+                st.error("🔒 Este lote de inventário foi finalizado e fechado.")
+            else:
+                st.subheader(f"📝 Lançamento de Contagem Ativa – Lote {id_inventario_atual}")
+                bip_prod = st.text_input("💻 Bipar Código do Produto", key=f"bip_op_{st.session_state.contador_reset}")
+                if bip_prod:
+                    prod_l = str(bip_prod).strip().upper()
+                    it = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip() == prod_l]
+                    if not it.empty:
+                        row = it.iloc[0]
                         
-                        if st.form_submit_button("Confirmar Lançamento", type="primary"):
-                            if q_cont == 0:
-                                st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
-                            elif tem_ativo_na_base and not n_ativ.strip():
-                                st.error("❌ Erro: O campo Ativo é obrigatório forçando para este produto!")
+                        # Verifica se este material específico está em fluxo de 2ª Contagem ordenada pelo Supervisor
+                        df_recont_check = pd.read_sql_query("SELECT id, recontagem FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND unidade = ? ORDER BY id DESC LIMIT 1", conn, params=(id_p_limpo, prod_l, st.session_state.unidade_selecionada))
+                        
+                        is_fluxo_recontagem = False
+                        if not df_recont_check.empty and df_recont_check.iloc[0]['recontagem'] == 'Pendente':
+                            is_fluxo_recontagem = True
+                            st.warning("⚠️ **MODO RECONTAGEM:** Este item está na 2ª contagem devido a uma divergência apontada pelo Supervisor.")
+                        
+                        c_b1, c_b2, c_b3, c_b4 = st.columns(4)
+                        c_b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{prod_l}</div></div>', unsafe_allow_html=True)
+                        c_b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO / LOCAL</div><div class="bloco-valor" style="font-size:22px;">{row[c_loc]}</div></div>', unsafe_allow_html=True)
+                        c_b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{row[c_un]}</div></div>', unsafe_allow_html=True)
+                        c_b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. ESTOQUE</div><div class="bloco-valor">{row[c_est]}</div></div>', unsafe_allow_html=True)
+                        
+                        st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
+                        
+                        tem_ativo_na_base = False
+                        if c_atv_b in it.columns:
+                            val_at = str(row[c_atv_b]).strip()
+                            if val_at and val_at.lower() != "nan" and val_at != "": tem_ativo_na_base = True
+
+                        with st.form("f_salva_contagem", clear_on_submit=True):
+                            q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
+                            if tem_ativo_na_base:
+                                n_ativ = st.text_input("🔢 Número do Ativo (OBRIGATÓRIO)")
                             else:
-                                cursor = conn.cursor()
-                                q_sis = int(row[c_qtd]) if pd.notna(row[c_qtd]) else 0
-                                
-                                if is_fluxo_recontagem:
-                                    # Se está em recontagem, atualiza o registro com a quantidade definitiva ajustada da 2ª contagem
-                                    id_reg_recont = int(df_recont_check.iloc[0]['id'])
-                                    cursor.execute("""
-                                        UPDATE contagens 
-                                        SET qtd_contada = ?, diferenca = ?, recontagem = 'Realizada', operador = ?, data_hora = ?, observacao = ?
-                                        WHERE id = ?
-                                    """, (q_cont, q_cont - q_sis, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"[2a Contagem] {obs}", id_reg_recont))
+                                n_ativ = st.text_input("🔢 Número do Ativo (Opcional)")
+                            obs = st.text_input("Observação")
+                            
+                            if st.form_submit_button("Confirmar Lançamento", type="primary"):
+                                if q_cont == 0:
+                                    st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
+                                elif tem_ativo_na_base and not n_ativ.strip():
+                                    st.error("❌ Erro: O campo Ativo é obrigatório para este produto!")
                                 else:
-                                    # Fluxo padrão de primeira contagem
-                                    cursor.execute("""
-                                        INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?)
-                                    """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, n_ativ.strip().upper(), obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
-                                
-                                conn.commit()
-                                st.success("Contagem processada e armazenada com sucesso!")
-                                st.session_state.contador_reset += 1
-                                st.rerun()
-                else: st.error("Material/Produto não localizado na base de dados carregada.")
+                                    cursor = conn.cursor()
+                                    q_sis = int(row[c_qtd]) if pd.notna(row[c_qtd]) else 0
+                                    
+                                    if is_fluxo_recontagem:
+                                        id_reg_recont = int(df_recont_check.iloc[0]['id'])
+                                        cursor.execute("""
+                                            UPDATE contagens 
+                                            SET qtd_contada = ?, diferenca = ?, recontagem = 'Realizada', operador = ?, data_hora = ?, observacao = ?
+                                            WHERE id = ?
+                                        """, (q_cont, q_cont - q_sis, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"[2a Contagem] {obs}", id_reg_recont))
+                                    else:
+                                        cursor.execute("""
+                                            INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?)
+                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, n_ativ.strip().upper(), obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
+                                    
+                                    conn.commit()
+                                    st.success("Contagem processada e armazenada com sucesso!")
+                                    st.session_state.contador_reset += 1
+                                    st.rerun()
+                    else: st.error("Material/Produto não localizado na base de dados carregada.")
 
     # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO
     with abas_gui[1]:
@@ -705,11 +714,10 @@ else:
 
     # RECURSOS EXCLUSIVOS DO SUPERVISOR
     if eh_supervisor:
-        # 🔬 ABA 7: PAINEL SUPERVISOR
+        # 🔬 PAINEL SUPERVISOR
         with abas_gui[6]:
             st.title("🔬 Módulo Amostral do Supervisor e Fluxo de Recontagem")
             
-            # --- NOVO MECANISMO DE GERAR 2ª CONTAGEM DE ITENS DIVERGENTES ---
             if id_inventario_atual:
                 st.write(f"### 🔄 Gestão de Recontagem Inteligente do Lote Ativo ({id_inventario_atual})")
                 id_p_limpo = id_inventario_atual.replace('#','')
