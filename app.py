@@ -186,7 +186,6 @@ if not st.session_state.logged_in:
                     doc_l = limpar_documento(id_l)
                     cursor = conn.cursor()
                     
-                    # CORREÇÃO DO LOGIN: Uso de UPPER para evitar problemas com acentos ou caixa baixa
                     cursor.execute("""
                         SELECT nome, unidade, cargo 
                         FROM usuarios 
@@ -263,9 +262,9 @@ else:
         else:
             lista_inv = []
             for idx, r in df_inventarios.iterrows():
-                id_limpo_r = r['id'].replace('#','#')
+                id_limpo_r = r['id'].replace('#','')
                 cursor_check = conn.cursor()
-                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r.replace('#',''), st.session_state.unidade_selecionada))
+                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r, st.session_state.unidade_selecionada))
                 possui_pendente = cursor_check.fetchone()[0] > 0
                 
                 if r['status'] == 'Fechado':
@@ -412,7 +411,6 @@ else:
                                 cursor = conn.cursor()
                                 val_ativo_inserido = n_ativ.strip().upper()
                                 
-                                # --- CORREÇÃO DE DUPLICIDADE DE ATIVOS E ITENS NORMAS ---
                                 if not is_fluxo_recontagem:
                                     if tem_ativo_na_base:
                                         if not val_ativo_inserido:
@@ -436,7 +434,6 @@ else:
                                         if cursor.fetchone()[0] > 0:
                                             st.error("❌ Erro: Este item sem ativo já foi contabilizado neste lote!")
                                             st.stop()
-                                # ---------------------------------------------------
 
                                 if q_cont == 0:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
@@ -692,7 +689,9 @@ else:
                 certos_qtd = len(grupo[grupo['diferenca'] == 0])
                 certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                 certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
-                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in group.columns else "Não Informado"
+                
+                # --- CORREÇÃO DO NAMEERROR: Alterado de group.columns para grupo.columns ---
+                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
@@ -951,7 +950,7 @@ else:
                     if st.button("🗑️ Excluir Estoque"):
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM cadastros_estoques WHERE id = ? AND unidade = ?", (est_del, st.session_state.unidade_selecionada))
-                        conn.commit(); st.rerun()
+                        conn.commit(); r.rerun()
 
     # 👥 ABA 9: GESTÃO DE USUÁRIOS
     if eh_yago_master:
