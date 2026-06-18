@@ -17,7 +17,7 @@ def inicializar_banco():
     conn = conectar_banco()
     cursor = conn.cursor()
     
-    # Tabela de usuários/colaboradores com coluna de UNIDADE e CARGO
+    # Tabela de usuários/colaboradores com nível de acesso (cargo)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,7 +30,17 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de inventários gerais com coluna de UNIDADE
+    # Tabela dinâmica para os Supervisores cadastrarem seus próprios estoques por unidade
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS cadastros_estoques (
+            id TEXT,
+            descricao TEXT,
+            unidade TEXT,
+            PRIMARY KEY (id, unidade)
+        )
+    """)
+    
+    # Tabela de inventários gerais
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios (
             id TEXT PRIMARY KEY,
@@ -41,18 +51,7 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de inventários do Supervisor com coluna de UNIDADE
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS inventarios_supervisor (
-            id TEXT PRIMARY KEY,
-            nome TEXT,
-            data TEXT,
-            status TEXT,
-            unidade TEXT DEFAULT 'JURUBATUBA'
-        )
-    """)
-    
-    # Tabela de contagens dos funcionários com coluna de UNIDADE
+    # Tabela de contagens dos funcionários
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS contagens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -74,7 +73,7 @@ def inicializar_banco():
         )
     """)
 
-    # Tabela de Auditorias do Supervisor com coluna de UNIDADE
+    # Tabela de Auditorias do Supervisor
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS auditorias_supervisor (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -96,35 +95,50 @@ def inicializar_banco():
         )
     """)
     
-    # --- MIGRAÇÕES OPERACIONAIS DE ESTRUTURA ---
-    tab_alteracoes = {
-        "usuarios": ["unidade TEXT DEFAULT 'JURUBATUBA'", "cargo TEXT DEFAULT 'Almoxarife'"],
-        "inventarios": ["unidade TEXT DEFAULT 'JURUBATUBA'"],
-        "inventarios_supervisor": ["unidade TEXT DEFAULT 'JURUBATUBA'"],
-        "contagens": ["lote TEXT DEFAULT ''", "unidade TEXT DEFAULT 'JURUBATUBA'"],
-        "auditorias_supervisor": ["unidade TEXT DEFAULT 'JURUBATUBA'"]
-    }
-    
-    for tabela, colunas in tab_alteracoes.items():
-        try:
-            cursor.execute(f"PRAGMA table_info({tabela})")
-            cols_existentes = [c[1] for c in cursor.fetchall()]
-            for col_def in colunas:
-                nome_col = col_def.split()[0]
-                if nome_col not in cols_existentes:
-                    cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {col_def}")
-                    conn.commit()
-        except:
-            pass
+    # --- MIGRAÇÕES E CARGA INICIAL DE VALORES PADRÕES ---
+    try:
+        cursor.execute("PRAGMA table_info(usuarios)")
+        cols = [c[1] for c in cursor.fetchall()]
+        if "cargo" not in cols:
+            cursor.execute("ALTER TABLE usuarios ADD COLUMN cargo TEXT DEFAULT 'Almoxarife'")
+            conn.commit()
+    except:
+        pass
 
-    # Garantir que Yago e Administrador padrão nasçam como Supervisor
+    # Garantir que os administradores e seu usuário comecem com nível máximo
     try:
         cursor.execute("UPDATE usuarios SET cargo = 'Supervisor' WHERE nome LIKE '%Yago Rodrigues%' OR nome LIKE '%Administrador%'")
         conn.commit()
     except:
         pass
 
-    # Criar administrador padrão se a tabela estiver vazia
+    # Inserção padrão caso a tabela de estoques iniciais de Jurubatuba esteja vazia
+    cursor.execute("SELECT COUNT(*) FROM cadastros_estoques WHERE unidade = 'JURUBATUBA'")
+    if cursor.fetchone()[0] == 0:
+        estoques_padrao_jba = [
+            ("1077", "JBA - CLASSE D"), ("1078", "JBA - COPA E COZINHA"),
+            ("1080", "JBA - DADOS - CLIENTE"), ("1082", "JBA - VIVO VITA - CLIENTE"),
+            ("1084", "JBA - EPI-EPC"), ("1086", "JBA - EQUIPAMENTOS"),
+            ("1088", "JBA - FERRAMENTAL"), ("1089", "JBA - KIT FERRAMENTAL CONTRATACOES"),
+            ("1090", "JBA - FERRAMENTAS DE CANTEIRO"), ("1102", "1385 - LA JBA - CLIENTE"),
+            ("1104", "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"), ("1106", "JBA - MOBILIARIO"),
+            ("1108", "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"), ("1113", "1385 - MANUTENCAO JBA - CLIENTE"),
+            ("1118", "JBA - PROPRIO GERAL"), ("1122", "JBA - GRANDES OBRAS IMPLANTACAO"),
+            ("1124", "JBA - PROPRIO TIM"), ("1140", "JBA - SPEEDY/FTTX - CLIENTE"),
+            ("1144", "1385 - MANUTENCAO JBA CLIENTE RESERVADO"), ("1149", "JBA - UNIFORME"),
+            ("2149", "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"), ("2183", "1071 - BOL IMPLANTANCAO JBA - CLIENTE"),
+            ("2185", "JBA - PROPRIO FATURA B PLANTA EXTERNA - BDI"), ("2188", "1071 - IMPLANTACAO JBA CLIENTE RESERVADO"),
+            ("2189", "JBA - DEFEITO"), ("2190", "JBA - DEPARTAMENTO T.I"),
+            ("2194", "JBA - KITS FERRAMENTAL - DEVOLUCAO"), ("2197", "JBA - EQUIPAMENTOS TI"),
+            ("2641", "1259 - IMPLANTACAO JBA - MATERIAL REUTILIZACAO"), ("2643", "1724 - MANUTENCAO JBA - MATERIAL REUTILIZACAO"),
+            ("2725", "JBA - RESERVA TIM"), ("2983", "JBA - FORNECEDORES P/ MANUTENCAO - RECARGA"),
+            ("3193", "JBA - PROPRIO MATERIAL REAPROVEITAVEL"), ("3395", "LPA - FTTX - CLIENTE"),
+            ("3484", "JBA - CELULARES DEFEITO"), ("3546", "JBA - CELULARES")
+        ]
+        cursor.executemany("INSERT OR IGNORE INTO cadastros_estoques (id, descricao, unidade) VALUES (?, ?, 'JURUBATUBA')", estoques_padrao_jba)
+        conn.commit()
+
+    # Criar administrador raiz se não existir nenhum registro
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
@@ -137,32 +151,21 @@ def inicializar_banco():
 
 inicializar_banco()
 
-# --- CARREGAMENTO SEGURO DOS INVENTÁRIOS FILTRADOS POR UNIDADE ---
+# --- ESTADOS DE SESSÃO DA PLATAFORMA ---
+if 'logged_in' not in st.session_state:
+    st.session_state.logged_in = False
+if 'operador' not in st.session_state:
+    st.session_state.operador = ""
+if 'tela_acesso' not in st.session_state:
+    st.session_state.tela_acesso = "login"
 if 'unidade_selecionada' not in st.session_state:
     st.session_state.unidade_selecionada = "JURUBATUBA"
 if 'cargo_usuario' not in st.session_state:
     st.session_state.cargo_usuario = "Almoxarife"
+if 'base_sistema' not in st.session_state:
+    st.session_state.base_sistema = None
 
-conn_init = conectar_banco()
-try:
-    df_inventarios = pd.read_sql_query("SELECT * FROM inventarios WHERE unidade = ? ORDER BY data DESC, id DESC", conn_init, params=(st.session_state.unidade_selecionada,))
-except:
-    df_inventarios = pd.DataFrame(columns=['id', 'nome', 'data', 'status', 'unidade'])
-
-try:
-    df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor WHERE unidade = ? ORDER BY data DESC, id DESC", conn_init, params=(st.session_state.unidade_selecionada,))
-except:
-    df_inventarios_sup = pd.DataFrame(columns=['id', 'nome', 'data', 'status', 'unidade'])
-conn_init.close()
-
-# --- FUNÇÃO AUXILIAR PARA EXPORTAR EXCEL ---
-def converter_para_excel(df):
-    output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Relatorio')
-    return output.getvalue()
-
-# --- ESTILIZAÇÃO PERSONALIZADA ---
+# --- ESTILIZAÇÃO INTERNA CSS ---
 st.markdown("""
     <style>
     div.stButton > button:first-child[kind="primary"] {
@@ -174,60 +177,6 @@ st.markdown("""
     div.stButton > button:first-child[kind="primary"]:hover {
         background-color: #e67e22;
         border-color: #e67e22;
-        color: white;
-    }
-    .bloco-info {
-        background-color: #ebf5fb;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #d4e6f1;
-        text-align: left;
-        margin-bottom: 10px;
-    }
-    .bloco-info-link {
-        background-color: #fef9e7;
-        padding: 15px;
-        border-radius: 8px;
-        border: 1px solid #f9e79f;
-        text-align: center;
-        margin-top: 15px;
-        margin-bottom: 15px;
-    }
-    .bloco-titulo {
-        color: #7f8c8d;
-        font-size: 11px;
-        font-weight: bold;
-        letter-spacing: 0.5px;
-    }
-    .bloco-valor {
-        color: #1b4f72;
-        font-size: 24px;
-        font-weight: bold;
-    }
-    .card-sistema {
-        background-color: #ebf5fb;
-        padding: 20px;
-        border-radius: 8px;
-        border: 1px solid #d4e6f1;
-        margin-top: 15px;
-        margin-bottom: 25px;
-    }
-    .card-lateral {
-        background-color: #1a233a;
-        padding: 12px;
-        border-radius: 8px;
-        margin-bottom: 12px;
-        border-left: 4px solid #2563eb;
-    }
-    .card-lateral-titulo {
-        color: #93c5fd;
-        font-size: 11px;
-        font-weight: bold;
-    }
-    .card-lateral-valor {
-        color: white;
-        font-size: 28px;
-        font-weight: bold;
     }
     </style>
 """, unsafe_allow_html=True)
@@ -235,55 +184,20 @@ st.markdown("""
 def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
 
-# --- CAPTURA DE PARÂMETROS DE URL ---
-query_params = st.query_params
-
-if "recuperar" in query_params and "token" in query_params:
-    st.title("🔑 Redefinição de Senha Seguro JBA")
-    try:
-        email_token = base64.b64decode(query_params["token"]).decode('utf-8')
-    except:
-        email_token = ""
-
-    if not email_token:
-        st.error("❌ Link inválido ou corrompido.")
-    else:
-        st.info(f"Alterando a senha da conta vinculada ao e-mail: **{email_token}**")
-        _, col_senha_center, _ = st.columns([2, 4, 2])
-        with col_senha_center:
-            with st.form("form_nova_senha_janela"):
-                nova_senha_f = st.text_input("Digite a Nova Senha", type="password")
-                confirma_senha_f = st.text_input("Confirme a Nova Senha", type="password")
-                
-                if st.form_submit_button("Confirmar e Atualizar Senha", type="primary", use_container_width=True):
-                    if not nova_senha_f:
-                        st.error("⚠️ Digite uma senha válida.")
-                    elif nova_senha_f != confirma_senha_f:
-                        st.error("❌ As senhas digitadas não conferem.")
-                    else:
-                        conn = conectar_banco()
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
-                        conn.commit()
-                        conn.close()
-                        st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
-    st.stop()
-
-# --- TELA DE ACESSO CENTRALIZADA E COMPACTA ---
+# --- GESTÃO DE ACESSO / LOGIN ---
 if not st.session_state.logged_in:
     conn = conectar_banco()
     _, col_login_focada, _ = st.columns([3, 4, 3])
     
     with col_login_focada:
         if st.session_state.tela_acesso == "login":
-            st.markdown("<h2 style='text-align: center; border-bottom: none;'>🔒 Acesso ao Sistema</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align: center;'>🔒 Acesso ao Sistema JBA</h2>", unsafe_allow_html=True)
             with st.form("login_form"):
                 identificador = st.text_input("CPF (somente números) ou E-mail")
                 senha = st.text_input("Senha", type="password")
-                unidade_login = st.selectbox("📍 Localidade da Auditoria", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"])
+                unidade_login = st.selectbox("📍 Localidade da Operação", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"])
                 
-                botao_login = st.form_submit_button("Entrar no Sistema", type="primary", use_container_width=True)
-                if botao_login:
+                if st.form_submit_button("Entrar no Sistema", type="primary", use_container_width=True):
                     id_limpo = identificador.strip()
                     doc_limpo = limpar_documento(id_limpo)
                     cursor = conn.cursor()
@@ -296,20 +210,18 @@ if not st.session_state.logged_in:
                         st.session_state.cargo_usuario = user[2]
                         st.rerun()
                     else:
-                        st.error("❌ Credenciais incorretas ou não cadastradas nesta unidade!")
+                        st.error("❌ Credenciais incorretas ou não vinculadas a esta localidade!")
                         
             c_cad, c_rec = st.columns(2)
             with c_cad:
                 if st.button("📝 Criar nova conta", use_container_width=True):
-                    st.session_state.tela_acesso = "cadastro"
-                    st.rerun()
+                    st.session_state.tela_acesso = "cadastro"; st.rerun()
             with c_rec:
                 if st.button("🔑 Alterar Senha", use_container_width=True):
-                    st.session_state.tela_acesso = "recuperar"
-                    st.rerun()
+                    st.session_state.tela_acesso = "recuperar"; st.rerun()
                     
         elif st.session_state.tela_acesso == "cadastro":
-            st.markdown("<h2 style='text-align: center; border-bottom: none;'>📝 Cadastro de Colaborador</h2>", unsafe_allow_html=True)
+            st.markdown("<h2 style='text-align: center;'>📝 Cadastro de Colaborador</h2>", unsafe_allow_html=True)
             with st.form("cadastro_form"):
                 novo_nome = st.text_input("Nome Completo")
                 novo_cpf = st.text_input("CPF (Apenas números)")
@@ -318,118 +230,77 @@ if not st.session_state.logged_in:
                 confirma_senha = st.text_input("Confirme a Senha", type="password")
                 unidade_cadastro = st.selectbox("📍 Vincular à Localidade", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"])
                 
-                btn_cad = st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True)
-                if btn_cad:
+                if st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True):
                     cpf_l = limpar_documento(novo_cpf)
                     email_l = novo_email.strip()
-                    
                     if not novo_nome or not cpf_l or not email_l or not nova_senha:
                         st.error("⚠️ Preencha todos os campos!")
                     elif nova_senha != confirma_senha:
-                        st.error("❌ As senhas não batem!")
+                        st.error("❌ As senhas não conferem!")
                     else:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT email, cpf FROM usuarios WHERE cpf = ? OR email = ?", (cpf_l, email_l))
-                        usuario_existente = cursor.fetchone()
-                        
-                        if usuario_existente:
-                            st.error("❌ Erro de Cadastro: CPF ou E-mail já ativo!")
-                            token_cripto = base64.b64encode(email_l.encode('utf-8')).decode('utf-8')
-                            link_direto_cadastro = f"https://auditoriajba.streamlit.app/?recuperar=true&token={token_cripto}"
-                            st.markdown(f'<a href="{link_direto_cadastro}" target="_blank"><button style="width:100%; background-color:#e74c3c; color:white; border:none; padding:8px; border-radius:4px; font-weight:bold;">🔗 Gerar Nova Senha Agora</button></a>', unsafe_allow_html=True)
-                        else:
-                            try:
-                                cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
-                                conn.commit()
-                                st.success("✅ Cadastrado com sucesso!")
-                                st.session_state.tela_acesso = "login"
-                                st.rerun()
-                            except Exception as e:
-                                st.error(f"❌ Erro operacional: {e}")
+                        try:
+                            cursor = conn.cursor()
+                            cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
+                            conn.commit()
+                            st.success("✅ Cadastro efetuado com sucesso! Aguarde o supervisor conceder permissões se necessário.")
+                            st.session_state.tela_acesso = "login"
+                            st.rerun()
+                        except:
+                            st.error("❌ CPF ou E-mail já registrado no sistema.")
             if st.button("◀ Voltar"):
-                st.session_state.tela_acesso = "login"
-                st.rerun()
-                
-        elif st.session_state.tela_acesso == "recuperar":
-            st.markdown("<h2 style='text-align: center; border-bottom: none;'>🔑 Recuperação de Senha</h2>", unsafe_allow_html=True)
-            with st.form("rec_form"):
-                validador = st.text_input("Informe o seu E-mail cadastrado")
-                btn_rec = st.form_submit_button("Gerar Link de Alteração de Senha", type="primary", use_container_width=True)
-                
-                if btn_rec:
-                    v_limpo = validador.strip()
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT id, email FROM usuarios WHERE email = ?", (v_limpo,))
-                    row = cursor.fetchone()
-                    if row:
-                        token_cripto = base64.b64encode(row[1].encode('utf-8')).decode('utf-8')
-                        link_final = f"https://auditoriajba.streamlit.app/?recuperar=true&token={token_cripto}"
-                        st.markdown(f'<div class="bloco-info-link"><p>📧 Link Gerado!</p><a href="{link_final}" target="_blank"><button style="background-color:#e74c3c; color:white; border:none; padding:10px; border-radius:4px; font-weight:bold; width:100%;">🔗 Abrir Janela de Nova Senha</button></a></div>', unsafe_allow_html=True)
-                    else:
-                        st.error("❌ E-mail não localizado.")
-            if st.button("◀ Voltar para Tela de Login"):
-                st.session_state.tela_acesso = "login"
-                st.rerun()
+                st.session_state.tela_acesso = "login"; st.rerun()
     conn.close()
 
-# --- TELA LOGADA DO SISTEMA ---
+# --- TELA INTERNA PRINCIPAL DO SISTEMA ---
 else:
     conn = conectar_banco()
     
-    df_inventarios = pd.read_sql_query("SELECT * FROM inventarios WHERE unidade = ? ORDER BY data DESC, id DESC", conn, params=(st.session_state.unidade_selecionada,))
-    df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor WHERE unidade = ? ORDER BY data DESC, id DESC", conn, params=(st.session_state.unidade_selecionada,))
+    # Validação de permissões de visualização hierárquica
+    nome_limpo_check = st.session_state.operador.lower()
+    eh_supervisor = st.session_state.cargo_usuario == "Supervisor" or "yago" in nome_limpo_check or "admin" in nome_limpo_check
+    eh_yago_master = "yago" in nome_limpo_check or "admin" in nome_limpo_check
+
+    # Leitura dos inventários da unidade atual
+    df_inventarios = pd.read_sql_query("SELECT * FROM inventarios WHERE unidade = ? ORDER BY id DESC", conn, params=(st.session_state.unidade_selecionada,))
     
-    nome_usuario_logado_limpo = st.session_state.operador.lower()
-    
-    # --- CONTROLE DINÂMICO DE CARGOS ---
-    eh_supervisor = st.session_state.cargo_usuario == "Supervisor" or "yago rodrigues" in nome_usuario_logado_limpo
-    eh_yago_master = "yago rodrigues" in nome_usuario_logado_limpo or "administrador tel" in nome_usuario_logado_limpo
-    
-    id_inventario_atual_inicial = df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else ""
-    
-    # --- MAPEAMENTO E DEPARA DE COLUNAS ANTECIPADO ---
+    # MAPEAMENTO DE COLUNAS DA PLANILHA EXCEL CARREGADA
     col_cod, col_desc, col_local, col_unidade, col_qtd, col_id_estoque = "", "", "", "", "", ""
     if st.session_state.base_sistema is not None:
         colunas_reais = list(st.session_state.base_sistema.columns)
         def encontrar_coluna(opcoes, default_idx):
             for opcao in opcoes:
                 for col in colunas_reais:
-                    if opcao.lower().replace(" ", "").replace(".", "") in col.lower().replace(" ", "").replace(".", ""):
+                    if opcao.lower().replace(" ", "") in col.lower().replace(" ", ""):
                         return col
             return colunas_reais[default_idx] if default_idx < len(colunas_reais) else colunas_reais[0]
+        col_cod = encontrar_coluna(['códproduto', 'codproduto', 'codigo'], 0)
+        col_desc = encontrar_coluna(['descproduto', 'descricao'], 1)
+        col_local = encontrar_coluna(['descestoquefisico', 'localizacao'], 2)
+        col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo'], -1)
+        col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoque'], 0)
 
-        col_cod = encontrar_coluna(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
-        col_desc = encontrar_coluna(['descproduto', 'descricao', 'desc'], 1)
-        col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
-        col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
-        col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-        col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
-
-    # SIDEBAR
+    # BARRA LATERAL (SIDEBAR)
     with st.sidebar:
-        if st.button("🔄 Atualizar Dados", type="primary", use_container_width=True):
-            st.rerun()
-            
         st.subheader(f"🏢 Unidade: {st.session_state.unidade_selecionada}")
-        st.write(f"👤 **Operador:** {st.session_state.operador} ({st.session_state.cargo_usuario})")
-        if st.button("🚪 Sair da Conta", use_container_width=True):
+        st.write(f"👤 **Usuário:** {st.session_state.operador}")
+        st.write(f"💼 **Perfil:** {st.session_state.cargo_usuario}")
+        
+        if st.button("🚪 Desconectar", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.operador = ""
-            st.session_state.tela_acesso = "login"
             st.rerun()
             
         st.markdown("---")
-        st.write("📂 **Carregar Base de Dados (Funcionários)**")
-        arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed", key="func_excel_loader")
+        st.write("📂 **Carregar Planilha Base de Estoque**")
+        arquivo_excel = st.file_uploader("Upload Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed")
         if arquivo_excel is not None and st.session_state.base_sistema is None:
             st.session_state.base_sistema = pd.read_excel(arquivo_excel)
-            st.session_state.nome_arquivo_excel = arquivo_excel.name
             st.rerun()
             
         st.markdown("---")
-        st.write("📁 **Selecione o inventário**")
+        st.write("📁 **Seleção do Inventário Ativo**")
         if df_inventarios.empty:
-            st.info("Crie um inventário abaixo.")
+            st.info("Nenhum inventário aberto nesta unidade.")
             id_inventario_atual = None
             inventario_selected_obj = None
         else:
@@ -438,189 +309,171 @@ else:
             id_inventario_atual = inventario_selected.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        with st.expander("➕ Novo Inventário", expanded=df_inventarios.empty):
-            with st.form("form_novo", clear_on_submit=True):
-                novo_nome = st.text_input("Nome do Inventário")
-                if st.form_submit_button("Criar", type="primary") and novo_nome:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT id FROM inventarios ORDER BY ROWID DESC LIMIT 1")
-                    last_row = cursor.fetchone()
-                    maior_id = int(last_row[0].replace('#','')) if last_row else 38
-                    novo_id = f"#{maior_id + 1}"
-                    hoje = datetime.date.today().strftime("%Y-%m-%d")
-                    cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (novo_id, novo_nome, hoje, st.session_state.unidade_selecionada))
-                    conn.commit()
-                    st.rerun()
-
-        # TRAVA 100%
-        if inventario_selected_obj is not None and inventario_selected_obj['status'] == "Aberto":
-            itens_esquecidos_lista = []
-            if st.session_state.base_sistema is not None:
-                df_c_verif = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
-                lista_contados_set = set(df_c_verif['cod_produto'].astype(str).str.upper().str.strip().tolist())
-                for idx, r_base in st.session_state.base_sistema.iterrows():
-                    cod_b = str(r_base[col_cod]).upper().strip()
-                    if cod_b not in lista_contados_set:
-                        itens_esquecidos_lista.append(cod_b)
-
-            if len(itens_esquecidos_lista) == 0:
-                if st.button("🔒 Fechar Inventário (100%)", use_container_width=True):
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
-                    conn.commit()
-                    st.rerun()
-            else:
-                st.error(f"❌ Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais.")
-                if eh_supervisor:
-                    if st.button("⚠️ Forçar Fechamento (ADMIN)", use_container_width=True, type="primary"):
+        if eh_supervisor:
+            with st.expander("➕ Criar Novo Lote de Inventário"):
+                with st.form("form_novo_inv", clear_on_submit=True):
+                    nome_inv_f = st.text_input("Identificação do Lote")
+                    if st.form_submit_button("Gerar", type="primary") and nome_inv_f:
                         cursor = conn.cursor()
-                        cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
+                        cursor.execute("SELECT id FROM inventarios ORDER BY ROWID DESC LIMIT 1")
+                        last = cursor.fetchone()
+                        prox_id = int(last[0].replace('#','')) + 1 if last else 1
+                        cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (f"#{prox_id}", nome_inv_f, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
                         conn.commit()
                         st.rerun()
 
-    # ABAS FILTRADAS POR CARGO
-    lista_abas = ["🔍 Contar Item", "📊 Contagem Atual"]
+    # MONTAGEM DINÂMICA DAS ABAS BASEADO NO CARGO DO USUÁRIO
+    lista_abas = ["🔍 Bipar / Contar", "📊 Contagens Realizadas"]
     if eh_supervisor:
-        lista_abas += ["🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho e Prazos"]
+        lista_abas += ["⚙️ Gerenciar Estoques (Unidade)", "🏆 Desempenho e Prazos", "📁 Histórico da Unidade"]
     if eh_yago_master:
-        lista_abas.append("⚙️ Gestão de Usuários")
+        lista_abas += ["👥 Controle de Usuários e Acessos"]
         
-    abas_render = st.tabs(lista_abas)
+    abas = st.tabs(lista_abas)
     
-    # Módulo de contagem padrão para Almoxarife e Supervisor
-    with abas_render[0]:
+    # ABA 1: BIPAGEM (COMUM A TODOS)
+    with abas[0]:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
-            st.warning("⚠️ Módulo de bipagem desativado. Carregue a base e selecione um inventário aberto.")
+            st.warning("⚠️ Carregue a planilha de saldos na barra lateral e selecione um lote de inventário ativo para liberar a contagem.")
         elif inventario_selected_obj['status'] == "Fechado":
-            st.error("🔒 Inventário fechado.")
+            st.error("🔒 Este lote de inventário encontra-se fechado e consolidado.")
         else:
-            codigo_input = st.text_input("💻 Bipar Código do Produto", value="", placeholder="Aguardando bipagem...")
-            if codigo_input:
-                busca_limpa = str(codigo_input).upper().strip()
-                item = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == busca_limpa]
-                if not item.empty:
-                    desc_val = item.iloc[0][col_desc]
-                    local_val = item.iloc[0][col_local] if col_local in item.columns else "Geral"
-                    id_estoque_val = str(item.iloc[0][col_id_estoque]).strip() if col_id_estoque in item.columns else ""
-                    st.info(f"📦 **Material:** {busca_limpa} - {desc_val} | **Estoque:** {local_val}")
-                    with st.form("conf_form_alm", clear_on_submit=True):
-                        qtd_f = st.number_input("Quantidade Física Encontrada", min_value=1, step=1)
-                        ativo_opc = st.text_input("Número do Ativo (Se houver)")
-                        if st.form_submit_button("✓ Confirmar Lançamento"):
-                            try:
-                                qs = int(item.iloc[0][col_qtd])
-                            except:
-                                qs = 0
-                            agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            cod_bipado = st.text_input("💻 Bipar Código do Item / Produto", value="", placeholder="Aguardando leitura do leitor...")
+            if cod_bipado:
+                item_filtrado = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.strip() == cod_bipado.strip()]
+                if not item_filtrado.empty:
+                    row_item = item_filtrado.iloc[0]
+                    st.info(f"📦 **Item:** {cod_bipado} - {row_item[col_desc]} | **Local Padrão:** {row_item[col_local]}")
+                    with st.form("form_salvar_contagem", clear_on_submit=True):
+                        qtd_f = st.number_input("Quantidade Física Contada", min_value=0, step=1)
+                        ativo_f = st.text_input("Número do Ativo / Etiqueta Patrimonial (Opcional)")
+                        if st.form_submit_button("Confirmar Lançamento"):
                             cursor = conn.cursor()
                             cursor.execute("""
                                 INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, operador, data_hora, unidade)
                                 VALUES (?, ?, ?, ?, ?, 'UN', ?, ?, ?, ?, ?, ?, ?)
-                            """, (id_inventario_atual.replace("#",""), id_estoque_val, local_val, busca_limpa, desc_val, qs, qtd_f, qtd_f - qs, ativo_opc.upper().strip(), st.session_state.operador, agora, st.session_state.unidade_selecionada))
+                            """, (id_inventario_atual.replace("#",""), str(row_item[col_id_estoque]), str(row_item[col_local]), cod_bipado, str(row_item[col_desc]), int(row_item[col_qtd]), qtd_f, qtd_f - int(row_item[col_qtd]), ativo_f.upper().strip(), st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
                             conn.commit()
-                            st.success("Lançamento efetuado!")
+                            st.success("✅ Lançamento computado!")
                             st.rerun()
+                else:
+                    st.error("❌ Código de material não localizado na planilha base de dados.")
 
-    with abas_render[1]:
-        st.subheader("📋 Suas Contagens Recentes")
-        df_c = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
-        st.dataframe(df_c.drop(columns=['unidade'], errors='ignore'), use_container_width=True)
+    # ABA 2: VISUALIZAR LANÇAMENTOS (COMUM A TODOS)
+    with abas[1]:
+        st.subheader("📋 Histórico Recente de Lançamentos")
+        if id_inventario_atual:
+            df_contados_rec = pd.read_sql_query("SELECT operador, cod_produto, desc_produto, desc_estoque, qtd_contada, data_hora FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
+            st.dataframe(df_contados_rec, use_container_width=True)
 
-    # RECURSOS EXCLUSIVOS DO SUPERVISOR REGIONAL
+    # RECURSOS EXCLUSIVOS: SUPERVISOR REGIONAL
     if eh_supervisor:
-        # 3. Painel Supervisor Interno
-        with abas_render[2]:
-            st.title("🔬 Módulo Amostral do Supervisor")
-            # Painel do supervisor regionalizado...
+        # ABA 3: GERENCIAR ESTOQUES DINAMICAMENTE
+        with abas[2]:
+            st.title("⚙️ Gerenciamento de Estoques Físicos da Unidade")
+            st.write("Utilize este espaço para cadastrar, editar ou remover as sublocalidades e códigos de estoques que sua equipe audita temporariamente.")
             
-        # 4. Acuracidade
-        with abas_render[3]:
-            st.title("📈 Acuracidade Local")
-            df_ac = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-            st.dataframe(df_ac, use_container_width=True)
+            col_cad1, col_cad2 = st.columns([1, 2])
+            with col_cad1:
+                st.write("### ➕ Adicionar Novo Estoque")
+                with st.form("form_add_estoque", clear_on_submit=True):
+                    id_novo_est = st.text_input("ID do Estoque (Ex: 1077)")
+                    desc_novo_est = st.text_input("Descrição do Estoque (Ex: JBA - CLASSE D)")
+                    if st.form_submit_button("Cadastrar no Sistema", type="primary"):
+                        if id_novo_est and desc_novo_est:
+                            try:
+                                cursor = conn.cursor()
+                                cursor.execute("INSERT INTO cadastros_estoques (id, descricao, unidade) VALUES (?, ?, ?)", (id_novo_est.strip(), desc_novo_est.strip(), st.session_state.unidade_selecionada))
+                                conn.commit()
+                                st.success("🎉 Estoque cadastrado com sucesso!")
+                                st.rerun()
+                            except:
+                                st.error("❌ Código de estoque já existente nesta filial.")
+                        else:
+                            st.warning("⚠️ Preencha ambos os campos.")
+                            
+            with col_cad2:
+                st.write("### 📋 Estoques Ativos para Auditoria")
+                df_estoques_atuais = pd.read_sql_query("SELECT id as 'ID Estoque', descricao as 'Descrição' FROM cadastros_estoques WHERE unidade = ? ORDER BY id", conn, params=(st.session_state.unidade_selecionada,))
+                st.dataframe(df_estoques_atuais, use_container_width=True, hide_index=True)
+                
+                estoque_deletar = st.selectbox("Selecione um estoque para remover se necessário", df_estoques_atuais['ID Estoque'].tolist() if not df_estoques_atuais.empty else ["Nenhum"])
+                if st.button("🗑️ Remover Estoque Selecionado") and estoque_deletar != "Nenhum":
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM cadastros_estoques WHERE id = ? AND unidade = ?", (estoque_deletar, st.session_state.unidade_selecionada))
+                    conn.commit()
+                    st.success("Removido com sucesso!")
+                    st.rerun()
 
-        # 5. Histórico Geral da Unidade
-        with abas_render[4]:
-            st.title("📁 Arquivo de Inventários desta Unidade")
-            df_hist = pd.read_sql_query("SELECT * FROM inventarios WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-            for idx, r_inv in df_hist.iterrows():
-                with st.expander(f"Inventário {r_inv['id']} - {r_inv['nome']}"):
-                    df_det = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(r_inv['id'].replace('#',''),))
-                    st.dataframe(df_det, use_container_width=True)
-
-        # 6. Base de Estoque
-        with abas_render[5]:
-            st.title("📄 Espelho Base Carregada")
-            if st.session_state.base_sistema is not None:
-                st.dataframe(st.session_state.base_sistema, use_container_width=True)
-
-        # 7. Desempenho e Prazos dos 36 Estoques
-        with abas_render[6]:
+        # ABA 4: VALIDADE, STATUS E DIAS SEM CONTAR (DINÂMICO)
+        with abas[3]:
             st.title("🏆 Validade e Prazos de Auditoria Temporal")
-            lista_estoques_fixa = [
-                {"id": "1077", "desc": "JBA - CLASSE D"}, {"id": "1078", "desc": "JBA - COPA E COZINHA"},
-                {"id": "1080", "desc": "JBA - DADOS - CLIENTE"}, {"id": "1082", "desc": "JBA - VIVO VITA - CLIENTE"},
-                {"id": "1084", "desc": "JBA - EPI-EPC"}, {"id": "1086", "desc": "JBA - EQUIPAMENTOS"},
-                {"id": "1088", "desc": "JBA - FERRAMENTAL"}, {"id": "1089", "desc": "JBA - KIT FERRAMENTAL CONTRATACOES"},
-                {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
-                {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
-                {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
-                {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
-                {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
-                {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
-                {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
-                {"id": "2185", "desc": "JBA - PROPRIO FATURA B PLANTA EXTERNA - BDI"}, {"id": "2188", "desc": "1071 - IMPLANTACAO JBA CLIENTE RESERVADO"},
-                {"id": "2189", "desc": "JBA - DEFEITO"}, {"id": "2190", "desc": "JBA - DEPARTAMENTO T.I"},
-                {"id": "2194", "desc": "JBA - KITS FERRAMENTAL - DEVOLUCAO"}, {"id": "2197", "desc": "JBA - EQUIPAMENTOS TI"},
-                {"id": "2641", "desc": "1259 - IMPLANTACAO JBA - MATERIAL REUTILIZACAO"}, {"id": "2643", "desc": "1724 - MANUTENCAO JBA - MATERIAL REUTILIZACAO"},
-                {"id": "2725", "desc": "JBA - RESERVA TIM"}, {"id": "2983", "desc": "JBA - FORNECEDORES P/ MANUTENCAO - RECARGA"},
-                {"id": "3193", "desc": "JBA - PROPRIO MATERIAL REAPROVEITAVEL"}, {"id": "3395", "desc": "LPA - FTTX - CLIENTE"},
-                {"id": "3484", "desc": "JBA - CELULARES DEFEITO"}, {"id": "3546", "desc": "JBA - CELULARES"}
-            ]
-            df_ultimas_contagens = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as ultima_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
-            mapa_datas = dict(zip(df_ultimas_contagens['id_estoque'].astype(str).str.strip(), df_ultimas_contagens['ultima_data']))
+            df_meus_estoques = pd.read_sql_query("SELECT id, descricao FROM cadastros_estoques WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
+            
+            df_datas_calculadas = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as ultima_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
+            mapa_prazos = dict(zip(df_datas_calculadas['id_estoque'].astype(str).str.strip(), df_datas_calculadas['ultima_data']))
+            
             hoje_dt = datetime.datetime.now()
-            linhas_planilha_desempenho = []
-            for est in lista_estoques_fixa:
-                est_id = est["id"]
-                ultima_data_str = mapa_datas.get(est_id, None)
+            linhas_prazos = []
+            
+            for _, r_est in df_meus_estoques.iterrows():
+                id_e = str(r_est['id']).strip()
+                ultima_data_str = mapa_prazos.get(id_e, None)
                 if ultima_data_str:
                     try:
-                        dt_contagem = datetime.datetime.strptime(ultima_data_str, "%Y-%m-%d %H:%M:%S")
-                        dias_passados = (hoje_dt - dt_contagem).days
-                        data_formatada = dt_contagem.strftime("%d/%m/%Y %H:%M")
-                    except: dias_passados = 999; data_formatada = "Sem histórico"
-                else: dias_passados = 999; data_formatada = "Nunca Contado"
-                status_final = "🟢 Bom" if dias_passados <= 7 else "🟡 Precisa contar" if dias_passados <= 14 else "🔴 Crítico"
-                linhas_planilha_desempenho.append({"Id. Estoque Físico": est_id, "Descrição": est["desc"], "Última Contagem": data_formatada, "Dias sem Contar": dias_passados if dias_passados != 999 else "—", "Status": status_final})
-            st.dataframe(pd.DataFrame(linhas_planilha_desempenho), use_container_width=True, hide_index=True)
+                        dt_c = datetime.datetime.strptime(ultima_data_str, "%Y-%m-%d %H:%M:%S")
+                        dias_passados = (hoje_dt - dt_c).days
+                        data_exibida = dt_c.strftime("%d/%m/%Y %H:%M")
+                    except: dias_passados = 999; data_exibida = "Sem histórico válido"
+                else:
+                    dias_passados = 999; data_exibida = "Nunca Contado"
+                    
+                status_f = "🟢 Bom" if dias_passados <= 7 else "🟡 Precisa de Atenção" if dias_passados <= 14 else "🔴 Crítico"
+                linhas_prazos.append({
+                    "Id. Estoque Físico": id_e,
+                    "Descrição": r_est['descricao'],
+                    "Última Contagem": data_exibida,
+                    "Dias sem Contar": dias_passados if dias_passados != 999 else "—",
+                    "Status": status_f
+                })
+                
+            if linhas_prazos:
+                st.dataframe(pd.DataFrame(linhas_prazos), use_container_width=True, hide_index=True)
+            else:
+                st.info("Nenhum subestoque configurado para monitoramento temporal.")
 
-    # --- ABA EXCLUSIVA DO YAGO MASTER SOBERANO: CONTROLAR TODOS ---
+        # ABA 5: HISTÓRICO DA UNIDADE
+        with abas[4]:
+            st.title("📁 Arquivo Geral de Movimentações da Unidade")
+            df_consolidados = pd.read_sql_query("SELECT * FROM inventarios WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
+            st.dataframe(df_consolidados, use_container_width=True, hide_index=True)
+
+    # ABA RESTRITA MÁXIMA (YAGO SOBERANO / MASTER ADMIN)
     if eh_yago_master:
-        with abas_render[-1]:
-            st.title("⚙️ Painel de Controle e Gestão de Usuários")
-            df_usuarios_all = pd.read_sql_query("SELECT id, nome, cpf, email, senha, unidade, cargo FROM usuarios ORDER BY unidade, nome", conn)
-            st.dataframe(df_usuarios_all, use_container_width=True, hide_index=True)
+        with abas[-1]:
+            st.title("👥 Painel de Controle e Gestão de Usuários")
+            df_usuarios_totais = pd.read_sql_query("SELECT id, nome, cpf, email, senha, unidade, cargo FROM usuarios ORDER BY unidade, nome", conn)
+            st.dataframe(df_usuarios_totais, use_container_width=True, hide_index=True)
             
             st.markdown("---")
-            st.write("### 🛠️ Alterar Dados e Nível de Acesso")
-            with st.form("form_edit_user"):
-                usuario_alvo_id = st.selectbox("Escolha o usuário para alterar", df_usuarios_all['id'].tolist(), format_func=lambda x: f"ID {x} - {df_usuarios_all[df_usuarios_all['id']==x]['nome'].values[0]} ({df_usuarios_all[df_usuarios_all['id']==x]['unidade'].values[0]})")
-                u_row = df_usuarios_all[df_usuarios_all['id'] == usuario_alvo_id].iloc[0]
+            st.write("### 🛠️ Alterar Atribuições e Níveis de Acesso")
+            with st.form("form_ajuste_permissao"):
+                id_alvo = st.selectbox("Selecione o Usuário para Ajuste", df_usuarios_totais['id'].tolist(), format_func=lambda x: f"ID {x} - {df_usuarios_totais[df_usuarios_totais['id']==x]['nome'].values[0]} ({df_usuarios_totais[df_usuarios_totais['id']==x]['unidade'].values[0]})")
+                dados_alvo = df_usuarios_totais[df_usuarios_totais['id'] == id_alvo].iloc[0]
                 
-                novo_nome_user = st.text_input("Nome Completo", value=u_row['nome'])
-                nova_senha_user = st.text_input("Nova Senha de Acesso", value=u_row['senha'])
-                nova_unid_user = st.selectbox("Mudar Unidade / Localidade", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"], index=["JURUBATUBA", "JUNDIAI", "CUBATÃO"].index(u_row['unidade']))
+                nome_editado = st.text_input("Nome Completo", value=dados_alvo['nome'])
+                senha_editada = st.text_input("Senha", value=dados_alvo['senha'])
+                unidade_editada = st.selectbox("Unidade de Lotação", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"], index=["JURUBATUBA", "JUNDIAI", "CUBATÃO"].index(dados_alvo['unidade']))
                 
-                # --- NOVO CAMPO: SELETOR DE PERMISSÃO COMPACTO (ALMOXARIFE VS SUPERVISOR) ---
-                cargo_atual_idx = ["Almoxarife", "Supervisor"].index(u_row['cargo']) if u_row['cargo'] in ["Almoxarife", "Supervisor"] else 0
-                novo_cargo_user = st.selectbox("💼 Nível de Acesso (Cargo)", ["Almoxarife", "Supervisor"], index=cargo_atual_idx)
+                # SELETOR DE NÍVEL DE PERMISSÃO / CARGO SOLICITADO
+                cargo_atual_idx = ["Almoxarife", "Supervisor"].index(dados_alvo['cargo']) if dados_alvo['cargo'] in ["Almoxarife", "Supervisor"] else 0
+                cargo_editado = st.selectbox("💼 Cargo (Nível de Acesso)", ["Almoxarife", "Supervisor"], index=cargo_atual_idx)
                 
-                if st.form_submit_button("💾 Salvar Alterações Definitivas", type="primary"):
+                if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
-                    cursor.execute("UPDATE usuarios SET nome = ?, senha = ?, unidade = ?, cargo = ? WHERE id = ?", (novo_nome_user.strip(), nova_senha_user.strip(), nova_unid_user, novo_cargo_user, usuario_alvo_id))
+                    cursor.execute("UPDATE usuarios SET nome = ?, senha = ?, unidade = ?, cargo = ? WHERE id = ?", (nome_editado.strip(), senha_editada.strip(), unidade_editada, cargo_editado, id_alvo))
                     conn.commit()
-                    st.success("✅ Usuário atualizado com sucesso no banco de dados!")
+                    st.success("✅ Privilégios salvos e alterados no banco com sucesso!")
                     st.rerun()
-                    
+
     conn.close()
