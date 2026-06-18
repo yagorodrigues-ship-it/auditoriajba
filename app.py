@@ -267,7 +267,6 @@ else:
             id_inventario_atual = inv_sel.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # RECONEXÃO DOS BOTÕES DE GERENCIAMENTO: EXCLUSIVO DO SUPERVISOR DA LOCALIDADE
         if eh_supervisor:
             st.markdown("---")
             st.write("⚙️ **Painel de Controle de Lotes**")
@@ -348,15 +347,12 @@ else:
                                 st.session_state.contador_reset += 1; st.rerun()
                 else: st.error("Material/Produto não localizado na base de dados carregada.")
 
-    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO (ACOMPANHAMENTO EM TEMPO REAL)
+    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO
     with abas_gui[1]:
         if id_inventario_atual:
             st.subheader(f"📊 Progresso em Tempo Real - Lote {id_inventario_atual}")
-            
-            # Puxar contagens salvas
             df_c = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
             
-            # Se houver base carregada, calcular itens faltantes
             if st.session_state.base_sistema is not None:
                 total_itens_base = len(st.session_state.base_sistema)
                 itens_contados_unicos = df_c['cod_produto'].unique() if not df_c.empty else []
@@ -368,10 +364,8 @@ else:
                 m2.metric("✅ Itens Já Contabilizados", total_contados)
                 m3.metric("⏳ Itens Pendentes (Falta Contar)", total_faltantes)
                 
-                # Identificar os itens faltantes
                 codigos_base = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().tolist()
                 codigos_contados = [str(x).upper().strip() for x in itens_contados_unicos]
-                
                 codigos_faltantes = [c for c in codigos_base if c not in codigos_contados]
                 
                 st.markdown("---")
@@ -384,10 +378,9 @@ else:
                     st.success("🎉 **Excelente!** 100% dos itens da planilha base foram contabilizados.")
                 st.markdown("---")
 
-                # REGRAS DE FECHAMENTO EXCLUSIVAS DO SUPERVISOR
                 if eh_supervisor and inventario_selected_obj['status'] == 'Aberto':
                     if total_faltantes > 0:
-                        st.button("🔒 Encerrar e Fechar Lote Geral", disabled=True, help="Não é permitido fechar o inventário incompleto! Finalize a contagem de todos os itens.")
+                        st.button("🔒 Encerrar e Fechar Lote Geral", disabled=True, help="Não é permitido fechar o inventário incompleto!")
                         st.caption("🔴 O botão de encerramento está bloqueado porque existem itens pendentes de contagem.")
                     else:
                         if st.button("🔒 Encerrar e Fechar Lote Geral", type="primary", use_container_width=True):
@@ -568,42 +561,75 @@ else:
             st.write("### Itens Auditados neste Lote Amostral")
             st.dataframe(df_auditorias_atual.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
 
-        # 📈 ABA 7: ACURACIDADE ESTOQUE
+        # 📈 ABA 7: ACURACIDADE ESTOQUE (COM BOLAS VERDES, AMARELAS E VERMELHAS + PASTAS EM BAIXO)
         with abas_gui[6]:
-            st.title("📈 Acuracidade Local por Estoque")
+            st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
+            
+            # Consultar todas as amostras registradas para a unidade corrente
             df_ac = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
             
             if df_ac.empty:
                 st.info("💡 Nenhuma amostragem de acuracidade coletada no banco de dados para esta unidade.")
             else:
                 linhas_acuracidade_gerencial = []
+                
+                # Função auxiliar para formatar a acuracidade conforme as novas regras visuais
+                def formatar_acuracidade_visual(porcentagem):
+                    if porcentagem == 100.0:
+                        return f"<span style='color:green; font-weight:bold;'>🟢 {porcentagem:.1f}%</span>"
+                    elif porcentagem >= 95.0:
+                        return f"<span style='color:#d4ac0d; font-weight:bold;'>🟡 {porcentagem:.1f}%</span>"
+                    else:
+                        return f"<span style='color:red; font-weight:bold;'>🔴 {porcentagem:.1f}%</span>"
+                
+                # Agrupamento estrito focado por Código de Estoque (Almoxarifado)
                 for dep_id, grupo in df_ac.groupby('id_estoque'):
                     total_itens_dep = len(grupo)
                     certos_qtd = len(grupo[grupo['diferenca'] == 0])
                     certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                     certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
+                    
                     desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
                     
+                    # Cálculo exato das taxas percentuais
                     pct_saldo = (certos_qtd / total_itens_dep) * 100
                     pct_etiq = (certos_etiq / total_itens_dep) * 100
                     pct_local = (certos_local / total_itens_dep) * 100
-                    
-                    cor_saldo = "green" if pct_saldo == 100 else "red"
-                    cor_etiq = "green" if pct_etiq == 100 else "red"
-                    cor_local = "green" if pct_local == 100 else "red"
                     
                     linhas_acuracidade_gerencial.append({
                         "CÓDIGO ESTOQUE": str(dep_id),
                         "DESCRIÇÃO DO ESTOQUE": desc_dep,
                         "QUANTIDADE ITENS": total_itens_dep,
-                        "ACURACIDADE SALDO": f"<span style='color:{cor_saldo}; font-weight:bold;'>{pct_saldo:.1f}%</span>",
-                        "ACURACIDADE ETIQUETA": f"<span style='color:{cor_etiq}; font-weight:bold;'>{pct_etiq:.1f}%</span>",
-                        "ACURACIDADE LOCALIZAÇÃO": f"<span style='color:{cor_local}; font-weight:bold;'>{pct_local:.1f}%</span>"
+                        "ACURACIDADE SALDO": formatar_acuracidade_visual(pct_saldo),
+                        "ACURACIDADE ETIQUETA": formatar_acuracidade_visual(pct_etiq),
+                        "ACURACIDADE LOCALIZAÇÃO": formatar_acuracidade_visual(pct_local)
                     })
                 
                 df_gerencial_final = pd.DataFrame(linhas_acuracidade_gerencial)
+                
+                # Renderizar a planilha gerencial principal
                 st.write(df_gerencial_final.to_html(escape=False, index=False), unsafe_allow_html=True)
-                st.write("")
+                
+            st.markdown("---")
+            st.subheader("📁 Histórico de Pastas Contabilizadas (Supervisor)")
+            
+            # Puxar as pastas criadas na tabela do supervisor
+            if not df_inventarios_sup.empty:
+                for idx, pasta_sup in df_inventarios_sup.iterrows():
+                    # Consultar dinamicamente os registros de itens dessa pasta específica
+                    df_itens_da_pasta = pd.read_sql_query(
+                        "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora' FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", 
+                        conn, 
+                        params=(pasta_sup['id'],)
+                    )
+                    
+                    with st.expander(f"📁 Pasta: {pasta_sup['id']} – {pasta_sup['nome']} ({pasta_sup['status']}) | {len(df_itens_da_pasta)} itens auditados"):
+                        if not df_itens_da_pasta.empty:
+                            st.dataframe(df_itens_da_pasta, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Nenhum item foi inserido ou contabilizado nesta pasta amostral ainda.")
+            else:
+                st.info("Nenhuma pasta de auditoria foi aberta até o momento.")
 
         # ⚙️ ABA 8: GERENCIAR ESTOQUES
         with abas_gui[7]:
