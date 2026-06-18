@@ -231,6 +231,8 @@ else:
 
     # --- MAPEAMENTO DE COLUNAS DA BASE ---
     c_cod, c_desc, c_un, c_est, c_qtd, c_loc = "", "", "", "", "", ""
+    possui_coluna_lote = False
+    
     if st.session_state.base_sistema is not None:
         c_cod = encontrar_coluna(st.session_state.base_sistema, ['códproduto', 'codproduto', 'codigo', 'cod'], 0)
         c_desc = encontrar_coluna(st.session_state.base_sistema, ['descproduto', 'descricao'], 1)
@@ -238,6 +240,13 @@ else:
         c_est = encontrar_coluna(st.session_state.base_sistema, ['idestoquefísico', 'idestoque'], 0)
         c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
         c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
+        
+        # Validação inteligente das colunas de Lote solicitadas
+        colunas_lote_alvo = ['lote', 'situaçãolote', 'lotefornecedoraux', 'lotefornecedor']
+        possui_coluna_lote = any(
+            any(alvo in str(col).lower().replace(" ", "").replace("ã", "a") for alvo in colunas_lote_alvo)
+            for col in st.session_state.base_sistema.columns
+        )
 
     # INTERFACE LATERAL (SIDEBAR)
     with st.sidebar:
@@ -252,6 +261,7 @@ else:
         ar_excel = st.file_uploader("Upload Excel Geral", type=["xlsx"], label_visibility="collapsed")
         if ar_excel:
             st.session_state.base_sistema = pd.read_excel(ar_excel)
+            st.rerun()
             
         st.markdown("---")
         st.write("📁 **Selecione o Inventário**")
@@ -396,12 +406,18 @@ else:
 
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
+                            
+                            # Condicional dinâmica: Exibe o campo como opcional apenas se houver coluna de lote na base
+                            val_ativo = ""
+                            if possui_coluna_lote:
+                                val_ativo = st.text_input("🔢 Número do Ativo / Lote (Opcional)")
+                                
                             obs = st.text_input("Observação")
                             
                             if st.form_submit_button("Confirmar Lançamento", type="primary"):
                                 cursor = conn.cursor()
                                 
-                                # --- VALIDAÇÃO SIMPLIFICADA SEM CONTROLE DE ATIVOS ---
+                                # --- VALIDAÇÃO SIMPLIFICADA SEM TRANCAR SE ESTIVER DUPLICADO ---
                                 if not is_fluxo_recontagem:
                                     cursor.execute("""
                                         SELECT COUNT(*) FROM contagens 
@@ -421,14 +437,14 @@ else:
                                         id_reg_recont = int(df_recont_check.iloc[0]['id'])
                                         cursor.execute("""
                                             UPDATE contagens 
-                                            SET qtd_contada = ?, diferenca = ?, recontagem = 'Realizada', operador = ?, data_hora = ?, observacao = ?
+                                            SET qtd_contada = ?, diferenca = ?, recontagem = 'Realizada', operador = ?, data_hora = ?, observacao = ?, ativo = ?
                                             WHERE id = ?
-                                        """, (q_cont, q_cont - q_sis, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"[2a Contagem] {obs}", id_reg_recont))
+                                        """, (q_cont, q_cont - q_sis, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"[2a Contagem] {obs}", val_ativo, id_reg_recont))
                                     else:
                                         cursor.execute("""
                                             INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade)
                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?)
-                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, "", obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
+                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, val_ativo, obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
                                     
                                     conn.commit()
                                     st.success("Contagem processada e armazenada com sucesso!")
@@ -498,7 +514,7 @@ else:
 
             if st.session_state.base_sistema is not None and c_cod and total_faltantes_tab > 0:
                 st.markdown("---")
-                st.error(f"⚠️ **Atenção:** Still restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
+                st.error(f"⚠️ **Atenção:** Restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
                 codigos_base = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().tolist()
                 codigos_contados = [str(x).upper().strip() for x in df_c['cod_produto'].unique()] if not df_c.empty else []
                 codigos_faltantes = [c for c in codigos_base if c not in codigos_contados]
@@ -516,7 +532,7 @@ else:
     # 📄 ABA 3: BASE DE ESTOQUE
     with abas_gui[2]:
         if st.session_state.base_sistema is not None and c_cod:
-            st.subheader("📄 Espelho Base de Saldo - Status de Contagem Updated")
+            st.subheader("📄 Espelho Base de Saldo - Status de Contagem Atualizado")
             
             if id_inventario_atual:
                 df_lancados_base = pd.read_sql_query("SELECT cod_produto, operador, qtd_contada, recontagem FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
@@ -531,8 +547,8 @@ else:
             def mapear_status_gerencial(linha_cod):
                 cod_chave = str(linha_cod).upper().strip()
                 if cod_chave in map_operadores:
-                    rec_status = f" (2ª Contagem)" if mapa_recont.get(cod_chave) == 'Realizada' else ""
-                    return f"🟩 Contado ({mapa_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}{rec_status}"
+                    rec_status = f" (2ª Contagem)" if map_recont.get(cod_chave) == 'Realizada' else ""
+                    return f"🟩 Contado ({map_quantidades[cod_chave]}) por {map_operadores[cod_chave]}{rec_status}"
                 return "🟥 Não Contado"
             
             df_base_realtime = st.session_state.base_sistema.copy()
@@ -787,7 +803,7 @@ else:
                     else:
                         st.info("ℹ️ Todos os itens divergentes já foram enviados para a recontagem.")
                 else:
-                    st.success("🎉 Nenhuma divergência ativa encontrada neste lote até o momento.")
+                    st.success("🎉 Nenhuma divergência activa encontrada neste lote até o momento.")
                     
             st.markdown("---")
             if df_inventarios_sup.empty:
@@ -920,6 +936,6 @@ else:
                 if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
                     cursor.execute("UPDATE usuarios SET nome=?, senha=?, unidade=?, cargo=? WHERE id=?", (n_nome.strip(), n_senha.strip(), n_unid, n_cargo, id_a))
-                    conn.commit(); st.success("Usuário Updated!"); st.rerun()
+                    conn.commit(); st.success("Usuário Atualizado!"); st.rerun()
                     
     conn.close()
