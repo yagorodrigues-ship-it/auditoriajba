@@ -185,24 +185,16 @@ if not st.session_state.logged_in:
                     id_l = identificador.strip()
                     doc_l = limpar_documento(id_l)
                     cursor = conn.cursor()
-                    
-                    # CORREÇÃO DO LOGIN: Uso de UPPER para evitar problemas com acentos ou caixa baixa
-                    cursor.execute("""
-                        SELECT nome, unidade, cargo 
-                        FROM usuarios 
-                        WHERE (email = ? OR cpf = ?) AND senha = ? AND UPPER(unidade) = ?
-                    """, (id_l, doc_l, senha, unidade_login.upper()))
-                    
+                    cursor.execute("SELECT nome, unidade, cargo FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_l, doc_l, senha, unidade_login))
                     user = cursor.fetchone()
                     if user:
                         st.session_state.logged_in = True
                         st.session_state.operador = user[0]
                         st.session_state.unidade_selecionada = user[1]
                         st.session_state.cargo_usuario = user[2]
-                        st.success("✅ Autenticado com sucesso!")
                         st.rerun()
                     else:
-                        st.error("❌ Credenciais incorretas ou usuário não cadastrado nesta unidade!")
+                        st.error("❌ Credenciais incorretas ou não cadastradas nesta unidade!")
             
             c_cad, c_rec = st.columns(2)
             with c_cad:
@@ -261,13 +253,15 @@ else:
             id_inventario_atual = None
             inventario_selected_obj = None
         else:
+            # --- CORREÇÃO DA MENSAGEM SUTIL DO STATUS NA LATERAL PEDIDA ---
             lista_inv = []
             for idx, r in df_inventarios.iterrows():
-                id_limpo_r = r['id'].replace('#','#')
+                id_limpo_r = r['id'].replace('#','')
                 cursor_check = conn.cursor()
-                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r.replace('#',''), st.session_state.unidade_selecionada))
+                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r, st.session_state.unidade_selecionada))
                 possui_pendente = cursor_check.fetchone()[0] > 0
                 
+                # Se o supervisor liberar a recontagem, o status lateral muda sutilmente para avisar
                 if r['status'] == 'Fechado':
                     status_exibicao = "Fechado"
                 elif possui_pendente:
@@ -370,6 +364,7 @@ else:
             )
             tem_recontagem_ativa = int(df_recont_totais.iloc[0]['total_p']) > 0
             
+            # Libera o espaço da bipagem dos itens errados automaticamente mesmo se o status mestre estiver restrito
             if inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado" and not tem_recontagem_ativa:
                 st.error("🔒 Este lote de inventário foi finalizado e fechado.")
             else:
@@ -409,38 +404,12 @@ else:
                             obs = st.text_input("Observação")
                             
                             if st.form_submit_button("Confirmar Lançamento", type="primary"):
-                                cursor = conn.cursor()
-                                val_ativo_inserido = n_ativ.strip().upper()
-                                
-                                # --- CORREÇÃO DE DUPLICIDADE DE ATIVOS E ITENS NORMAS ---
-                                if not is_fluxo_recontagem:
-                                    if tem_ativo_na_base:
-                                        if not val_ativo_inserido:
-                                            st.error("❌ Erro: O preenchimento do número do Ativo é obrigatório para este produto!")
-                                            st.stop()
-                                            
-                                        cursor.execute("""
-                                            SELECT COUNT(*) FROM contagens 
-                                            WHERE inventario_id = ? AND cod_produto = ? AND ativo = ? AND unidade = ?
-                                        """, (id_p_limpo, prod_l, val_ativo_inserido, st.session_state.unidade_selecionada))
-                                        
-                                        if cursor.fetchone()[0] > 0:
-                                            st.error(f"❌ Erro: O ativo '{val_ativo_inserido}' para este produto já foi contabilizado neste lote!")
-                                            st.stop()
-                                    else:
-                                        cursor.execute("""
-                                            SELECT COUNT(*) FROM contagens 
-                                            WHERE inventario_id = ? AND cod_produto = ? AND unidade = ?
-                                        """, (id_p_limpo, prod_l, st.session_state.unidade_selecionada))
-                                        
-                                        if cursor.fetchone()[0] > 0:
-                                            st.error("❌ Erro: Este item sem ativo já foi contabilizado neste lote!")
-                                            st.stop()
-                                # ---------------------------------------------------
-
                                 if q_cont == 0:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
+                                elif tem_ativo_na_base and not n_ativ.strip():
+                                    st.error("❌ Erro: O campo Ativo é obrigatório para este produto!")
                                 else:
+                                    cursor = conn.cursor()
                                     q_sis = int(row[c_qtd]) if pd.notna(row[c_qtd]) else 0
                                     
                                     if is_fluxo_recontagem:
@@ -454,7 +423,7 @@ else:
                                         cursor.execute("""
                                             INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade)
                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?)
-                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, val_ativo_inserido, obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
+                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, n_ativ.strip().upper(), obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
                                     
                                     conn.commit()
                                     st.success("Contagem processada e armazenada com sucesso!")
@@ -513,7 +482,7 @@ else:
                 if not df_divergentes_realtime.empty:
                     st.markdown("### 🚨 Itens com Divergência de Saldo Detectada (Aguardando Correção)")
                     st.dataframe(
-                        df_divergentes_realtime[['cod_produto', 'desc_produto', 'desc_estoque', 'qtd_sistema', 'qtd_contada', 'diferenca', 'operador', 'data_hora', 'ativo']], 
+                        df_divergentes_realtime[['cod_produto', 'desc_produto', 'desc_estoque', 'qtd_sistema', 'qtd_contada', 'diferenca', 'operador', 'data_hora']], 
                         use_container_width=True, 
                         hide_index=True
                     )
@@ -672,6 +641,7 @@ else:
     # 📈 ABA 6: ACURACIDADE ESTOQUE
     with abas_gui[5]:
         st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
+        
         df_ac = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
         
         if df_ac.empty:
@@ -692,7 +662,8 @@ else:
                 certos_qtd = len(grupo[grupo['diferenca'] == 0])
                 certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                 certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
-                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in group.columns else "Não Informado"
+                
+                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
@@ -711,6 +682,7 @@ else:
             st.write(df_gerencial_final.to_html(escape=False, index=False), unsafe_allow_html=True)
             
         st.markdown("---")
+        
         st.subheader("🔍 Filtrar Pastas por Período")
         f_col1, f_col2 = st.columns(2)
         with f_col1: dt_ini_ac = st.date_input("Filtrar Data Inicial", value=None, key="dt_ini_ac")
@@ -738,7 +710,7 @@ else:
                 
                 for idx, pasta_sup in df_pastas_paginadas.iterrows():
                     df_itens_da_pasta = pd.read_sql_query(
-                        "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora', ativo as 'Ativo' FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", 
+                        "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora' FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", 
                         conn, 
                         params=(pasta_sup['id'], st.session_state.unidade_selecionada)
                     )
@@ -793,7 +765,7 @@ else:
 
     # RECURSOS EXCLUSIVOS DO SUPERVISOR
     if eh_supervisor:
-        # 🔬 PAINEL SUPERVISOR
+        # 🔬 PAINEL SUPERVISOR (CORRIGIDO FORM SUBMIT BUG)
         with abas_gui[6]:
             st.title("🔬 Módulo Amostral do Supervisor e Fluxo de Recontagem")
             
@@ -802,7 +774,7 @@ else:
                 id_p_limpo = id_inventario_atual.replace('#','')
                 
                 df_erros_lote = pd.read_sql_query(
-                    "SELECT id, cod_produto, desc_produto, qtd_sistema, qtd_contada, diferenca, recontagem, ativo FROM contagens WHERE inventario_id = ? AND diferenca != 0 AND unidade = ?", 
+                    "SELECT id, cod_produto, desc_produto, qtd_sistema, qtd_contada, diferenca, recontagem FROM contagens WHERE inventario_id = ? AND diferenca != 0 AND unidade = ?", 
                     conn, params=(id_p_limpo, st.session_state.unidade_selecionada)
                 )
                 
@@ -840,6 +812,7 @@ else:
                         conn.commit(); st.rerun()
 
             with st.popover("➕ Novo Inventário Supervisor", use_container_width=True):
+                # FIXED: Isolado corretamente em um form_submit estruturado interno
                 with st.form("form_novo_sup_corrigido_submit", clear_on_submit=True):
                     nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                     if st.form_submit_button("Criar Lote", type="primary") and nome_sup_inv:
