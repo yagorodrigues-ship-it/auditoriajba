@@ -81,6 +81,7 @@ def inicializar_banco():
             operador TEXT,
             data_hora TEXT,
             lote TEXT,
+            recontagem TEXT DEFAULT 'Não',
             unidade TEXT DEFAULT 'JURUBATUBA'
         )
     """)
@@ -112,7 +113,7 @@ def inicializar_banco():
         "usuarios": ["unidade TEXT DEFAULT 'JURUBATUBA'", "cargo TEXT DEFAULT 'Almoxarife'"],
         "inventarios": ["unidade TEXT DEFAULT 'JURUBATUBA'"],
         "inventarios_supervisor": ["unidade TEXT DEFAULT 'JURUBATUBA'"],
-        "contagens": ["lote TEXT DEFAULT ''", "unidade TEXT DEFAULT 'JURUBATUBA'"],
+        "contagens": ["lote TEXT DEFAULT ''", "unidade TEXT DEFAULT 'JURUBATUBA'", "recontagem TEXT DEFAULT 'Não'"],
         "auditorias_supervisor": ["unidade TEXT DEFAULT 'JURUBATUBA'", "ativo TEXT", "recontagem_3 TEXT DEFAULT 'Não'"]
     }
     
@@ -296,7 +297,6 @@ else:
                             st.success("Lote fechado com pendências!")
                             st.rerun()
                     else:
-                        # --- TEXTO DA MENSAGEM DE ERRO ATUALIZADA EXATAMENTE COMO SOLICITADO ---
                         st.error("Fechamento Bloqueado: O Inventario não foi 100% contabilizado. Apenas o Supervisor da unidade pode forçar este encerramento.")
 
         st.markdown("---")
@@ -349,13 +349,23 @@ else:
                 if not it.empty:
                     row = it.iloc[0]
                     
+                    # Verificação se o item está em fluxo de 2ª Contagem ordenada pelo Supervisor
+                    id_p_limpo = id_inventario_atual.replace('#','')
+                    df_recont_check = pd.read_sql_query("SELECT id, recontagem FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND unidade = ? ORDER BY id DESC LIMIT 1", conn, params=(id_p_limpo, prod_l, st.session_state.unidade_selecionada))
+                    
+                    is_fluxo_recontagem = False
+                    if not df_recont_check.empty and df_recont_check.iloc[0]['recontagem'] == 'Pendente':
+                        is_fluxo_recontagem = True
+                        st.warning("⚠️ **MODO RECONTAGEM:** Este item está na 2ª contagem devido a uma divergência apontada pelo Supervisor.")
+                    
                     c_b1, c_b2, c_b3, c_b4 = st.columns(4)
                     c_b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{prod_l}</div></div>', unsafe_allow_html=True)
                     c_b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO / LOCAL</div><div class="bloco-valor" style="font-size:22px;">{row[c_loc]}</div></div>', unsafe_allow_html=True)
                     c_b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{row[c_un]}</div></div>', unsafe_allow_html=True)
                     c_b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. ESTOQUE</div><div class="bloco-valor">{row[c_est]}</div></div>', unsafe_allow_html=True)
                     
-                    st.markdown(f"**Descrição Detalhada do Material:** {row[c_desc]}")
+                    # --- DESCRIÇÃO DO PRODUTO DESTACADA EXATAMENTE COMO OS CARDS SUPERIORES ---
+                    st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
                     
                     tem_ativo_na_base = False
                     if c_atv_b in it.columns:
@@ -374,16 +384,28 @@ else:
                             if q_cont == 0:
                                 st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
                             elif tem_ativo_na_base and not n_ativ.strip():
-                                st.error("❌ Erro: O campo Ativo é obrigatório para este produto!")
+                                st.error("❌ Erro: O campo Ativo é obrigatório forçando para este produto!")
                             else:
                                 cursor = conn.cursor()
                                 q_sis = int(row[c_qtd]) if pd.notna(row[c_qtd]) else 0
-                                cursor.execute("""
-                                    INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, unidade)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (id_inventario_atual.replace('#',''), str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, n_ativ.strip().upper(), obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
+                                
+                                if is_fluxo_recontagem:
+                                    # Se está em recontagem, atualiza o registro com a quantidade definitiva ajustada da 2ª contagem
+                                    id_reg_recont = int(df_recont_check.iloc[0]['id'])
+                                    cursor.execute("""
+                                        UPDATE contagens 
+                                        SET qtd_contada = ?, diferenca = ?, recontagem = 'Realizada', operador = ?, data_hora = ?, observacao = ?
+                                        WHERE id = ?
+                                    """, (q_cont, q_cont - q_sis, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"[2a Contagem] {obs}", id_reg_recont))
+                                else:
+                                    # Fluxo padrão de primeira contagem
+                                    cursor.execute("""
+                                        INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?)
+                                    """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, n_ativ.strip().upper(), obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
+                                
                                 conn.commit()
-                                st.success("Contagem salva com sucesso!")
+                                st.success("Contagem processada e armazenada com sucesso!")
                                 st.session_state.contador_reset += 1
                                 st.rerun()
                 else: st.error("Material/Produto não localizado na base de dados carregada.")
@@ -432,17 +454,20 @@ else:
             st.subheader("📄 Espelho Base de Saldo - Status de Contagem Atualizado")
             
             if id_inventario_atual:
-                df_lancados_base = pd.read_sql_query("SELECT cod_produto, operador, qtd_contada FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
+                df_lancados_base = pd.read_sql_query("SELECT cod_produto, operador, qtd_contada, recontagem FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
                 mapa_operadores = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['operador']))
                 mapa_quantidades = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['qtd_contada']))
+                mapa_recont = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['recontagem']))
             else:
                 mapa_operadores = {}
                 mapa_quantidades = {}
+                mapa_recont = {}
             
             def mapear_status_gerencial(linha_cod):
                 cod_chave = str(linha_cod).upper().strip()
                 if cod_chave in mapa_operadores:
-                    return f"🟩 Contado ({mapa_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}"
+                    rec_status = f" (2ª Contagem)" if mapa_recont.get(cod_chave) == 'Realizada' else ""
+                    return f"🟩 Contado ({mapa_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}{rec_status}"
                 return "🟥 Não Contado"
             
             df_base_realtime = st.session_state.base_sistema.copy()
@@ -525,7 +550,7 @@ else:
     with abas_gui[4]:
         st.title("🏆 Validade e Prazos de Auditoria Temporal")
         df_m_est = pd.read_sql_query("SELECT id, descricao FROM cadastros_estoques WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-        df_lasts = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE warmth=1 AND unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,)) if 'warmth' in pd.read_sql_query("PRAGMA table_info(contagens)", conn)['name'].tolist() else pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
+        df_lasts = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
         map_lasts = dict(zip(df_lasts['id_estoque'].astype(str).str.strip(), df_lasts['u_data']))
         
         hoje_dt = datetime.datetime.now()
@@ -682,7 +707,36 @@ else:
     if eh_supervisor:
         # 🔬 ABA 7: PAINEL SUPERVISOR
         with abas_gui[6]:
-            st.title("🔬 Módulo Amostral do Supervisor")
+            st.title("🔬 Módulo Amostral do Supervisor e Fluxo de Recontagem")
+            
+            # --- NOVO MECANISMO DE GERAR 2ª CONTAGEM DE ITENS DIVERGENTES ---
+            if id_inventario_atual:
+                st.write(f"### 🔄 Gestão de Recontagem Inteligente do Lote Ativo ({id_inventario_atual})")
+                id_p_limpo = id_inventario_atual.replace('#','')
+                
+                df_erros_lote = pd.read_sql_query(
+                    "SELECT id, cod_produto, desc_produto, qtd_sistema, qtd_contada, diferenca, recontagem FROM contagens WHERE inventario_id = ? AND diferenca != 0 AND unidade = ?", 
+                    conn, params=(id_p_limpo, st.session_state.unidade_selecionada)
+                )
+                
+                if not df_erros_lote.empty:
+                    itens_para_recontar = df_erros_lote[df_erros_lote['recontagem'] == 'Não']
+                    st.warning(f"⚠️ Existem **{len(df_erros_lote)}** lançamentos com divergência no saldo físico. ({len(itens_para_recontar)} prontos para entrar em 2ª contagem)")
+                    st.dataframe(df_erros_lote, use_container_width=True, hide_index=True)
+                    
+                    if not itens_para_recontar.empty:
+                        if st.button("🔄 Abrir 2ª Contagem (Apenas Itens Divergentes)", type="primary", use_container_width=True):
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE contagens SET recontagem = 'Pendente' WHERE inventario_id = ? AND diferenca != 0 AND recontagem = 'Não' AND unidade = ?", (id_p_limpo, st.session_state.unidade_selecionada))
+                            conn.commit()
+                            st.success("✅ Segunda contagem ativada com sucesso! Os operadores serão notificados na Aba 1 ao biparem estes materiais.")
+                            st.rerun()
+                    else:
+                        st.info("ℹ️ Todos os itens divergentes já foram enviados para a recontagem.")
+                else:
+                    st.success("🎉 Nenhuma divergência ativa encontrada neste lote até o momento.")
+                    
+            st.markdown("---")
             if df_inventarios_sup.empty:
                 st.warning("Nenhum inventário amostral aberto.")
                 id_inv_sup_atual = None
