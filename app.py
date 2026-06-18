@@ -454,6 +454,10 @@ else:
 
     # SIDEBAR
     with st.sidebar:
+        # --- IMPLEMENTADO: BOTÃO DE ATUALIZAÇÃO SÉRIE (IMAGE_E2B116.PNG) ---
+        if st.button("🔄 Atualizar Dados", type="primary", use_container_width=True):
+            st.rerun()
+            
         st.subheader(f"🏢 Unidade: {st.session_state.unidade_selecionada}")
         st.write(f"👤 **Operador:** {st.session_state.operador}")
         if st.button("🚪 Sair da Conta", use_container_width=True):
@@ -725,11 +729,10 @@ else:
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
         st.dataframe(df_todas_auditorias_banco, use_container_width=True)
 
-    # --- ABA 5: HISTÓRICO GERAL (FIXADA - EM BRANCO POR PADRÃO) ---
+    # --- ABA 5: HISTÓRICO GERAL (EM BRANCO POR PADRÃO) ---
     with abas_render[4]:
         st.title("📁 Arquivo Geral de Movimentações")
         
-        # --- AJUSTE SOLICITADO: DATAS EM BRANCO POR PADRÃO ---
         c_dt1, c_dt2 = st.columns(2)
         with c_dt1: 
             data_inicio_filtro = st.date_input("Data Inicial (Opcional)", value=None, key="hist_dt_ini_blank")
@@ -738,11 +741,9 @@ else:
             
         st.markdown("---")
         
-        # Filtro de Unidade Isolado
         df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
         df_filtrados = df_inventarios[df_inventarios['unidade'] == st.session_state.unidade_selecionada]
         
-        # Se o usuário preencher os filtros de data opcionais, o sistema filtra. Caso contrário, ignora.
         if data_inicio_filtro:
             df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] >= data_inicio_filtro]
         if data_fim_filtro:
@@ -753,7 +754,6 @@ else:
         if df_filtrados.empty:
             st.info("Nenhum inventário registrado ou localizado no filtro selecionado.")
         else:
-            # Paginação estruturada de 15 em 15
             tamanho_pagina = 15
             total_itens = len(df_filtrados)
             total_paginas = (total_itens - 1) // tamanho_pagina + 1
@@ -778,7 +778,6 @@ else:
                     else:
                         st.info("Nenhuma contagem feita nesta pasta.")
                         
-            # Botões de controle Anterior / Próximo
             st.markdown("---")
             col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
             with col_pag1:
@@ -906,7 +905,7 @@ else:
                     cursor = conn.cursor()
                     cursor.execute("UPDATE usuarios SET nome = ?, senha = ?, unidade = ? WHERE id = ?", (novo_nome_user.strip(), nova_senha_user.strip(), nova_unid_user, usuario_alvo_id))
                     conn.commit()
-                    st.success("✅ Usuário atualizado com sucesso no banco de dados!")
+                    st.success("✅ Usuário updated com sucesso no banco de dados!")
                     st.rerun()
                     
     conn.close()
