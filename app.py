@@ -199,6 +199,7 @@ if not st.session_state.logged_in:
                         st.session_state.unidade_selecionada = user[1]
                         st.session_state.cargo_usuario = user[2]
                         st.success("✅ Autenticado com sucesso!")
+                        st.calendar_refresh = True
                         st.rerun()
                     else:
                         st.error("❌ Credenciais incorretas ou usuário não cadastrado nesta unidade!")
@@ -253,7 +254,6 @@ else:
         ar_excel = st.file_uploader("Upload Excel Geral", type=["xlsx"], label_visibility="collapsed")
         if ar_excel:
             st.session_state.base_sistema = pd.read_excel(ar_excel)
-            st.rerun()
             
         st.markdown("---")
         st.write("📁 **Selecione o Inventário**")
@@ -330,7 +330,8 @@ else:
                 if st.form_submit_button("Criar Lote"):
                     if n_inv:
                         cursor = conn.cursor()
-                        cursor.execute("SELECT id FROM inventarios")
+                        # --- CORREÇÃO DE CRIAÇÃO: Filtra apenas os IDs da unidade selecionada para evitar quebras de escopo ---
+                        cursor.execute("SELECT id FROM inventarios WHERE unidade = ?", (st.session_state.unidade_selecionada,))
                         todos_ids = cursor.fetchall()
                         
                         maior_id = 0
@@ -344,7 +345,8 @@ else:
                         
                         nxt = maior_id + 1
                         cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (f"#{nxt}", n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
-                        conn.commit(); st.rerun()
+                        conn.commit()
+                        st.rerun()
 
     # --- DEFINIÇÃO E RENDERIZAÇÃO DAS ABAS NA ORDEM EXATA ---
     ordem_abas = ["🔍 Contar Item", "📊 Contagem Atual e Progresso", "📄 Base de Estoque", "📁 Histórico Geral", "🏆 Desempenho e Prazos", "📈 Acuracidade Estoque"]
@@ -942,7 +944,7 @@ else:
                     if st.button("🗑️ Excluir Estoque"):
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM cadastros_estoques WHERE id = ? AND unidade = ?", (est_del, st.session_state.unidade_selecionada))
-                        conn.commit(); st.rerun() # --- CORRIGIDO: de r.rerun() para st.rerun() ---
+                        conn.commit(); st.rerun()
 
     # 👥 ABA 9: GESTÃO DE USUÁRIOS
     if eh_yago_master:
@@ -960,6 +962,6 @@ else:
                 if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
                     cursor.execute("UPDATE usuarios SET nome=?, senha=?, unidade=?, cargo=? WHERE id=?", (n_nome.strip(), n_senha.strip(), n_unid, n_cargo, id_a))
-                    conn.commit(); st.success("Usuário Atualizado!"); st.rerun()
+                    conn.commit(); st.success("Usuário Atuallizado!"); st.rerun()
                     
     conn.close()
