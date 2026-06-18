@@ -291,7 +291,7 @@ if "recuperar" in query_params and "token" in query_params:
                         cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
                         conn.commit()
                         conn.close()
-                        st.success("🎉 Senha updated com sucesso! Pode fazer o login na tela principal.")
+                        st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
     st.stop()
 
 # --- TELA DE ACESSO CENTRALIZADA E COMPACTA ---
@@ -374,7 +374,7 @@ if not st.session_state.logged_in:
                             """, unsafe_allow_html=True)
                         else:
                             try:
-                                cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade) VALUES (?, ?, ?, ?, ?)", (novo_nome.strip(), cpf_l, email_l, nova_senha, unity_cadastro := unity_cadastro if 'unity_cadastro' in locals() else unidade_cadastro))
+                                cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade) VALUES (?, ?, ?, ?, ?)", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
                                 conn.commit()
                                 st.success("✅ Cadastrado com sucesso!")
                                 st.session_state.tela_acesso = "login"
@@ -429,7 +429,6 @@ else:
     
     nome_usuario_logado_limpo = st.session_state.operador.lower()
     
-    # --- CRITÉRIO REVISADO DE SUPERVISÃO POR PALAVRA-CHAVE OU USUÁRIO MASTER ---
     eh_supervisor = "supervisor" in nome_usuario_logado_limpo or "admin" in nome_usuario_logado_limpo or "yago rodrigues" in nome_usuario_logado_limpo
     eh_yago_master = "yago rodrigues" in nome_usuario_logado_limpo or "administrador tel" in nome_usuario_logado_limpo
     
@@ -553,8 +552,6 @@ else:
 
     # Determinar abas disponíveis
     lista_abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho e Prazos"]
-    
-    # Exclusividade da aba de gestão apenas para você (Acesso Master Soberano)
     if eh_yago_master:
         lista_abas.append("⚙️ Gestão de Usuários")
         
@@ -728,16 +725,63 @@ else:
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
         st.dataframe(df_todas_auditorias_banco, use_container_width=True)
 
-    # --- ABA 5: HISTÓRICO GERAL ---
+    # --- ABA 5: HISTÓRICO GERAL (FIXADA PARA FILTRAR PASTAS SEGURO POR DATA) ---
     with abas_render[4]:
         st.title("📁 Arquivo Geral de Movimentações")
         c_dt1, c_dt2 = st.columns(2)
         with c_dt1: data_inicio_filtro = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=90))
-        with c_dt2: data_fim_filtro = st.date_input("Data Final", datetime.date.today() + datetime.timedelta(days=1))
+        with c_dt2: data_fim_filtro = st.date_input("Data Final", datetime.date.today() + datetime.timedelta(days=7))
         
+        # Ajuste na formatação para que a verificação de data coincida milimetricamente com a string do banco de dados
         df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
-        df_filtrados = df_inventarios[(df_inventarios['datetime_parsed'] >= data_inicio_filtro) & (df_inventarios['datetime_parsed'] <= data_fim_filtro) & (df_inventarios['unidade'] == st.session_state.unidade_selecionada)]
+        df_filtrados = df_inventarios[
+            (df_inventarios['datetime_parsed'] >= data_inicio_filtro) & 
+            (df_inventarios['datetime_parsed'] <= data_fim_filtro) & 
+            (df_inventarios['unidade'] == st.session_state.unidade_selecionada)
+        ]
+        
         st.write(f"Total de pastas nesta unidade: {len(df_filtrados)}")
+        
+        if df_filtrados.empty:
+            st.info("Nenhum inventário registrado no período selecionado.")
+        else:
+            tamanho_pagina = 15
+            total_itens = len(df_filtrados)
+            total_paginas = (total_itens - 1) // tamanho_pagina + 1
+            
+            if st.session_state.pagina_historico >= total_paginas:
+                st.session_state.pagina_historico = 0
+                
+            inicio_idx = st.session_state.pagina_historico * tamanho_pagina
+            fim_idx = inicio_idx + tamanho_pagina
+            
+            df_pagina_atual = df_filtrados.iloc[inicio_idx:fim_idx]
+            
+            for idx, inv in df_pagina_atual.iterrows():
+                id_inv_proc = inv['id'].replace('#','')
+                df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", conn, params=(id_inv_proc, st.session_state.unidade_selecionada))
+                
+                with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} contados)"):
+                    if not df_hist_inv.empty:
+                        excel_geral_hist = converter_para_excel(df_hist_inv)
+                        st.download_button(label="📥 Baixar Pasta em Excel", data=excel_geral_hist, file_name=f"inventario_{inv['id']}.xlsx", key=f"dl_{inv['id']}")
+                        st.dataframe(df_hist_inv.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Nenhuma contagem feita nesta pasta.")
+                        
+            # Controles de paginação
+            st.markdown("---")
+            col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
+            with col_pag1:
+                if st.button("◀ Anterior", use_container_width=True, disabled=(st.session_state.pagina_historico == 0)):
+                    st.session_state.pagina_historico -= 1
+                    st.rerun()
+            with col_pag_texto:
+                st.markdown(f"<p style='text-align: center; margin-top: 7px;'>Página <strong>{st.session_state.pagina_historico + 1}</strong> de <strong>{total_paginas}</strong></p>", unsafe_allow_html=True)
+            with col_pag2:
+                if st.button("Próximo ▶", use_container_width=True, disabled=(st.session_state.pagina_historico >= total_paginas - 1)):
+                    st.session_state.pagina_historico += 1
+                    st.rerun()
 
     # --- ABA 6: BASE DE ESTOQUE ---
     with abas_render[5]:
@@ -833,7 +877,7 @@ else:
         if not df_ops.empty:
             st.bar_chart(data=df_ops, x='Operador', y='Lançamentos Feitos', color="#d35400")
 
-    # --- ABA EXCLUSIVA PERMISSÃO MASTER SOBERANO: GESTÃO DE LOGINS (REVISADA) ---
+    # --- ABA EXCLUSIVA PERMISSÃO MASTER SOBERANO: GESTÃO DE LOGINS ---
     if eh_yago_master:
         with abas_render[7]:
             st.title("⚙️ Painel de Controle e Gestão de Usuários")
