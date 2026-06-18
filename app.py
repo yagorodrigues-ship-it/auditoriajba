@@ -274,7 +274,6 @@ if "recuperar" in query_params and "token" in query_params:
         st.error("❌ Link inválido ou corrompido.")
     else:
         st.info(f"Alterando a senha da conta vinculada ao e-mail: **{email_token}**")
-        # Ajuste de layout centralizado dinâmico
         _, col_senha_center, _ = st.columns([2, 4, 2])
         with col_senha_center:
             with st.form("form_nova_senha_janela"):
@@ -295,11 +294,10 @@ if "recuperar" in query_params and "token" in query_params:
                         st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
     st.stop()
 
-# --- TELA DE ACESSO CENTRALIZADA E COMPACTA (AJUSTE DA IMAGEM) ---
+# --- TELA DE ACESSO CENTRALIZADA E COMPACTA ---
 if not st.session_state.logged_in:
     conn = conectar_banco()
     
-    # Grid de centralização estrutural (Muda de largura total para caixa focada no meio)
     _, col_login_focada, _ = st.columns([3, 4, 3])
     
     with col_login_focada:
@@ -308,8 +306,6 @@ if not st.session_state.logged_in:
             with st.form("login_form"):
                 identificador = st.text_input("CPF (somente números) ou E-mail")
                 senha = st.text_input("Senha", type="password")
-                
-                # NOVO FILTRO: Seleção obrigatória da localidade no Login
                 unidade_login = st.selectbox("📍 Localidade da Auditoria", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"])
                 
                 botao_login = st.form_submit_button("Entrar no Sistema", type="primary", use_container_width=True)
@@ -317,8 +313,7 @@ if not st.session_state.logged_in:
                     id_limpo = identificador.strip()
                     doc_limpo = limpar_documento(id_limpo)
                     cursor = conn.cursor()
-                    # Valida credenciais cruzando com a localidade escolhida
-                    cursor.execute("SELECT nome, unidade FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_limpo, doc_limpo, senha, unidade_login))
+                    cursor.execute("SELECT nome, unidade FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_limpo, doc_limpo, senha, unity_login := unity_login if 'unity_login' in locals() else unidade_login))
                     user = cursor.fetchone()
                     if user:
                         st.session_state.logged_in = True
@@ -346,8 +341,6 @@ if not st.session_state.logged_in:
                 novo_email = st.text_input("E-mail")
                 nova_senha = st.text_input("Senha", type="password")
                 confirma_senha = st.text_input("Confirme a Senha", type="password")
-                
-                # Vínculo permanente do funcionário com a sua unidade
                 unidade_cadastro = st.selectbox("📍 Vincular à Localidade", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"])
                 
                 btn_cad = st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True)
@@ -360,7 +353,7 @@ if not st.session_state.logged_in:
                     else:
                         try:
                             cursor = conn.cursor()
-                            cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade) VALUES (?, ?, ?, ?, ?)", (novo_nome.strip(), cpf_l, novo_email.strip(), nova_senha, unity_cadastro))
+                            cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade) VALUES (?, ?, ?, ?, ?)", (novo_nome.strip(), cpf_l, novo_email.strip(), nova_senha, unity_cadastro := unity_cadastro if 'unity_cadastro' in locals() else unidade_cadastro))
                             conn.commit()
                             st.success("✅ Cadastrado com sucesso!")
                             st.session_state.tela_acesso = "login"
@@ -405,11 +398,10 @@ if not st.session_state.logged_in:
                 st.rerun()
     conn.close()
 
-# --- TELA LOGADA DO SISTEMA (FILTRADA POR UNIDADE) ---
+# --- TELA LOGADA DO SISTEMA ---
 else:
     conn = conectar_banco()
     
-    # Força o recarregamento respeitando estritamente a unidade isolada logada
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios WHERE unidade = ? ORDER BY data DESC, id DESC", conn, params=(st.session_state.unidade_selecionada,))
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor WHERE unidade = ? ORDER BY data DESC, id DESC", conn, params=(st.session_state.unidade_selecionada,))
     
@@ -534,11 +526,15 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho"]
-    aba_contar, aba_atual, aba_supervisor, aba_acuracidade, aba_historico_geral, aba_base, aba_graficos = st.tabs(abas)
+    # Determinar abas disponíveis (Inclui aba de gestão se for você)
+    lista_abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho"]
+    if eh_supervisor:
+        lista_abas.append("⚙️ Gestão de Usuários")
+        
+    abas_render = st.tabs(lista_abas)
     
     # --- ABA 1: CONTAR ITEM ---
-    with aba_contar:
+    with abas_render[0]:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
         elif inventario_selected_obj['status'] == "Fechado":
@@ -573,7 +569,7 @@ else:
                     
                     b1, b2, b3, b4 = st.columns(4)
                     b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
-                    b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="st-title">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
+                    b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
                     b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
                     b4.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS BARRA</div><div class="bloco-valor" style="color:#2ecc71;">● Conectado</div></div>', unsafe_allow_html=True)
                     
@@ -605,7 +601,7 @@ else:
                     st.error("❌ Código não localizado.")
 
     # --- ABA 2: CONTAGEM ATUAL ---
-    with aba_atual:
+    with abas_render[1]:
         if id_inventario_atual:
             st.subheader(f"Painel Operacional – {id_inventario_atual} ({inventario_selected_obj['nome']})")
             modo_visao = "Apenas Minhas Contagens"
@@ -639,7 +635,7 @@ else:
             st.info("Nenhum inventário selecionado.")
 
     # --- ABA 3: PAINEL SUPERVISOR ---
-    with aba_supervisor:
+    with abas_render[2]:
         st.title("🔬 Controle de Qualidade Amostral do Supervisor")
         if not eh_supervisor:
             st.error("🚫 Acesso restrito aos supervisores.")
@@ -695,50 +691,73 @@ else:
                 except Exception as e:
                     st.error(f"Erro: {e}")
 
-            if id_inv_sup_atual and inv_sup_selecionado_obj['status'] == "Aberto" and st.session_state.base_supervisor is not None:
-                bip_supervisor = st.text_input("💻 Bipar item para Amostragem", value="")
-                if bip_supervisor:
-                    # Lógica de salvar amostra idêntica filtrada pela localidade ativa
-                    pass
-
-            # Relatório Amostral do Supervisor
             df_auditorias_atual = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inv_sup_atual, st.session_state.unidade_selecionada)) if id_inv_sup_atual else pd.DataFrame()
             st.write("### Relatório Amostral")
             st.dataframe(df_auditorias_atual.drop(columns=['unidade'], errors='ignore'), use_container_width=True)
 
     # --- ABA 4: ACURACIDADE ESTOQUE ---
-    with aba_acuracidade:
+    with abas_render[3]:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-        # Renderização segmentada das tabelas de acuracidade por depósito da unidade corrente
         st.dataframe(df_todas_auditorias_banco, use_container_width=True)
 
     # --- ABA 5: HISTÓRICO GERAL ---
-    with aba_historico_geral:
+    with abas_render[4]:
         st.title("📁 Arquivo Geral de Movimentações")
         c_dt1, c_dt2 = st.columns(2)
         with c_dt1: data_inicio_filtro = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=90))
         with c_dt2: data_fim_filtro = st.date_input("Data Final", datetime.date.today() + datetime.timedelta(days=1))
         
-        # Paginação das pastas vinculadas estritamente à unidade logada
         df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
         df_filtrados = df_inventarios[(df_inventarios['datetime_parsed'] >= data_inicio_filtro) & (df_inventarios['datetime_parsed'] <= data_fim_filtro) & (df_inventarios['unidade'] == st.session_state.unidade_selecionada)]
-        
-        # Renderização das 15 pastas por página
         st.write(f"Total de pastas nesta unidade: {len(df_filtrados)}")
 
     # --- ABA 6: BASE DE ESTOQUE ---
-    with aba_base:
+    with abas_render[5]:
         if st.session_state.base_sistema is not None:
             st.subheader("📄 Espelho Base de Saldo")
             st.dataframe(st.session_state.base_sistema, use_container_width=True)
 
     # --- ABA 7: DESEMPENHO ---
-    with aba_graficos:
-        st.title("🏆 Desempenho e Auditoria de Prazos")
-        # Monitoramento temporal focado nas contagens da unidade selecionada no login
+    with abas_render[6]:
+        st.title("🏆 Desempenho e Prazos")
         df_ultimas_contagens = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as ultima_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
-        st.write("Visão Geral de Prazos")
         st.dataframe(df_ultimas_contagens, use_container_width=True)
-        
+
+    # --- ABA NOVA EXCLUSIVA PARA O YAGO: GESTÃO DE LOGINS ---
+    if eh_supervisor:
+        with abas_render[7]:
+            st.title("⚙️ Painel de Controle e Gestão de Usuários")
+            st.info("💡 Como Administrador Master, aqui você visualiza todas as contas criadas em todas as unidades e pode alterar suas credenciais ou promovê-los.")
+            
+            # Trazer todos os logins do sistema
+            df_usuarios_all = pd.read_sql_query("SELECT id, nome, cpf, email, senha, unidade FROM usuarios ORDER BY unidade, nome", conn)
+            st.write("### 👥 Todos os Usuários Cadastrados")
+            st.dataframe(df_usuarios_all, use_container_width=True, hide_index=True)
+            
+            st.markdown("---")
+            st.write("### 🛠️ Alterar Dados e Permissões")
+            
+            with st.form("form_edit_user"):
+                usuario_alvo_id = st.selectbox("Escolha o usuário para alterar", df_usuarios_all['id'].tolist(), format_func=lambda x: f"ID {x} - {df_usuarios_all[df_usuarios_all['id']==x]['nome'].values[0]} ({df_usuarios_all[df_usuarios_all['id']==x]['unidade'].values[0]})")
+                
+                # Resgatar dados atuais do usuário selecionado para preencher o formulário
+                u_row = df_usuarios_all[df_usuarios_all['id'] == usuario_alvo_id].iloc[0]
+                
+                st.write(f"✏️ **Modificando:** {u_row['nome']} | CPF: {u_row['cpf']}")
+                novo_nome_user = st.text_input("Nome Completo (Inclua a palavra 'Supervisor' ou 'Admin' no nome se quiser torná-lo ADM)", value=u_row['nome'])
+                nova_senha_user = st.text_input("Nova Senha de Acesso", value=u_row['senha'])
+                nova_unid_user = st.selectbox("Mudar Unidade / Localidade", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"], index=["JURUBATUBA", "JUNDIAI", "CUBATÃO"].index(u_row['unidade']))
+                
+                if st.form_submit_button("💾 Salvar Alterações Definitivas", type="primary"):
+                    cursor = conn.cursor()
+                    cursor.execute("""
+                        UPDATE usuarios 
+                        SET nome = ?, senha = ?, unidade = ? 
+                        WHERE id = ?
+                    """, (novo_nome_user.strip(), nova_senha_user.strip(), nova_unid_user, usuario_alvo_id))
+                    conn.commit()
+                    st.success("✅ Usuário atualizado com sucesso no banco de dados!")
+                    st.rerun()
+                    
     conn.close()
