@@ -186,6 +186,7 @@ if not st.session_state.logged_in:
                     doc_l = limpar_documento(id_l)
                     cursor = conn.cursor()
                     
+                    # CORREÇÃO DO LOGIN: Uso de UPPER para evitar problemas com acentos ou caixa baixa
                     cursor.execute("""
                         SELECT nome, unidade, cargo 
                         FROM usuarios 
@@ -253,7 +254,6 @@ else:
         ar_excel = st.file_uploader("Upload Excel Geral", type=["xlsx"], label_visibility="collapsed")
         if ar_excel:
             st.session_state.base_sistema = pd.read_excel(ar_excel)
-            st.rerun()
             
         st.markdown("---")
         st.write("📁 **Selecione o Inventário**")
@@ -263,9 +263,9 @@ else:
         else:
             lista_inv = []
             for idx, r in df_inventarios.iterrows():
-                id_limpo_r = r['id'].replace('#','')
+                id_limpo_r = r['id'].replace('#','#')
                 cursor_check = conn.cursor()
-                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r, st.session_state.unidade_selecionada))
+                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r.replace('#',''), st.session_state.unidade_selecionada))
                 possui_pendente = cursor_check.fetchone()[0] > 0
                 
                 if r['status'] == 'Fechado':
@@ -360,7 +360,7 @@ else:
     with abas_gui[0]:
         if id_inventario_atual is None:
             st.warning("⚠️ **Bloqueado:** Nenhum lote de inventário selecionado ou ativo. Use a barra lateral para criar ou selecionar um lote.")
-        elif st.session_state.base_sistema is None or not c_cod:
+        elif st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a Base Geral no menu lateral para iniciar as bipagens.")
         else:
             id_p_limpo = id_inventario_atual.replace('#','')
@@ -412,7 +412,7 @@ else:
                                 cursor = conn.cursor()
                                 val_ativo_inserido = n_ativ.strip().upper()
                                 
-                                # --- FLUXO DE VALIDAÇÃO DE DUPLICIDADE ---
+                                # --- CORREÇÃO DE DUPLICIDADE DE ATIVOS E ITENS NORMAS ---
                                 if not is_fluxo_recontagem:
                                     if tem_ativo_na_base:
                                         if not val_ativo_inserido:
@@ -436,6 +436,7 @@ else:
                                         if cursor.fetchone()[0] > 0:
                                             st.error("❌ Erro: Este item sem ativo já foi contabilizado neste lote!")
                                             st.stop()
+                                # ---------------------------------------------------
 
                                 if q_cont == 0:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
@@ -482,8 +483,7 @@ else:
             total_faltantes_tab = 0
             taxa_acuracidade = 100.0
             
-            # --- PROTEÇÃO CONTRA KEYERROR: Só roda se c_cod e planilha existirem ---
-            if st.session_state.base_sistema is not None and c_cod:
+            if st.session_state.base_sistema is not None:
                 total_itens_base = len(st.session_state.base_sistema)
                 itens_contados_unicos = df_c['cod_produto'].unique() if not df_c.empty else []
                 total_contados = len(itens_contados_unicos)
@@ -522,8 +522,7 @@ else:
             else:
                 st.info("💡 Nenhuma contagem realizada para este lote ainda.")
 
-            # Protegido contra KeyError
-            if st.session_state.base_sistema is not None and c_cod and total_faltantes_tab > 0:
+            if st.session_state.base_sistema is not None and total_faltantes_tab > 0:
                 st.markdown("---")
                 st.error(f"⚠️ **Atenção:** Ainda restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
                 codigos_base = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().tolist()
@@ -542,7 +541,7 @@ else:
 
     # 📄 ABA 3: BASE DE ESTOQUE
     with abas_gui[2]:
-        if st.session_state.base_sistema is not None and c_cod:
+        if st.session_state.base_sistema is not None:
             st.subheader("📄 Espelho Base de Saldo - Status de Contagem Atualizado")
             
             if id_inventario_atual:
@@ -693,9 +692,7 @@ else:
                 certos_qtd = len(grupo[grupo['diferenca'] == 0])
                 certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                 certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
-                
-                # --- CORREÇÃO DO NAMEERROR: Aplicado em todas as instâncias do laço ---
-                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
+                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in group.columns else "Não Informado"
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
@@ -959,7 +956,7 @@ else:
     # 👥 ABA 9: GESTÃO DE USUÁRIOS
     if eh_yago_master:
         with abas_gui[-1]:
-            st.title("👥 Panel de Controle e Gestão de Usuários")
+            st.title("👥 Painel de Controle e Gestão de Usuários")
             df_u = pd.read_sql_query("SELECT id, nome, cpf, email, senha, unidade, cargo FROM usuarios ORDER BY unidade, nome", conn)
             st.dataframe(df_u, use_container_width=True, hide_index=True)
             with st.form("form_adm_edit"):
