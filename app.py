@@ -142,7 +142,7 @@ if 'contador_reset' not in st.session_state: st.session_state.contador_reset = 0
 if 'pagina_historico' not in st.session_state: st.session_state.pagina_historico = 0
 if 'pagina_acuracidade_sup' not in st.session_state: st.session_state.pagina_acuracidade_sup = 0
 
-# --- FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL USANDO OPENPYXL NATIVO ---
+# --- FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL ---
 def converter_para_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -274,12 +274,11 @@ else:
             else:
                 st.caption("🎉 Status: <span style='color:#2ecc71;font-weight:bold;'>100% Concluído</span>", unsafe_allow_html=True)
 
-        # --- SEÇÃO ATUALIZADA DE ACORDO COM O SEU PEDIDO (FECHAMENTO NA LATERAL) ---
+        # --- SEÇÃO DE FECHAMENTO NA LATERAL ---
         if id_inventario_atual and inventario_selected_obj is not None and inventario_selected_obj['status'] == 'Aberto':
             st.markdown("---")
             with st.expander("🔒 Fechar Inventário Atual"):
                 if total_faltantes == 0:
-                    # Se estiver 100% completo, liberado para qualquer perfil fechar
                     st.success("🎉 Inventário 100% preenchido e pronto para fechamento.")
                     if st.button("Confirmar Fechamento", type="primary", use_container_width=True, key="btn_fechar_100_side"):
                         cursor = conn.cursor()
@@ -288,7 +287,6 @@ else:
                         st.success("Inventário Encerrado!")
                         st.rerun()
                 else:
-                    # Se estiver incompleto, checa privilégios de Supervisor
                     if eh_supervisor:
                         st.warning(f"⚠️ Existem {total_faltantes} itens pendentes. Como Supervisor, você pode forçar o encerramento do lote.")
                         if st.button("Forçar Fechamento Lote", type="primary", use_container_width=True, key="btn_fechar_sup_side"):
@@ -298,7 +296,8 @@ else:
                             st.success("Lote fechado com pendências!")
                             st.rerun()
                     else:
-                        st.error("❌ Fechamento Bloqueado: O lote possui pendências. Apenas o **Supervisor** da unidade pode forçar este encerramento.")
+                        # --- TEXTO DA MENSAGEM DE ERRO ATUALIZADA EXATAMENTE COMO SOLICITADO ---
+                        st.error("Fechamento Bloqueado: O Inventario não foi 100% contabilizado. Apenas o Supervisor da unidade pode forçar este encerramento.")
 
         st.markdown("---")
         st.write("⚙️ **Criar Inventário**")
@@ -419,6 +418,9 @@ else:
                 else:
                     st.success("🎉 **Excelente!** 100% dos itens da planilha base foram contabilizados.")
                 st.markdown("---")
+                
+                if inventario_selected_obj is not None and inventario_selected_obj['status'] != 'Aberto':
+                    st.info("🔒 **Status do Lote:** Este inventário encontra-se **Fechado/Finalizado**. As contagens e dados acima são apenas para consulta.")
             
             st.write("### 📑 Histórico de Lançamentos Registrados")
             st.dataframe(df_c.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
