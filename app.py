@@ -239,7 +239,6 @@ else:
         c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
         c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
         
-        # --- ATUALIZAÇÃO MAIS INTELIGENTE DO ATIVO: Evita mapear "Lote" ou "Lote Fornecedor" por engano ---
         c_atv_b = ""
         for c in st.session_state.base_sistema.columns:
             c_upper = str(c).upper().replace(" ", "")
@@ -404,22 +403,21 @@ else:
                         
                         st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
 
+                        # --- CORREÇÃO FINAL DA REQUISITÃO: O campo na interface é exibido sempre como livre/opcional ---
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
-                            
-                            # Mantém amigável e limpo na interface
-                            n_ativ = st.text_input("🔢 Número do Ativo (Opcional - Necessário apenas se o item possuir Ativo na planilha)")
+                            n_ativ = st.text_input("🔢 Número do Ativo (Opcional - Requerido somente para itens patrimoniais identificados)")
                             obs = st.text_input("Observação")
                             
                             if st.form_submit_button("Confirmar Lançamento", type="primary"):
                                 cursor = conn.cursor()
                                 val_ativo_inserido = n_ativ.strip().upper()
                                 
-                                # --- NOVO BACKEND PROTEGIDO CONTRA LOTE / FORNECEDOR ---
+                                # --- INTELIGÊNCIA EXCLUSIVA DA VALIDAÇÃO POR ITEM (LINHA POR LINHA) ---
                                 tem_ativo_na_base = False
                                 if c_atv_b and c_atv_b in it.columns and not pd.isna(row[c_atv_b]):
                                     c_atv_upper = str(c_atv_b).upper().replace(" ", "")
-                                    # Garante que NUNCA vai considerar Lote ou Fornecedor como ativo obrigatorio
+                                    # Desconsidera completamente falsos cabeçalhos como "Lote" ou "Lote Fornecedor"
                                     if "LOTE" not in c_atv_upper and "FORNECEDOR" not in c_atv_upper:
                                         val_at_linha = str(row[c_atv_b]).strip()
                                         if val_at_linha and val_at_linha.lower() != "nan" and val_at_linha != "":
@@ -427,6 +425,7 @@ else:
 
                                 if not is_fluxo_recontagem:
                                     if tem_ativo_na_base:
+                                        # Bloqueia apenas se a linha do produto no Excel exigir ativo e o operador deixar em branco
                                         if not val_ativo_inserido:
                                             st.error("❌ Erro: O preenchimento do número do Ativo é obrigatório para este produto específico!")
                                             st.stop()
@@ -440,14 +439,16 @@ else:
                                             st.error(f"❌ Erro: O ativo '{val_ativo_inserido}' para este produto já foi contabilizado neste lote!")
                                             st.stop()
                                     else:
+                                        # Se o item bipado não exigir ativo no Excel (ex: botina de segurança), pula a trava e salva direto
                                         cursor.execute("""
                                             SELECT COUNT(*) FROM contagens 
                                             WHERE inventario_id = ? AND cod_produto = ? AND unidade = ?
                                         """, (id_p_limpo, prod_l, st.session_state.unidade_selecionada))
                                         
                                         if cursor.fetchone()[0] > 0:
-                                            st.error("❌ Erro: Este item sem ativo já foi contabilizado neste lote!")
+                                            st.error("❌ Erro: Este item comum sem ativo já foi contabilizado neste lote!")
                                             st.stop()
+                                # ---------------------------------------------------------------------------------------
 
                                 if q_cont == 0:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
@@ -525,7 +526,7 @@ else:
                     st.markdown("### 🚨 Itens com Divergência de Saldo Detectada (Aguardando Correção)")
                     st.dataframe(
                         df_divergentes_realtime[['cod_produto', 'desc_produto', 'desc_estoque', 'qtd_sistema', 'qtd_contada', 'diferenca', 'operador', 'data_hora', 'ativo']], 
-                        use_width_width=True, 
+                        use_container_width=True, 
                         hide_index=True
                     )
                 else:
@@ -824,7 +825,7 @@ else:
                     else:
                         st.info("ℹ️ Todos os itens divergentes já foram enviados para a recontagem.")
                 else:
-                    st.success("🎉 Nenhuma divergência ativa encontrada neste lote até o momento.")
+                    st.success("🎉 Nenhuma divergência activa encontrada neste lote até o momento.")
                     
             st.markdown("---")
             if df_inventarios_sup.empty:
