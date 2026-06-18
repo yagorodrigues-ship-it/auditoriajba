@@ -355,7 +355,7 @@ else:
         
     abas_gui = st.tabs(ordem_abas)
 
-    # 🔍 ABA 1: CONTAR ITEM (CAMPO DE ATIVO TOTALMENTE REMOVIDO)
+    # 🔍 ABA 1: CONTAR ITEM
     with abas_gui[0]:
         if id_inventario_atual is None:
             st.warning("⚠️ **Bloqueado:** Nenhum lote de inventário selecionado ou ativo. Use a barra lateral para criar ou selecionar um lote.")
@@ -520,17 +520,17 @@ else:
             
             if id_inventario_atual:
                 df_lancados_base = pd.read_sql_query("SELECT cod_produto, operador, qtd_contada, recontagem FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
-                mapa_operadores = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['operador']))
-                mapa_quantidades = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['qtd_contada']))
-                mapa_recont = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['recontagem']))
+                map_operadores = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['operador']))
+                map_quantidades = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['qtd_contada']))
+                map_recont = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['recontagem']))
             else:
-                mapa_operadores = {}
-                mapa_quantidades = {}
-                mapa_recont = {}
+                map_operadores = {}
+                map_quantidades = {}
+                map_recont = {}
             
             def mapear_status_gerencial(linha_cod):
                 cod_chave = str(linha_cod).upper().strip()
-                if cod_chave in mapa_operadores:
+                if cod_chave in map_operadores:
                     rec_status = f" (2ª Contagem)" if mapa_recont.get(cod_chave) == 'Realizada' else ""
                     return f"🟩 Contado ({mapa_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}{rec_status}"
                 return "🟥 Não Contado"
@@ -626,16 +626,16 @@ else:
             if udstr:
                 try:
                     dtc = datetime.datetime.strptime(udstr, "%Y-%m-%d %H:%M:%S")
-                    dias = (hoje_dt - dtc).days
+                    disabled = (hoje_dt - dtc).days
                     exib = dtc.strftime("%d/%m/%Y %H:%M")
-                except: dias = 999; exib = "Erro"
-            else: dias = 999; exib = "Nunca Contado"
+                except: disabled = 999; exib = "Erro"
+            else: disabled = 999; exib = "Nunca Contado"
             
-            status_f = "🟢 Bom" if dias <= 7 else "🟡 Precisa contar" if dias <= 14 else "🔴 Crítico"
-            if dias <= 7: bom_count += 1
-            elif dias <= 14: auditar_count += 1
+            status_f = "🟢 Bom" if disabled <= 7 else "🟡 Precisa contar" if disabled <= 14 else "🔴 Crítico"
+            if disabled <= 7: bom_count += 1
+            elif disabled <= 14: auditar_count += 1
             else: criticos_count += 1
-            dados_prazos.append({"Id. Estoque": ide, "Descrição": re['descricao'], "Última Contagem": exib, "Dias sem Contar": dias if dias != 999 else "—", "Status": status_f})
+            dados_prazos.append({"Id. Estoque": ide, "Descrição": re['descricao'], "Última Contagem": exib, "Dias sem Contar": disabled if disabled != 999 else "—", "Status": status_f})
         
         k1, k2, k3 = st.columns(3)
         with k1: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🟢 EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
@@ -920,6 +920,6 @@ else:
                 if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
                     cursor.execute("UPDATE usuarios SET nome=?, senha=?, unidade=?, cargo=? WHERE id=?", (n_nome.strip(), n_senha.strip(), n_unid, n_cargo, id_a))
-                    conn.commit(); st.success("Usuário Atualizado!"); st.rerun()
+                    conn.commit(); st.success("Usuário Updated!"); st.rerun()
                     
     conn.close()
