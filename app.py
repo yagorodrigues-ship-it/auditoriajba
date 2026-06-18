@@ -263,9 +263,9 @@ else:
         else:
             lista_inv = []
             for idx, r in df_inventarios.iterrows():
-                id_limpo_r = r['id'].replace('#','')
+                id_limpo_r = r['id'].replace('#','#')
                 cursor_check = conn.cursor()
-                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r, st.session_state.unidade_selecionada))
+                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r.replace('#',''), st.session_state.unidade_selecionada))
                 possui_pendente = cursor_check.fetchone()[0] > 0
                 
                 if r['status'] == 'Fechado':
@@ -482,7 +482,6 @@ else:
             total_faltantes_tab = 0
             taxa_acuracidade = 100.0
             
-            # --- PROTEÇÃO CONTRA KEYERROR: Só roda se c_cod e planilha existirem ---
             if st.session_state.base_sistema is not None and c_cod:
                 total_itens_base = len(st.session_state.base_sistema)
                 itens_contados_unicos = df_c['cod_produto'].unique() if not df_c.empty else []
@@ -522,7 +521,6 @@ else:
             else:
                 st.info("💡 Nenhuma contagem realizada para este lote ainda.")
 
-            # Protegido contra KeyError
             if st.session_state.base_sistema is not None and c_cod and total_faltantes_tab > 0:
                 st.markdown("---")
                 st.error(f"⚠️ **Atenção:** Ainda restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
@@ -680,21 +678,11 @@ else:
         else:
             linhas_acuracidade_gerencial = []
             
-            def formatar_acuracidade_visual(porcentagem):
-                if porcentagem == 100.0:
-                    return f"<span style='color:green; font-weight:bold;'>🟢 {porcentagem:.1f}%</span>"
-                elif porcentagem >= 95.0:
-                    return f"<span style='color:#d4ac0d; font-weight:bold;'>🟡 {porcentagem:.1f}%</span>"
-                else:
-                    return f"<span style='color:red; font-weight:bold;'>🔴 {porcentagem:.1f}%</span>"
-            
             for dep_id, grupo in df_ac.groupby('id_estoque'):
                 total_itens_dep = len(grupo)
                 certos_qtd = len(grupo[grupo['diferenca'] == 0])
                 certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                 certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
-                
-                # --- CORREÇÃO DO NAMEERROR: Aplicado em todas as instâncias do laço ---
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
@@ -705,13 +693,13 @@ else:
                     "CÓDIGO ESTOQUE": str(dep_id),
                     "DESCRIÇÃO DO ESTOQUE": desc_dep,
                     "QUANTIDADE ITENS": total_itens_dep,
-                    "ACURACIDADE SALDO": formatar_acuracidade_visual(pct_saldo),
-                    "ACURACIDADE ETIQUETA": formatar_acuracidade_visual(pct_etiq),
-                    "ACURACIDADE LOCALIZAÇÃO": formatar_acuracidade_visual(pct_local)
+                    "ACURACIDADE SALDO": f"{pct_saldo:.1f}%",
+                    "ACURACIDADE ETIQUETA": f"{pct_etiq:.1f}%",
+                    "ACURACIDADE LOCALIZAÇÃO": f"{pct_local:.1f}%"
                 })
             
             df_gerencial_final = pd.DataFrame(linhas_acuracidade_gerencial)
-            st.write(df_gerencial_final.to_html(escape=False, index=False), unsafe_allow_html=True)
+            st.dataframe(df_gerencial_final, use_container_width=True, hide_index=True)
             
         st.markdown("---")
         st.subheader("🔍 Filtrar Pastas por Período")
@@ -959,7 +947,7 @@ else:
     # 👥 ABA 9: GESTÃO DE USUÁRIOS
     if eh_yago_master:
         with abas_gui[-1]:
-            st.title("👥 Panel de Controle e Gestão de Usuários")
+            st.title("👥 Painel de Controle e Gestão de Usuários")
             df_u = pd.read_sql_query("SELECT id, nome, cpf, email, senha, unidade, cargo FROM usuarios ORDER BY unidade, nome", conn)
             st.dataframe(df_u, use_container_width=True, hide_index=True)
             with st.form("form_adm_edit"):
