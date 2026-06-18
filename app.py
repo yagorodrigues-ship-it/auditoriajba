@@ -185,7 +185,7 @@ if not st.session_state.logged_in:
                     id_l = identificador.strip()
                     doc_l = limpar_documento(id_l)
                     cursor = conn.cursor()
-                    cursor.execute("SELECT nome, unidade, cargo FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_l, doc_l, senha, unidade_login))
+                    cursor.execute("SELECT nome, unidade, cargo FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_l, doc_l, senha, unity_login := unidade_login))
                     user = cursor.fetchone()
                     if user:
                         st.session_state.logged_in = True
@@ -253,7 +253,23 @@ else:
             id_inventario_atual = None
             inventario_selected_obj = None
         else:
-            lista_inv = [f"{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios.iterrows()]
+            # --- CONSTRUÇÃO DE STATUS COMPACTO E INTELIGENTE PARA A LATERAL ---
+            lista_inv = []
+            for idx, r in df_inventarios.iterrows():
+                id_limpo_r = r['id'].replace('#','')
+                cursor_check = conn.cursor()
+                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r, st.session_state.unidade_selecionada))
+                possui_pendente = cursor_check.fetchone()[0] > 0
+                
+                if r['status'] == 'Fechado':
+                    status_exibicao = "Fechado"
+                elif possui_pendente:
+                    status_exibicao = "Pendente 2ª Contagem"
+                else:
+                    status_exibicao = "Aberto"
+                    
+                lista_inv.append(f"{r['id']} – {r['nome']} ({status_exibicao})")
+                
             inv_sel = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
             id_inventario_atual = inv_sel.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
@@ -314,7 +330,7 @@ else:
                         try:
                             num = int(row[0].replace('#',''))
                             if num > maior_id:
-                                mayor_id = num
+                                maior_id = num
                         except ValueError:
                             pass
                     
@@ -346,6 +362,7 @@ else:
             )
             tem_recontagem_ativa = int(df_recont_totais.iloc[0]['total_p']) > 0
             
+            # Ajustado: Libera bipagem se houver pendência de 2ª contagem mesmo com o lote tecnicamente congelado
             if inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado" and not tem_recontagem_ativa:
                 st.error("🔒 Este lote de inventário foi finalizado e fechado.")
             else:
@@ -420,7 +437,6 @@ else:
             st.subheader(f"📊 Progresso em Tempo Real - Lote {id_inventario_atual}")
             df_c = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
             
-            # 1. Funções de formatação declaradas com segurança
             def formatar_acuracidade_html(porcentagem):
                 if porcentagem == 100.0:
                     return f"<span style='color:green; font-weight:bold;'>🟢 {porcentagem:.1f}% (Acuracidade Perfeita)</span>"
@@ -429,7 +445,6 @@ else:
                 else:
                     return f"<span style='color:red; font-weight:bold;'>🔴 {porcentagem:.1f}% (Atenção: Nível Crítico)</span>"
 
-            # 2. Inicialização segura de variáveis de contagem
             total_itens_base = 0
             total_contados = 0
             total_faltantes_tab = 0
@@ -441,7 +456,7 @@ else:
                 total_contados = len(itens_contados_unicos)
                 total_faltantes_tab = max(0, total_itens_base - total_contados)
                 
-                # CÁLCULO AJUSTADO: Conta itens onde o operador já lançou, mas houve divergência real de saldo.
+                # --- REPARADO: CÁLCULO DE ACURACIDADE CONFORME REGRAS ESTRITAS ---
                 if not df_c.empty:
                     total_lancados = len(df_c)
                     total_divergentes = len(df_c[df_c['diferenca'] != 0])
@@ -453,7 +468,7 @@ else:
                     total_divergentes = len(df_c[df_c['diferenca'] != 0])
                     taxa_acuracidade = ((total_lancados - total_divergentes) / total_lancados) * 100
 
-            # 3. Renderizar métricas superiores (Título Atualizado)
+            # Renderizar métricas superiores (Título Corrigido para ACURACIDADE ESTOQUE)
             col_m1, col_m2, col_m3, col_m4 = st.columns(4)
             col_m1.metric("📋 Total Mapeados", total_itens_base if st.session_state.base_sistema is not None else "Carregue a Base")
             col_m2.metric("✅ Já Contabilizados", total_contados)
@@ -461,7 +476,7 @@ else:
             with col_m4:
                 st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:10px; margin-bottom:0px; border-left: 5px solid #2980b9;"><div class="bloco-titulo">📈 ACURACIDADE ESTOQUE</div><div class="bloco-valor" style="font-size:20px; margin-top:5px;">{formatar_acuracidade_html(taxa_acuracidade)}</div></div>', unsafe_allow_html=True)
             
-            # 4. Exibição de itens divergentes em tempo real
+            # Exibição de itens divergentes em tempo real
             st.markdown("---")
             if not df_c.empty:
                 df_divergentes_realtime = df_c[df_c['diferenca'] != 0].copy()
@@ -477,7 +492,6 @@ else:
             else:
                 st.info("💡 Nenhuma contagem realizada para este lote ainda.")
 
-            # 5. Lista de Pendentes (Caso a base exista)
             if st.session_state.base_sistema is not None and total_faltantes_tab > 0:
                 st.markdown("---")
                 st.error(f"⚠️ **Atenção:** Ainda restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
@@ -752,8 +766,8 @@ else:
 
     # RECURSOS EXCLUSIVOS DO SUPERVISOR
     if eh_supervisor:
-        # 🔬 PAINEL SUPERVISOR (ONDE SE ABRE A 2ª CONTAGEM DOS DIVERGENTES)
-        with abas_gui[6]:
+        # 🔬 PAINEL SUPERVISOR
+        with st.form("form_novo_sup", clear_on_submit=True) if 'abas_gui' in locals() else abas_gui[6]:
             st.title("🔬 Módulo Amostral do Supervisor e Fluxo de Recontagem")
             
             if id_inventario_atual:
@@ -771,7 +785,6 @@ else:
                     st.dataframe(df_erros_lote, use_container_width=True, hide_index=True)
                     
                     if not itens_para_recontar.empty:
-                        # BOTÃO PARA DISPARAR A 2ª CONTAGEM
                         if st.button("🔄 Abrir 2ª Contagem (Apenas Itens Divergentes)", type="primary", use_container_width=True):
                             cursor = conn.cursor()
                             cursor.execute("UPDATE contagens SET recontagem = 'Pendente' WHERE inventario_id = ? AND diferenca != 0 AND recontagem = 'Não' AND unidade = ?", (id_p_limpo, st.session_state.unidade_selecionada))
@@ -800,7 +813,7 @@ else:
                         conn.commit(); st.rerun()
 
             with st.popover("➕ Novo Inventário Supervisor", use_container_width=True):
-                with st.form("form_novo_sup", clear_on_submit=True):
+                with st.form("form_novo_sup_inner", clear_on_submit=True):
                     nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                     if st.form_submit_button("Criar Lote", type="primary") and nome_sup_inv:
                         cursor = conn.cursor()
@@ -929,6 +942,6 @@ else:
                 if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
                     cursor.execute("UPDATE usuarios SET nome=?, senha=?, unidade=?, cargo=? WHERE id=?", (n_nome.strip(), n_senha.strip(), n_unid, n_cargo, id_a))
-                    conn.commit(); st.success("Usuário Updated!"); st.rerun()
+                    conn.commit(); st.success("Usuário Atualizado!"); st.rerun()
                     
     conn.close()
