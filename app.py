@@ -17,7 +17,7 @@ def inicializar_banco():
     conn = conectar_banco()
     cursor = conn.cursor()
     
-    # Tabela de usuários/colaboradores com coluna de UNIDADE e CARGO
+    # Tabela de usuários/colaboradores com nível de acesso (cargo)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -40,7 +40,7 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de inventários gerais com coluna de UNIDADE
+    # Tabela de inventários gerais
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios (
             id TEXT PRIMARY KEY,
@@ -51,7 +51,7 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de inventários do Supervisor com coluna de UNIDADE
+    # Tabela de inventários do Supervisor
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios_supervisor (
             id TEXT PRIMARY KEY,
@@ -62,7 +62,7 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de contagens dos funcionários com coluna de UNIDADE
+    # Tabela de contagens dos funcionários
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS contagens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,7 +84,7 @@ def inicializar_banco():
         )
     """)
 
-    # Tabela de Auditorias do Supervisor com coluna de UNIDADE
+    # Tabela de Auditorias do Supervisor
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS auditorias_supervisor (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -157,7 +157,7 @@ def inicializar_banco():
         cursor.executemany("INSERT OR IGNORE INTO cadastros_estoques (id, descricao, unidade) VALUES (?, ?, 'JURUBATUBA')", estoques_padrao_jba)
         conn.commit()
 
-    # Criar administrador padrão
+    # Criar administrador padrão se a tabela estiver vazia
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
@@ -262,43 +262,8 @@ st.markdown("""
         font-size: 28px;
         font-weight: bold;
     }
-    .pasta-secao {
-        background-color: #f4f6f7;
-        padding: 15px;
-        border-radius: 8px;
-        border-left: 5px solid #2980b9;
-        margin-bottom: 20px;
-    }
     </style>
 """, unsafe_allow_html=True)
-
-# --- GERENCIAMENTO DE ESTADO ---
-if 'logged_in' not in st.session_state:
-    st.session_state.logged_in = False
-if 'base_sistema' not in st.session_state:
-    st.session_state.base_sistema = None
-if 'base_supervisor' not in st.session_state:
-    st.session_state.base_supervisor = None
-if 'nome_arquivo_excel' not in st.session_state:
-    st.session_state.nome_arquivo_excel = ""
-if 'nome_arquivo_supervisor' not in st.session_state:
-    st.session_state.nome_arquivo_supervisor = ""
-if 'operador' not in st.session_state:
-    st.session_state.operador = ""
-if 'tela_acesso' not in st.session_state:
-    st.session_state.tela_acesso = "login"
-
-if 'contador_reset' not in st.session_state:
-    st.session_state.contador_reset = 0
-if 'contador_reset_sup' not in st.session_state:
-    st.session_state.contador_reset_sup = 0
-if 'ultimo_item_sucesso' not in st.session_state:
-    st.session_state.ultimo_item_sucesso = ""
-
-if 'pagina_historico' not in st.session_state:
-    st.session_state.pagina_historico = 0
-if 'pagina_historico_sup' not in st.session_state:
-    st.session_state.pagina_historico_sup = 0
 
 def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
@@ -398,20 +363,10 @@ if not st.session_state.logged_in:
                         usuario_existente = cursor.fetchone()
                         
                         if usuario_existente:
-                            st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta ativa!")
+                            st.error("❌ Erro de Cadastro: CPF ou E-mail já ativo!")
                             token_cripto = base64.b64encode(email_l.encode('utf-8')).decode('utf-8')
                             link_direto_cadastro = f"https://auditoriajba.streamlit.app/?recuperar=true&token={token_cripto}"
-                            
-                            st.markdown(f"""
-                                <div class="bloco-info-link" style="margin-top: 5px;">
-                                    <p style="margin:0; color:#c0392b; font-weight:bold; font-size:14px;">🔄 Deseja alterar a senha desta conta existente?</p>
-                                    <a href="{link_direto_cadastro}" target="_blank" style="text-decoration:none;">
-                                        <button style="background-color:#e74c3c; color:white; border:none; padding:8px 15px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">
-                                            🔗 Gerar Nova Senha Agora
-                                        </button>
-                                    </a>
-                                </div>
-                            """, unsafe_allow_html=True)
+                            st.markdown(f'<a href="{link_direto_cadastro}" target="_blank"><button style="width:100%; background-color:#e74c3c; color:white; border:none; padding:8px; border-radius:4px; font-weight:bold;">🔗 Gerar Nova Senha Agora</button></a>', unsafe_allow_html=True)
                         else:
                             try:
                                 cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
@@ -577,16 +532,24 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    # Determinar abas disponíveis com base no nível logado
-    lista_abas = ["🔍 Contar Item", "📊 Contagem Atual"]
+    # --- NOVO FLUXO DE ABAS LIBERADAS (TODOS OS ENVOLVIDOS VISUALIZAM AS 6 SOLICITADAS) ---
+    lista_abas = [
+        "🔍 Contar Item", 
+        "📊 Contagem Atual", 
+        "📈 Acuracidade Estoque", 
+        "📁 Histórico Geral", 
+        "📄 Base de Estoque", 
+        "🏆 Desempenho e Prazos"
+    ]
+    
     if eh_supervisor:
-        lista_abas += ["🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "⚙️ Gerenciar Estoques", "🏆 Desempenho e Prazos"]
+        lista_abas += ["🔬 Painel Supervisor", "⚙️ Gerenciar Estoques"]
     if eh_yago_master:
         lista_abas.append("👥 Gestão de Usuários")
         
     abas_render = st.tabs(lista_abas)
     
-    # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS) ---
+    # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS E SUPERVISOR) ---
     with abas_render[0]:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
@@ -651,7 +614,7 @@ else:
                 else:
                     st.error("❌ Código não localizado.")
 
-    # --- ABA 2: CONTAGEM ATUAL ---
+    # --- ABA 2: CONTAGEM ATUAL (ALMOXARIFES E SUPERVISOR) ---
     with abas_render[1]:
         if id_inventario_atual:
             st.subheader(f"Painel Operacional – {id_inventario_atual} ({inventario_selected_obj['nome']})")
@@ -685,17 +648,113 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # RECURSOS EXCLUSIVOS: SUPERVISOR REGIONAL
+    # --- ABA 3: ACURACIDADE ESTOQUE (LIBERADO VISUALIZAÇÃO PARA ALMOXARIFES) ---
+    with abas_render[2]:
+        st.title("📈 Acuracidade - Controle Amostral")
+        df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
+        st.dataframe(df_todas_auditorias_banco.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+
+    # --- ABA 4: HISTÓRICO GERAL (LIBERADO VISUALIZAÇÃO PARA ALMOXARIFES) ---
+    with abas_render[3]:
+        st.title("📁 Arquivo Geral de Movimentações")
+        c_dt1, c_dt2 = st.columns(2)
+        with c_dt1: data_inicio_filtro = st.date_input("Data Inicial (Opcional)", value=None, key="hist_dt_ini_blank")
+        with c_dt2: data_fim_filtro = st.date_input("Data Final (Opcional)", value=None, key="hist_dt_fim_blank")
+            
+        st.markdown("---")
+        df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
+        df_filtrados = df_inventarios[df_inventarios['unidade'] == st.session_state.unidade_selecionada]
+        
+        if data_inicio_filtro: df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] >= data_inicio_filtro]
+        if data_fim_filtro: df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] <= data_fim_filtro]
+            
+        st.write(f"Total de pastas nesta unidade: {len(df_filtrados)}")
+        if df_filtrados.empty:
+            st.info("Nenhum inventário localizado no filtro selecionado.")
+        else:
+            tamanho_pagina = 15
+            total_itens = len(df_filtrados)
+            total_paginas = (total_itens - 1) // tamanho_pagina + 1
+            if st.session_state.pagina_historico >= total_paginas: st.session_state.pagina_historico = 0
+                
+            df_pagina_atual = df_filtrados.iloc[st.session_state.pagina_historico * tamanho_pagina : (st.session_state.pagina_historico + 1) * tamanho_pagina]
+            for idx, inv in df_pagina_atual.iterrows():
+                id_inv_proc = inv['id'].replace('#','')
+                df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", conn, params=(id_inv_proc, st.session_state.unidade_selecionada))
+                with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} contados)"):
+                    if not df_hist_inv.empty:
+                        excel_geral_hist = converter_para_excel(df_hist_inv)
+                        st.download_button(label="📥 Baixar Pasta em Excel", data=excel_geral_hist, file_name=f"inventario_{inv['id']}.xlsx", key=f"dl_{inv['id']}")
+                        st.dataframe(df_hist_inv.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Nenhuma contagem feita nesta pasta.")
+                        
+            st.markdown("---")
+            col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
+            with col_pag1:
+                if st.button("◀ Anterior", use_container_width=True, disabled=(st.session_state.pagina_historico == 0)):
+                    st.session_state.pagina_historico -= 1; st.rerun()
+            with col_pag_texto:
+                st.markdown(f"<p style='text-align: center; margin-top: 7px;'>Página <strong>{st.session_state.pagina_historico + 1}</strong> de <strong>{total_paginas}</strong></p>", unsafe_allow_html=True)
+            with col_pag2:
+                if st.button("Próximo ▶", use_container_width=True, disabled=(st.session_state.pagina_historico >= total_paginas - 1)):
+                    st.session_state.pagina_historico += 1; st.rerun()
+
+    # --- ABA 5: BASE DE ESTOQUE (LIBERADO VISUALIZAÇÃO PARA ALMOXARIFES) ---
+    with abas_render[4]:
+        if st.session_state.base_sistema is not None:
+            st.subheader("📄 Espelho Base de Saldo")
+            st.dataframe(st.session_state.base_sistema, use_container_width=True)
+        else:
+            st.info("Nenhuma base de dados ativa na sessão atual.")
+
+    # --- ABA 6: DESEMPENHO E PRAZOS (LIBERADO VISUALIZAÇÃO PARA ALMOXARIFES) ---
+    with abas_render[5]:
+        st.title("🏆 Validade e Prazos de Auditoria Temporal")
+        df_m_est = pd.read_sql_query("SELECT id, descricao FROM cadastros_estoques WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
+        df_lasts = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
+        map_lasts = dict(zip(df_lasts['id_estoque'].astype(str).str.strip(), df_lasts['u_data']))
+        
+        hoje_dt = datetime.datetime.now()
+        dados_prazos = []
+        bom_count, auditar_count, criticos_count = 0, 0, 0
+        
+        for _, re in df_m_est.iterrows():
+            ide = str(re['id']).strip()
+            udstr = map_lasts.get(ide, None)
+            if udstr:
+                try:
+                    dtc = datetime.datetime.strptime(udstr, "%Y-%m-%d %H:%M:%S")
+                    dias = (hoje_dt - dtc).days
+                    exib = dtc.strftime("%d/%m/%Y %H:%M")
+                except: dias = 999; exib = "Erro"
+            else: dias = 999; exib = "Nunca Contado"
+            
+            status_f = "🟢 Bom" if dias <= 7 else "🟡 Precisa contar" if dias <= 14 else "🔴 Crítico"
+            if dias <= 7: bom_count += 1
+            elif dias <= 14: auditar_count += 1
+            else: criticos_count += 1
+            
+            dados_prazos.append({"Id. Estoque": ide, "Descrição": re['descricao'], "Última Contagem": exib, "Dias sem Contar": dias if dias != 999 else "—", "Status": status_f})
+        
+        k1, k2, k3 = st.columns(3)
+        with k1: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🟢 EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
+        with k2: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #f1c40f;"><div class="bloco-titulo">🟡 PRECISA CONTAR</div><div class="bloco-valor" style="color: #f39c12;">{auditar_count}</div></div>', unsafe_allow_html=True)
+        with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
+        
+        st.write("")
+        if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
+
+    # --- RECURSOS EXCLUSIVOS: SUPERVISOR REGIONAL ---
     if eh_supervisor:
-        # --- ABA 3: PAINEL SUPERVISOR ---
-        with abas_render[2]:
+        # --- ABA 7: PAINEL SUPERVISOR ---
+        with abas_render[6]:
             st.title("🔬 Módulo Amostral do Supervisor")
             if df_inventarios_sup.empty:
                 st.info("Nenhum inventário amostral aberto.")
-                id_inv_sup_atual = None
             else:
                 lista_inv_sup = [f"{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios_sup.iterrows()]
-                inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup)
+                inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup, key="sel_box_sup_local_v3")
                 id_inv_sup_atual = inv_sup_selected.split(" – ")[0]
                 inv_sup_selected_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
                 
@@ -718,58 +777,8 @@ else:
                         cursor.execute("INSERT INTO inventarios_supervisor (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (novo_id_sup, nome_sup_inv, hoje_sup, st.session_state.unidade_selecionada))
                         conn.commit(); st.rerun()
 
-        # --- ABA 4: ACURACIDADE ---
-        with abas_render[3]:
-            st.title("📈 Acuracidade - Controle Amostral")
-            df_ac = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-            st.dataframe(df_ac.drop(columns=['unidade'], errors='ignore'), use_container_width=True)
-
-        # --- ABA 5: HISTÓRICO GERAL (EM BRANCO POR PADRÃO) ---
-        with abas_render[4]:
-            st.title("📁 Arquivo Geral de Movimentações")
-            c_dt1, c_dt2 = st.columns(2)
-            with c_dt1: data_inicio_filtro = st.date_input("Data Inicial (Opcional)", value=None, key="blank_dt_ini")
-            with c_dt2: data_fim_filtro = st.date_input("Data Final (Opcional)", value=None, key="blank_dt_fim")
-            
-            df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
-            df_filtrados = df_inventarios[df_inventarios['unidade'] == st.session_state.unidade_selecionada]
-            
-            if data_inicio_filtro:
-                df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] >= data_inicio_filtro]
-            if data_fim_filtro:
-                df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] <= data_fim_filtro]
-                
-            st.write(f"Total de pastas nesta unidade: {len(df_filtrados)}")
-            
-            if not df_filtrados.empty:
-                tamanho_pagina = 15
-                total_itens = len(df_filtrados)
-                total_paginas = (total_itens - 1) // tamanho_pagina + 1
-                if st.session_state.pagina_historico >= total_paginas: st.session_state.pagina_historico = 0
-                
-                df_pag = df_filtrados.iloc[st.session_state.pagina_historico*tamanho_pagina : (st.session_state.pagina_historico+1)*tamanho_pagina]
-                for idx, inv in df_pag.iterrows():
-                    id_p = inv['id'].replace('#','')
-                    df_det = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_p, st.session_state.unidade_selecionada))
-                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} ({len(df_det)} contados)"):
-                        st.dataframe(df_det.drop(columns=['unidade'], errors='ignore'), use_container_width=True)
-                        
-                # Navegadores
-                cp1, cp2, cp3 = st.columns([2, 6, 2])
-                with cp1:
-                    if st.button("◀ Anterior", disabled=(st.session_state.pagina_historico==0)): st.session_state.pagina_historico-=1; st.rerun()
-                with cp2: st.markdown(f"<p style='text-align:center;'>Página {st.session_state.pagina_historico+1} de {total_paginas}</p>", unsafe_allow_html=True)
-                with cp3:
-                    if st.button("Próximo ▶", disabled=(st.session_state.pagina_historico>=total_paginas-1)): st.session_state.pagina_historico+=1; st.rerun()
-
-        # --- ABA 6: BASE DE ESTOQUE ---
-        with abas_render[5]:
-            if st.session_state.base_sistema is not None:
-                st.subheader("📄 Espelho Base de Saldo")
-                st.dataframe(st.session_state.base_sistema, use_container_width=True)
-
-        # --- ABA 7: GERENCIAR ESTOQUES (DINÂMICO PARA CUBATÃO E JUNDIAÍ) ---
-        with abas_render[6]:
+        # --- ABA 8: GERENCIAR ESTOQUES ---
+        with abas_render[7]:
             st.title("⚙️ Gerenciamento de Estoques Físicos (Unidade)")
             c_est1, c_est2 = st.columns([1, 2])
             with c_est1:
@@ -793,31 +802,6 @@ else:
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM cadastros_estoques WHERE id = ? AND unidade = ?", (est_del, st.session_state.unidade_selecionada))
                         conn.commit(); st.rerun()
-
-        # --- ABA 8: DESEMPENHO E PRAZOS (COMPLETAMENTE DINÂMICO) ---
-        with abas_render[7]:
-            st.title("🏆 Validade e Prazos de Auditoria Temporal")
-            df_m_est = pd.read_sql_query("SELECT id, descricao FROM cadastros_estoques WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-            df_lasts = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
-            map_lasts = dict(zip(df_lasts['id_estoque'].astype(str).str.strip(), df_lasts['u_data']))
-            
-            hoje_dt = datetime.datetime.now()
-            dados_prazos = []
-            for _, re in df_m_est.iterrows():
-                ide = str(re['id']).strip()
-                udstr = map_lasts.get(ide, None)
-                if udstr:
-                    try:
-                        dtc = datetime.datetime.strptime(udstr, "%Y-%m-%d %H:%M:%S")
-                        dias = (hoje_dt - dtc).days
-                        exib = dtc.strftime("%d/%m/%Y %H:%M")
-                    except: dias = 999; exib = "Erro"
-                else: dias = 999; exib = "Nunca Contado"
-                
-                status_f = "🟢 Bom" if dias <= 7 else "🟡 Precisa contar" if dias <= 14 else "🔴 Crítico"
-                dados_prazos.append({"Id. Estoque": ide, "Descrição": re['descricao'], "Última Contagem": exib, "Dias sem Contar": dias if dias != 999 else "—", "Status": status_f})
-            
-            if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
 
     # --- ABA 9: GESTÃO DE USUÁRIOS (EXCLUSIVA MASTER ADM) ---
     if eh_yago_master:
