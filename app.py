@@ -291,7 +291,7 @@ if "recuperar" in query_params and "token" in query_params:
                         cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
                         conn.commit()
                         conn.close()
-                        st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
+                        st.success("🎉 Senha updated com sucesso! Pode fazer o login na tela principal.")
     st.stop()
 
 # --- TELA DE ACESSO CENTRALIZADA E COMPACTA ---
@@ -354,22 +354,17 @@ if not st.session_state.logged_in:
                         st.error("❌ As senhas não batem!")
                     else:
                         cursor = conn.cursor()
-                        # --- AJUSTE INTELEGENte CONTRA O ERRO DA IMAGEM ---
-                        # Verifica se o CPF ou E-mail já existem antes de rodar o INSERT para não duplicar
                         cursor.execute("SELECT email, cpf FROM usuarios WHERE cpf = ? OR email = ?", (cpf_l, email_l))
                         usuario_existente = cursor.fetchone()
                         
                         if usuario_existente:
                             st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta ativa no sistema!")
-                            
-                            # Gera automaticamente o link de redefinição para o e-mail duplicado de forma direta
                             token_cripto = base64.b64encode(email_l.encode('utf-8')).decode('utf-8')
                             link_direto_cadastro = f"https://auditoriajba.streamlit.app/?recuperar=true&token={token_cripto}"
                             
                             st.markdown(f"""
                                 <div class="bloco-info-link" style="margin-top: 5px;">
                                     <p style="margin:0; color:#c0392b; font-weight:bold; font-size:14px;">🔄 Deseja alterar a senha desta conta existente?</p>
-                                    <p style="margin:4px 0 10px 0; color:#7b241c; font-size:12px;">Para a sua segurança, o cadastro duplicado foi bloqueado. Clique no botão abaixo para abrir a janela de redefinição imediata.</p>
                                     <a href="{link_direto_cadastro}" target="_blank" style="text-decoration:none;">
                                         <button style="background-color:#e74c3c; color:white; border:none; padding:8px 15px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">
                                             🔗 Gerar Nova Senha Agora
@@ -433,7 +428,10 @@ else:
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor WHERE unidade = ? ORDER BY data DESC, id DESC", conn, params=(st.session_state.unidade_selecionada,))
     
     nome_usuario_logado_limpo = st.session_state.operador.lower()
-    eh_supervisor = any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"])
+    
+    # --- CRITÉRIO REVISADO DE SUPERVISÃO POR PALAVRA-CHAVE OU USUÁRIO MASTER ---
+    eh_supervisor = "supervisor" in nome_usuario_logado_limpo or "admin" in nome_usuario_logado_limpo or "yago rodrigues" in nome_usuario_logado_limpo
+    eh_yago_master = "yago rodrigues" in nome_usuario_logado_limpo or "administrador tel" in nome_usuario_logado_limpo
     
     id_inventario_atual_inicial = df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else ""
     
@@ -555,7 +553,9 @@ else:
 
     # Determinar abas disponíveis
     lista_abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho e Prazos"]
-    if eh_supervisor:
+    
+    # Exclusividade da aba de gestão apenas para você (Acesso Master Soberano)
+    if eh_yago_master:
         lista_abas.append("⚙️ Gestão de Usuários")
         
     abas_render = st.tabs(lista_abas)
@@ -833,8 +833,8 @@ else:
         if not df_ops.empty:
             st.bar_chart(data=df_ops, x='Operador', y='Lançamentos Feitos', color="#d35400")
 
-    # --- ABA EXCLUSIVA PERMISSÃO SUPERVISOR: GESTÃO DE LOGINS ---
-    if eh_supervisor:
+    # --- ABA EXCLUSIVA PERMISSÃO MASTER SOBERANO: GESTÃO DE LOGINS (REVISADA) ---
+    if eh_yago_master:
         with abas_render[7]:
             st.title("⚙️ Painel de Controle e Gestão de Usuários")
             df_usuarios_all = pd.read_sql_query("SELECT id, nome, cpf, email, senha, unidade FROM usuarios ORDER BY unidade, nome", conn)
