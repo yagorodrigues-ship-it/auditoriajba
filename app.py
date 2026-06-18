@@ -142,7 +142,7 @@ if 'contador_reset' not in st.session_state: st.session_state.contador_reset = 0
 if 'pagina_historico' not in st.session_state: st.session_state.pagina_historico = 0
 if 'pagina_acuracidade_sup' not in st.session_state: st.session_state.pagina_acuracidade_sup = 0
 
-# --- CORRIGIDO: FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL USANDO OPENPYXL NATIVO ---
+# --- FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL USANDO OPENPYXL NATIVO ---
 def converter_para_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -380,7 +380,7 @@ else:
                                 st.session_state.contador_reset += 1; st.rerun()
                 else: st.error("Material/Produto não localizado na base de dados carregada.")
 
-    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO
+    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO (AJUSTADA: FICA VISÍVEL MESMO FECHADA)
     with abas_gui[1]:
         if id_inventario_atual:
             st.subheader(f"📊 Progresso em Tempo Real - Lote {id_inventario_atual}")
@@ -411,7 +411,7 @@ else:
                     st.success("🎉 **Excelente!** 100% dos itens da planilha base foram contabilizados.")
                 st.markdown("---")
 
-                # REGRA DE FECHAMENTO
+                # REGRA DOS BOTÕES DE FECHAMENTO (SÓ EXIBE SE ESTIVER ABERTO)
                 if inventario_selected_obj is not None and inventario_selected_obj['status'] == 'Aberto':
                     if total_faltantes > 0:
                         if eh_supervisor:
@@ -428,6 +428,8 @@ else:
                             cursor = conn.cursor()
                             cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
                             conn.commit(); st.success("Lote concluído e fechado com sucesso!"); st.rerun()
+                else:
+                    st.info("🔒 **Status do Lote:** Este inventário encontra-se **Fechado/Finalizado**. As contagens e dados acima são apenas para consulta.")
             
             st.write("### 📑 Histórico de Lançamentos Registrados")
             st.dataframe(df_c.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
@@ -470,7 +472,6 @@ else:
                             # Ações na Pasta
                             c_btn1, c_btn2 = st.columns([1, 4])
                             with c_btn1:
-                                # DISPONÍVEL PARA TODOS OS PERFIS (ALMOXARIFE E SUPERVISOR)
                                 excel_data = converter_para_excel(df_det.drop(columns=['unidade'], errors='ignore'))
                                 st.download_button(
                                     label="📥 Exportar para Excel",
@@ -480,7 +481,6 @@ else:
                                     key=f"dl_gen_{inv['id']}"
                                 )
                             with c_btn2:
-                                # EXCLUSIVO PARA SUPERVISOR / MASTER
                                 if eh_supervisor:
                                     if st.button(f"🗑️ Excluir Pasta {inv['id']}", key=f"del_gen_{inv['id']}", type="secondary"):
                                         cursor = conn.cursor()
@@ -541,7 +541,7 @@ else:
         with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
         if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
 
-    # 📈 ABA 6: ACURACIDADE ESTOQUE
+    # 📈 ABA 6: ACURACIDADE ESTOQUE (CORRIGIDA: ALTERADO 'group.columns' PARA 'grupo.columns')
     with abas_gui[5]:
         st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
         
@@ -566,7 +566,8 @@ else:
                 certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                 certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
                 
-                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in group.columns else "Não Informado" if 'desc_estoque' not in grupo.columns else grupo.iloc[0]['desc_estoque']
+                # CORREÇÃO EFETUADA AQUI: mudado 'group.columns' para 'grupo.columns'
+                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
@@ -624,7 +625,6 @@ else:
                             
                             c_sup_btn1, c_sup_btn2 = st.columns([1, 4])
                             with c_sup_btn1:
-                                # DISPONÍVEL PARA TODOS OS PERFIS (ALMOXARIFE E SUPERVISOR)
                                 excel_sup_data = converter_para_excel(df_itens_da_pasta)
                                 st.download_button(
                                     label="📥 Exportar para Excel",
@@ -634,7 +634,6 @@ else:
                                     key=f"dl_sup_{pasta_sup['id']}"
                                 )
                             with c_sup_btn2:
-                                # EXCLUSIVO PARA SUPERVISOR / MASTER
                                 if eh_supervisor:
                                     if st.button(f"🗑️ Excluir Pasta Amostral {pasta_sup['id']}", key=f"del_sup_{pasta_sup['id']}", type="secondary"):
                                         cursor = conn.cursor()
