@@ -253,6 +253,7 @@ else:
         ar_excel = st.file_uploader("Upload Excel Geral", type=["xlsx"], label_visibility="collapsed")
         if ar_excel:
             st.session_state.base_sistema = pd.read_excel(ar_excel)
+            st.rerun()
             
         st.markdown("---")
         st.write("📁 **Selecione o Inventário**")
@@ -359,7 +360,7 @@ else:
     with abas_gui[0]:
         if id_inventario_atual is None:
             st.warning("⚠️ **Bloqueado:** Nenhum lote de inventário selecionado ou ativo. Use a barra lateral para criar ou selecionar um lote.")
-        elif st.session_state.base_sistema is None:
+        elif st.session_state.base_sistema is None or not c_cod:
             st.warning("⚠️ Carregue a Base Geral no menu lateral para iniciar as bipagens.")
         else:
             id_p_limpo = id_inventario_atual.replace('#','')
@@ -411,6 +412,7 @@ else:
                                 cursor = conn.cursor()
                                 val_ativo_inserido = n_ativ.strip().upper()
                                 
+                                # --- FLUXO DE VALIDAÇÃO DE DUPLICIDADE ---
                                 if not is_fluxo_recontagem:
                                     if tem_ativo_na_base:
                                         if not val_ativo_inserido:
@@ -480,7 +482,8 @@ else:
             total_faltantes_tab = 0
             taxa_acuracidade = 100.0
             
-            if st.session_state.base_sistema is not None:
+            # --- PROTEÇÃO CONTRA KEYERROR: Só roda se c_cod e planilha existirem ---
+            if st.session_state.base_sistema is not None and c_cod:
                 total_itens_base = len(st.session_state.base_sistema)
                 itens_contados_unicos = df_c['cod_produto'].unique() if not df_c.empty else []
                 total_contados = len(itens_contados_unicos)
@@ -519,7 +522,8 @@ else:
             else:
                 st.info("💡 Nenhuma contagem realizada para este lote ainda.")
 
-            if st.session_state.base_sistema is not None and total_faltantes_tab > 0:
+            # Protegido contra KeyError
+            if st.session_state.base_sistema is not None and c_cod and total_faltantes_tab > 0:
                 st.markdown("---")
                 st.error(f"⚠️ **Atenção:** Ainda restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
                 codigos_base = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().tolist()
@@ -538,7 +542,7 @@ else:
 
     # 📄 ABA 3: BASE DE ESTOQUE
     with abas_gui[2]:
-        if st.session_state.base_sistema is not None:
+        if st.session_state.base_sistema is not None and c_cod:
             st.subheader("📄 Espelho Base de Saldo - Status de Contagem Atualizado")
             
             if id_inventario_atual:
@@ -690,7 +694,7 @@ else:
                 certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                 certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
                 
-                # --- CORREÇÃO DO NAMEERROR: Alterado de group.columns para grupo.columns ---
+                # --- CORREÇÃO DO NAMEERROR: Aplicado em todas as instâncias do laço ---
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
@@ -950,12 +954,12 @@ else:
                     if st.button("🗑️ Excluir Estoque"):
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM cadastros_estoques WHERE id = ? AND unidade = ?", (est_del, st.session_state.unidade_selecionada))
-                        conn.commit(); r.rerun()
+                        conn.commit(); st.rerun()
 
     # 👥 ABA 9: GESTÃO DE USUÁRIOS
     if eh_yago_master:
         with abas_gui[-1]:
-            st.title("👥 Painel de Controle e Gestão de Usuários")
+            st.title("👥 Panel de Controle e Gestão de Usuários")
             df_u = pd.read_sql_query("SELECT id, nome, cpf, email, senha, unidade, cargo FROM usuarios ORDER BY unidade, nome", conn)
             st.dataframe(df_u, use_container_width=True, hide_index=True)
             with st.form("form_adm_edit"):
