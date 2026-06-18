@@ -295,8 +295,12 @@ else:
 
     # --- DEFINIÇÃO E RENDERIZAÇÃO DAS ABAS NA ORDEM EXATA SOLICITADA ---
     ordem_abas = ["🔍 Contar Item", "📊 Contagem Atual e Progresso", "📄 Base de Estoque", "📁 Histórico Geral", "🏆 Desempenho e Prazos"]
+    
+    # A aba de Acuracidade agora é liberada para os almoxarifes visualizarem também!
+    ordem_abas += ["📈 Acuracidade Estoque"]
+    
     if eh_supervisor:
-        ordem_abas += ["🔬 Painel Supervisor", "📈 Acuracidade Estoque", "⚙️ Gerenciar Estoques"]
+        ordem_abas += ["🔬 Painel Supervisor", "⚙️ Gerenciar Estoques"]
     if eh_yago_master:
         ordem_abas.append("👥 Gestão de Usuários")
         
@@ -400,7 +404,7 @@ else:
         if st.session_state.base_sistema is not None: st.dataframe(st.session_state.base_sistema, use_container_width=True)
         else: st.info("Nenhuma base carregada.")
 
-    # 📁 ABA 4: HISTÓRICO GERAL (COM FILTRO OPÇÃO EM BRANCO)
+    # 📁 ABA 4: HISTÓRICO GERAL
     with abas_gui[3]:
         st.title("📁 Arquivo Geral de Movimentações")
         c_dt1, c_dt2 = st.columns(2)
@@ -438,7 +442,7 @@ else:
     with abas_gui[4]:
         st.title("🏆 Validade e Prazos de Auditoria Temporal")
         df_m_est = pd.read_sql_query("SELECT id, descricao FROM cadastros_estoques WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-        df_lasts = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE warmth=1 AND unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,)) if 'warmth' in pd.read_sql_query("PRAGMA table_info(contagens)", conn)['name'].tolist() else pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
+        df_lasts = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE warmth=1 AND unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,)) if 'warmth' in pd.read_sql_query("PRAGMA table_info(contagens)", conn)['name'].tolist() else pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE warmth=1 AND unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,)) if 'warmth' in pd.read_sql_query("PRAGMA table_info(contagens)", conn)['name'].tolist() else pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
         map_lasts = dict(zip(df_lasts['id_estoque'].astype(str).str.strip(), df_lasts['u_data']))
         
         hoje_dt = datetime.datetime.now()
@@ -466,10 +470,117 @@ else:
         with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
         if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
 
+
+    # 📈 ABA 6: ACURACIDADE ESTOQUE (VISÍVEL PARA ALMOXARIFE E SUPERVISOR)
+    # Posição correta da aba no índice da lista `abas_gui`
+    idx_aba_acuracidade = 5
+    with abas_gui[idx_aba_acuracidade]:
+        st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
+        
+        # Puxar todos os dados brutos de acuracidade salvos no banco para esta unidade
+        df_ac = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
+        
+        if df_ac.empty:
+            st.info("💡 Nenhuma amostragem de acuracidade coletada no banco de dados para esta unidade.")
+        else:
+            linhas_acuracidade_gerencial = []
+            
+            def formatar_acuracidade_visual(porcentagem):
+                if porcentagem == 100.0:
+                    return f"<span style='color:green; font-weight:bold;'>🟢 {porcentagem:.1f}%</span>"
+                elif porcentagem >= 95.0:
+                    return f"<span style='color:#d4ac0d; font-weight:bold;'>🟡 {porcentagem:.1f}%</span>"
+                else:
+                    return f"<span style='color:red; font-weight:bold;'>🔴 {porcentagem:.1f}%</span>"
+            
+            # Montagem estrita da tabela mãe gerencial acima de tudo
+            for dep_id, grupo in df_ac.groupby('id_estoque'):
+                total_itens_dep = len(grupo)
+                certos_qtd = len(grupo[grupo['diferenca'] == 0])
+                certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
+                certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
+                
+                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
+                
+                pct_saldo = (certos_qtd / total_itens_dep) * 100
+                pct_etiq = (certos_etiq / total_itens_dep) * 100
+                pct_local = (certos_local / total_itens_dep) * 100
+                
+                linhas_acuracidade_gerencial.append({
+                    "CÓDIGO ESTOQUE": str(dep_id),
+                    "DESCRIÇÃO DO ESTOQUE": desc_dep,
+                    "QUANTIDADE ITENS": total_itens_dep,
+                    "ACURACIDADE SALDO": formatar_acuracidade_visual(pct_saldo),
+                    "ACURACIDADE ETIQUETA": formatar_acuracidade_visual(pct_etiq),
+                    "ACURACIDADE LOCALIZAÇÃO": formatar_acuracidade_visual(pct_local)
+                })
+            
+            df_gerencial_final = pd.DataFrame(linhas_acuracidade_gerencial)
+            st.write(df_gerencial_final.to_html(escape=False, index=False), unsafe_allow_html=True)
+            
+        st.markdown("---")
+        
+        # FILTROS JOGADOS EXATAMENTE AQUI (ABAIXO DA PLANILHA GERENCIAL)
+        st.subheader("🔍 Filtrar Pastas por Período")
+        f_col1, f_col2 = st.columns(2)
+        with f_col1: dt_ini_ac = st.date_input("Filtrar Data Inicial", value=None, key="dt_ini_ac")
+        with f_col2: dt_fim_ac = st.date_input("Filtrar Data Final", value=None, key="dt_fim_ac")
+        
+        st.markdown("---")
+        st.subheader("📁 Histórico de Pastas Contabilizadas (Supervisor)")
+        
+        # Filtrar o histórico de pastas com base nas datas selecionadas
+        df_inventarios_sup['dt_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
+        df_pastas_filtradas = df_inventarios_sup.copy()
+        if dt_ini_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] >= dt_ini_ac]
+        if dt_fim_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] <= dt_fim_ac]
+
+        if not df_pastas_filtradas.empty:
+            # --- PAGINAÇÃO EXATA DE 10 EM 10 PASTAS ---
+            tamanho_pag_sup = 10
+            total_pag_sup = (len(df_pastas_filtradas) - 1) // tamanho_pag_sup + 1
+            
+            if st.session_state.pagina_acuracidade_sup >= total_pag_sup:
+                st.session_state.pagina_acuracidade_sup = 0
+                
+            df_pastas_paginadas = df_pastas_filtradas.iloc[
+                st.session_state.pagina_acuracidade_sup * tamanho_pag_sup : (st.session_state.pagina_acuracidade_sup + 1) * tamanho_pag_sup
+            ]
+            
+            for idx, pasta_sup in df_pastas_paginadas.iterrows():
+                df_itens_da_pasta = pd.read_sql_query(
+                    "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora' FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", 
+                    conn, 
+                    params=(pasta_sup['id'],)
+                )
+                
+                with st.expander(f"📁 Pasta: {pasta_sup['id']} – {pasta_sup['nome']} ({pasta_sup['status']}) | {len(df_itens_da_pasta)} itens auditados"):
+                    if not df_itens_da_pasta.empty:
+                        st.dataframe(df_itens_da_pasta, use_container_width=True, hide_index=True)
+                    else:
+                        st.info("Nenhum item foi inserido ou contabilizado nesta pasta amostral ainda.")
+            
+            # Controles de navegação de páginas (A partir do 11º lote vai para a pág 2)
+            st.write("")
+            cs1, cs2, cs3 = st.columns([2, 6, 2])
+            with cs1:
+                if st.button("◀ Anterior", disabled=(st.session_state.pagina_acuracidade_sup == 0), key="btn_ant_ac_sup"):
+                    st.session_state.pagina_acuracidade_sup -= 1
+                    st.rerun()
+            with cs2:
+                st.markdown(f"<p style='text-align:center;'>Exibindo página {st.session_state.pagina_acuracidade_sup + 1} de {total_pag_sup} (Total de Lotes: {len(df_pastas_filtradas)})</p>", unsafe_allow_html=True)
+            with cs3:
+                if st.button("Próximo ▶", disabled=(st.session_state.pagina_acuracidade_sup >= total_pag_sup - 1), key="btn_prox_ac_sup"):
+                    st.session_state.pagina_acuracidade_sup += 1
+                    st.rerun()
+        else:
+            st.info("Nenhuma pasta mapeada ou localizada com estes critérios.")
+
+
     # RECURSOS EXCLUSIVOS DO SUPERVISOR
     if eh_supervisor:
-        # 🔬 ABA 6: PAINEL SUPERVISOR
-        with abas_gui[5]:
+        # 🔬 ABA 7: PAINEL SUPERVISOR
+        with abas_gui[6]:
             st.title("🔬 Módulo Amostral do Supervisor")
             if df_inventarios_sup.empty:
                 st.warning("Nenhum inventário amostral aberto.")
@@ -564,109 +675,6 @@ else:
             df_auditorias_atual = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inv_sup_atual, st.session_state.unidade_selecionada)) if id_inv_sup_atual else pd.DataFrame()
             st.write("### Itens Auditados neste Lote Amostral")
             st.dataframe(df_auditorias_atual.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
-
-        # 📈 ABA 7: ACURACIDADE ESTOQUE (PAGINAÇÃO COMPLETA A CADA 10 PASTAS + FILTRO EM BRANCO)
-        with abas_gui[6]:
-            st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
-            
-            # Filtro opcional de datas
-            f_col1, f_col2 = st.columns(2)
-            with f_col1: dt_ini_ac = st.date_input("Filtrar Data Inicial (Acuracidade)", value=None, key="dt_ini_ac")
-            with f_col2: dt_fim_ac = st.date_input("Filtrar Data Final (Acuracidade)", value=None, key="dt_fim_ac")
-            
-            df_ac = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-            
-            if not df_ac.empty:
-                df_ac['dt_parsed'] = pd.to_datetime(df_ac['data_hora'], errors='coerce').dt.date
-                if dt_ini_ac: df_ac = df_ac[df_ac['dt_parsed'] >= dt_ini_ac]
-                if dt_fim_ac: df_ac = df_ac[df_ac['dt_parsed'] <= dt_fim_ac]
-
-            if df_ac.empty:
-                st.info("💡 Nenhuma amostragem de acuracidade coletada no banco de dados para esta unidade ou período selecionado.")
-            else:
-                linhas_acuracidade_gerencial = []
-                
-                def formatar_acuracidade_visual(porcentagem):
-                    if porcentagem == 100.0:
-                        return f"<span style='color:green; font-weight:bold;'>🟢 {porcentagem:.1f}%</span>"
-                    elif porcentagem >= 95.0:
-                        return f"<span style='color:#d4ac0d; font-weight:bold;'>🟡 {porcentagem:.1f}%</span>"
-                    else:
-                        return f"<span style='color:red; font-weight:bold;'>🔴 {porcentagem:.1f}%</span>"
-                
-                for dep_id, grupo in df_ac.groupby('id_estoque'):
-                    total_itens_dep = len(grupo)
-                    certos_qtd = len(grupo[grupo['diferenca'] == 0])
-                    certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
-                    certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
-                    
-                    desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                    
-                    pct_saldo = (certos_qtd / total_itens_dep) * 100
-                    pct_etiq = (certos_etiq / total_itens_dep) * 100
-                    pct_local = (certos_local / total_itens_dep) * 100
-                    
-                    linhas_acuracidade_gerencial.append({
-                        "CÓDIGO ESTOQUE": str(dep_id),
-                        "DESCRIÇÃO DO ESTOQUE": desc_dep,
-                        "QUANTIDADE ITENS": total_itens_dep,
-                        "ACURACIDADE SALDO": formatar_acuracidade_visual(pct_saldo),
-                        "ACURACIDADE ETIQUETA": formatar_acuracidade_visual(pct_etiq),
-                        "ACURACIDADE LOCALIZAÇÃO": formatar_acuracidade_visual(pct_local)
-                    })
-                
-                df_gerencial_final = pd.DataFrame(linhas_acuracidade_gerencial)
-                st.write(df_gerencial_final.to_html(escape=False, index=False), unsafe_allow_html=True)
-                
-            st.markdown("---")
-            st.subheader("📁 Histórico de Pastas Contabilizadas (Supervisor)")
-            
-            # Filtrar pastas criadas
-            df_inventarios_sup['dt_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
-            df_pastas_filtradas = df_inventarios_sup.copy()
-            if dt_ini_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] >= dt_ini_ac]
-            if dt_fim_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] <= dt_fim_ac]
-
-            if not df_pastas_filtradas.empty:
-                # --- PAGINAÇÃO DE 10 EM 10 PASTAS ---
-                tamanho_pag_sup = 10
-                total_pag_sup = (len(df_pastas_filtradas) - 1) // tamanho_pag_sup + 1
-                
-                if st.session_state.pagina_acuracidade_sup >= total_pag_sup:
-                    st.session_state.pagina_acuracidade_sup = 0
-                    
-                df_pastas_paginadas = df_pastas_filtradas.iloc[
-                    st.session_state.pagina_acuracidade_sup * tamanho_pag_sup : (st.session_state.pagina_acuracidade_sup + 1) * tamanho_pag_sup
-                ]
-                
-                for idx, pasta_sup in df_pastas_paginadas.iterrows():
-                    df_itens_da_pasta = pd.read_sql_query(
-                        "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora' FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", 
-                        conn, 
-                        params=(pasta_sup['id'],)
-                    )
-                    
-                    with st.expander(f"📁 Pasta: {pasta_sup['id']} – {pasta_sup['nome']} ({pasta_sup['status']}) | {len(df_itens_da_pasta)} itens auditados"):
-                        if not df_itens_da_pasta.empty:
-                            st.dataframe(df_itens_da_pasta, use_container_width=True, hide_index=True)
-                        else:
-                            st.info("Nenhum item foi inserido ou contabilizado nesta pasta amostral ainda.")
-                
-                # Botões de controle da paginação das pastas
-                st.write("")
-                cs1, cs2, cs3 = st.columns([2, 6, 2])
-                with cs1:
-                    if st.button("◀ Anterior", disabled=(st.session_state.pagina_acuracidade_sup == 0), key="btn_ant_ac_sup"):
-                        st.session_state.pagina_acuracidade_sup -= 1
-                        st.rerun()
-                with cs2:
-                    st.markdown(f"<p style='text-align:center;'>Exibindo página {st.session_state.pagina_acuracidade_sup + 1} de {total_pag_sup} (Total de Lotes: {len(df_pastas_filtradas)})</p>", unsafe_allow_html=True)
-                with cs3:
-                    if st.button("Próximo ▶", disabled=(st.session_state.pagina_acuracidade_sup >= total_pag_sup - 1), key="btn_prox_ac_sup"):
-                        st.session_state.pagina_acuracidade_sup += 1
-                        st.rerun()
-            else:
-                st.info("Nenhuma pasta de auditoria localizada para os filtros inseridos.")
 
         # ⚙️ ABA 8: GERENCIAR ESTOQUES
         with abas_gui[7]:
