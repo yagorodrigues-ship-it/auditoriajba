@@ -395,13 +395,14 @@ else:
                         
                         st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
                         
-                        # --- CORREÇÃO E AJUSTE DA OBRIGATORIEDADE DO ATIVO SOLICITADA ---
+                        # --- FIX: Validação estrita por linha para ignorar valores nulos ('nan') lidos do Excel ---
                         tem_ativo_na_base = False
                         if c_atv_b in it.columns:
-                            val_at_linha = str(row[c_atv_b]).strip()
-                            # Só é obrigatório se a coluna existir E a linha do produto contiver dados válidos preenchidos
-                            if val_at_linha and val_at_linha.lower() != "nan" and val_at_linha != "":
-                                tem_ativo_na_base = True
+                            # pd.isna verifica se o valor é nulo/NaN nativo no DataFrame antes de converter para texto
+                            if not pd.isna(row[c_atv_b]):
+                                val_at_linha = str(row[c_atv_b]).strip()
+                                if val_at_linha and val_at_linha.lower() != "nan" and val_at_linha != "":
+                                    tem_ativo_na_base = True
 
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
