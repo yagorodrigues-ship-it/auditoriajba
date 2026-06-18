@@ -199,34 +199,6 @@ if not st.session_state.logged_in:
             with c_cad:
                 if st.button("📝 Criar conta", use_container_width=True):
                     st.session_state.tela_acesso = "cadastro"; st.rerun()
-                    
-        elif st.session_state.tela_acesso == "cadastro":
-            st.markdown("<h2 style='text-align: center;'>📝 Cadastro de Colaborador</h2>", unsafe_allow_html=True)
-            with st.form("cadastro_form"):
-                novo_nome = st.text_input("Nome Completo")
-                novo_cpf = st.text_input("CPF (Apenas números)")
-                novo_email = st.text_input("E-mail")
-                nova_senha = st.text_input("Senha", type="password")
-                unidade_cadastro = st.selectbox("📍 Unidade", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"])
-                
-                if st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True):
-                    cpf_l = limpar_documento(novo_cpf)
-                    email_l = novo_email.strip()
-                    if novo_nome and cpf_l and email_l and nova_senha:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT email, cpf FROM usuarios WHERE cpf = ? OR email = ?", (cpf_l, email_l))
-                        usuario_existente = cursor.fetchone()
-                        if usuario_existente:
-                            st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta ativa!")
-                        else:
-                            try:
-                                cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
-                                conn.commit()
-                                st.success("✅ Cadastrado!")
-                                st.session_state.tela_acesso = "login"; st.rerun()
-                            except Exception as e: st.error(f"❌ Erro operacional: {e}")
-            if st.button("◀ Voltar"):
-                st.session_state.tela_acesso = "login"; st.rerun()
     conn.close()
 
 # --- INSTÂNCIA LOGADA ---
@@ -286,6 +258,7 @@ else:
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
         # --- SEÇÃO DINÂMICA DE PROGRESSO REAL NA BARRA LATERAL ---
+        total_faltantes = 0
         if id_inventario_atual and st.session_state.base_sistema is not None:
             df_c_side = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
             total_itens_base = len(st.session_state.base_sistema)
@@ -300,6 +273,32 @@ else:
                 st.caption(f"⏳ Pendentes: <span style='color:#e74c3c;font-weight:bold;'>{total_faltantes}</span>", unsafe_allow_html=True)
             else:
                 st.caption("🎉 Status: <span style='color:#2ecc71;font-weight:bold;'>100% Concluído</span>", unsafe_allow_html=True)
+
+        # --- SEÇÃO ATUALIZADA DE ACORDO COM O SEU PEDIDO (FECHAMENTO NA LATERAL) ---
+        if id_inventario_atual and inventario_selected_obj is not None and inventario_selected_obj['status'] == 'Aberto':
+            st.markdown("---")
+            with st.expander("🔒 Fechar Inventário Atual"):
+                if total_faltantes == 0:
+                    # Se estiver 100% completo, liberado para qualquer perfil fechar
+                    st.success("🎉 Inventário 100% preenchido e pronto para fechamento.")
+                    if st.button("Confirmar Fechamento", type="primary", use_container_width=True, key="btn_fechar_100_side"):
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
+                        conn.commit()
+                        st.success("Inventário Encerrado!")
+                        st.rerun()
+                else:
+                    # Se estiver incompleto, checa privilégios de Supervisor
+                    if eh_supervisor:
+                        st.warning(f"⚠️ Existem {total_faltantes} itens pendentes. Como Supervisor, você pode forçar o encerramento do lote.")
+                        if st.button("Forçar Fechamento Lote", type="primary", use_container_width=True, key="btn_fechar_sup_side"):
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
+                            conn.commit()
+                            st.success("Lote fechado com pendências!")
+                            st.rerun()
+                    else:
+                        st.error("❌ Fechamento Bloqueado: O lote possui pendências. Apenas o **Supervisor** da unidade pode forçar este encerramento.")
 
         st.markdown("---")
         st.write("⚙️ **Criar Inventário**")
@@ -400,57 +399,36 @@ else:
                 total_itens_base = len(st.session_state.base_sistema)
                 itens_contados_unicos = df_c['cod_produto'].unique() if not df_c.empty else []
                 total_contados = len(itens_contados_unicos)
-                total_faltantes = max(0, total_itens_base - total_contados)
+                total_faltantes_tab = max(0, total_itens_base - total_contados)
                 
                 m1, m2, m3 = st.columns(3)
                 m1.metric("📋 Total de Itens Mapeados", total_itens_base)
                 m2.metric("✅ Itens Já Contabilizados", total_contados)
-                m3.metric("⏳ Itens Pendentes (Falta Contar)", total_faltantes)
+                m3.metric("⏳ Itens Pendentes (Falta Contar)", total_faltantes_tab)
                 
                 codigos_base = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().tolist()
                 codigos_contados = [str(x).upper().strip() for x in itens_contados_unicos]
                 codigos_faltantes = [c for c in codigos_base if c not in codigos_contados]
                 
                 st.markdown("---")
-                if total_faltantes > 0:
-                    st.error(f"⚠️ **Atenção:** Ainda restam {total_faltantes} itens sem nenhuma contagem realizada.")
+                if total_faltantes_tab > 0:
+                    st.error(f"⚠️ **Atenção:** Ainda restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
                     df_faltantes_exibir = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().isin(codigos_faltantes)]
                     st.write("### 📋 Lista de Itens Faltantes para Concluir:")
                     st.dataframe(df_faltantes_exibir[[c_cod, c_desc, c_loc]], use_container_width=True, hide_index=True)
                 else:
                     st.success("🎉 **Excelente!** 100% dos itens da planilha base foram contabilizados.")
                 st.markdown("---")
-
-                # REGRA DE FECHAMENTO
-                if inventario_selected_obj is not None and inventario_selected_obj['status'] == 'Aberto':
-                    if total_faltantes > 0:
-                        if eh_supervisor:
-                            st.warning("⚠️ **Aviso de Supervisor:** O inventário está incompleto, mas você possui permissão de nível hierárquico para forçar o fechamento.")
-                            if st.button("🔒 Forçar Encerramento do Lote (Supervisor)", type="primary", use_container_width=True):
-                                cursor = conn.cursor()
-                                cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
-                                conn.commit(); st.success("Lote encerrado com pendências pelo Supervisor!"); st.rerun()
-                        else:
-                            st.button("🔒 Encerrar Lote Geral (Incompleto)", disabled=True, use_container_width=True)
-                            st.caption("🔴 **Acesso Restrito:** Este lote possui pendências. Apenas o **Supervisor** tem autorização para encerrar inventários incompletos.")
-                    else:
-                        if st.button("🔒 Encerrar e Fechar Lote Geral (100% Concluído)", type="primary", use_container_width=True):
-                            cursor = conn.cursor()
-                            cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
-                            conn.commit(); st.success("Lote concluído e fechado com sucesso!"); st.rerun()
-                else:
-                    st.info("🔒 **Status do Lote:** Este inventário encontra-se **Fechado/Finalizado**. As contagens e dados acima são apenas para consulta.")
             
             st.write("### 📑 Histórico de Lançamentos Registrados")
             st.dataframe(df_c.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
         else: st.info("Nenhum inventário selecionado.")
 
-    # 📄 ABA 3: BASE DE ESTOQUE (ATUALIZADA: DINÂMICA DE STATUS EM TEMPO REAL)
+    # 📄 ABA 3: BASE DE ESTOQUE
     with abas_gui[2]:
         if st.session_state.base_sistema is not None:
             st.subheader("📄 Espelho Base de Saldo - Status de Contagem Atualizado")
             
-            # Puxar dados das contagens para cruzar em tempo real
             if id_inventario_atual:
                 df_lancados_base = pd.read_sql_query("SELECT cod_produto, operador, qtd_contada FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
                 mapa_operadores = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['operador']))
@@ -459,18 +437,15 @@ else:
                 mapa_operadores = {}
                 mapa_quantidades = {}
             
-            # Função para processar a linha da base
             def mapear_status_gerencial(linha_cod):
                 cod_chave = str(linha_cod).upper().strip()
                 if cod_chave in mapa_operadores:
                     return f"🟩 Contado ({mapa_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}"
                 return "🟥 Não Contado"
             
-            # Aplicar mapeamento de dados na cópia visual
             df_base_realtime = st.session_state.base_sistema.copy()
             df_base_realtime["Status de Auditoria (Lote Atual)"] = df_base_realtime[c_cod].apply(mapear_status_gerencial)
             
-            # Ordenar para jogar a coluna de status na frente de tudo
             cols_ordenadas = ["Status de Auditoria (Lote Atual)"] + [col for col in df_base_realtime.columns if col != "Status de Auditoria (Lote Atual)"]
             st.dataframe(df_base_realtime[cols_ordenadas], use_container_width=True, hide_index=True)
         else:
