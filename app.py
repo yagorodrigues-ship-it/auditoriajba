@@ -243,7 +243,7 @@ else:
         c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
         c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
         
-        # Mapeamento dinâmico de colunas para exibição amigável
+        # Mapeamento de colunas para exibição e regras
         for col in st.session_state.base_sistema.columns:
             c_clean = str(col).strip().upper().replace(" ", "").replace("Ã", "A")
             if c_clean == "ATIVO":
@@ -252,10 +252,9 @@ else:
             if c_clean in ["LOTE", "SITUACAOLOTE", "LOTEFORNECEDORAUX", "LOTEFORNECEDOR"]:
                 col_lote_detectada = col
         
-        # --- UNIFICAÇÃO INTELIGENTE COM CONCATENAÇÃO DE LOTES E ATIVOS ---
+        # --- UNIFICAÇÃO INTELIGENTE COM CONCATENAÇÃO DE VALORES ---
         st.session_state.base_sistema[c_cod] = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip()
         
-        # Função interna para juntar valores únicos de texto sem repetições vazias
         def join_unique_strings(series):
             unique_vals = series.dropna().astype(str).str.strip().unique()
             filtered_vals = [v for v in unique_vals if v.lower() not in ["", "nan", "none", "-", "0"]]
@@ -427,17 +426,17 @@ else:
                         
                         st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
 
-                        # --- EXIBIÇÃO VISÍVEL E DINÂMICA DE LOTE E ATIVO CASO EXISTAM NO SISTEMA ---
+                        # --- RECONHECIMENTO E EXIBIÇÃO VISÍVEL APENAS NO MOMENTO DA CONTAGEM ---
                         c_dados1, c_dados2 = st.columns(2)
                         if col_lote_detectada and col_lote_detectada in row:
                             val_lote_layout = str(row[col_lote_detectada]).strip()
                             if val_lote_layout and val_lote_layout.lower() not in ["nan", "none", "—"]:
-                                c_dados1.markdown(f'<div class="bloco-info" style="background-color: #fef9e7; border-color: #f1c40f;"><div class="bloco-titulo">📦 LOTE(S) NO SISTEMA</div><div class="bloco-valor" style="font-size: 16px; color: #b7950b;">{val_lote_layout}</div></div>', unsafe_allow_html=True)
+                                c_dados1.markdown(f'<div class="bloco-info" style="background-color: #fef9e7; border-color: #f1c40f;"><div class="bloco-titulo">📦 LOTE(S) LOCALIZADO(S) NA PLANILHA</div><div class="bloco-valor" style="font-size: 16px; color: #b7950b;">{val_lote_layout}</div></div>', unsafe_allow_html=True)
                         
                         if col_ativo_detectada and col_ativo_detectada in row:
                             val_ativo_layout = str(row[col_ativo_detectada]).strip()
                             if val_ativo_layout and val_ativo_layout.lower() not in ["nan", "none", "—"]:
-                                c_dados2.markdown(f'<div class="bloco-info" style="background-color: #f9ebea; border-color: #e74c3c;"><div class="bloco-titulo">🔢 ATIVO(S) NO SISTEMA</div><div class="bloco-valor" style="font-size: 16px; color: #922b21;">{val_ativo_layout}</div></div>', unsafe_allow_html=True)
+                                c_dados2.markdown(f'<div class="bloco-info" style="background-color: #f9ebea; border-color: #e74c3c;"><div class="bloco-titulo">🔢 ATIVO(S) LOCALIZADO(S) NA PLANILHA</div><div class="bloco-valor" style="font-size: 16px; color: #922b21;">{val_ativo_layout}</div></div>', unsafe_allow_html=True)
 
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
@@ -469,8 +468,6 @@ else:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
                                 else:
                                     q_sis = int(row[c_qtd]) if pd.notna(row[c_qtd]) else 0
-                                    
-                                    # Captura o lote concatenado para salvar no banco histórico
                                     lote_banco = str(row[col_lote_detectada]).strip() if col_lote_detectada else ""
                                     
                                     if is_fluxo_recontagem:
@@ -488,6 +485,8 @@ else:
                                     
                                     conn.commit()
                                     st.success("Contagem processada e armazenada com sucesso!")
+                                    
+                                    # --- ATUALIZA AUTOMATICAMENTE PARA SUTOR E REMOVER VISIBILIDADE DOS BLOCOS ---
                                     st.session_state.contador_reset += 1
                                     st.rerun()
                     else: st.error("Material/Produto não localizado na base de dados carregada.")
@@ -588,7 +587,7 @@ else:
                 cod_chave = str(linha_cod).upper().strip()
                 if cod_chave in map_operadores:
                     rec_status = f" (2ª Contagem)" if map_recont.get(cod_chave) == 'Realizada' else ""
-                    return f"🟩 Contado ({map_quantidades[cod_chave]}) por {map_operadores[cod_chave]}{rec_status}"
+                    return f"🟩 Contado ({map_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}{rec_status}"
                 return "🟥 Não Contado"
             
             df_base_realtime = st.session_state.base_sistema.copy()
