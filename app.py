@@ -142,10 +142,10 @@ if 'contador_reset' not in st.session_state: st.session_state.contador_reset = 0
 if 'pagina_historico' not in st.session_state: st.session_state.pagina_historico = 0
 if 'pagina_acuracidade_sup' not in st.session_state: st.session_state.pagina_acuracidade_sup = 0
 
-# --- FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL ---
+# --- CORRIGIDO: FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL USANDO OPENPYXL NATIVO ---
 def converter_para_excel(df):
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Relatorio_Contagem')
     return output.getvalue()
 
@@ -285,7 +285,7 @@ else:
             id_inventario_atual = inv_sel.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # --- REPARADO: PROGRESSO UNIVERSAL NA BARRA LATERAL ---
+        # --- SEÇÃO DINÂMICA DE PROGRESSO REAL NA BARRA LATERAL ---
         if id_inventario_atual and st.session_state.base_sistema is not None:
             df_c_side = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
             total_itens_base = len(st.session_state.base_sistema)
@@ -470,7 +470,7 @@ else:
                             # Ações na Pasta
                             c_btn1, c_btn2 = st.columns([1, 4])
                             with c_btn1:
-                                # DISPONÍVEL PARA ALMOXARIFE E SUPERVISOR
+                                # DISPONÍVEL PARA TODOS OS PERFIS (ALMOXARIFE E SUPERVISOR)
                                 excel_data = converter_para_excel(df_det.drop(columns=['unidade'], errors='ignore'))
                                 st.download_button(
                                     label="📥 Exportar para Excel",
@@ -480,7 +480,7 @@ else:
                                     key=f"dl_gen_{inv['id']}"
                                 )
                             with c_btn2:
-                                # EXCLUSIVO PARA SUPERVISOR
+                                # EXCLUSIVO PARA SUPERVISOR / MASTER
                                 if eh_supervisor:
                                     if st.button(f"🗑️ Excluir Pasta {inv['id']}", key=f"del_gen_{inv['id']}", type="secondary"):
                                         cursor = conn.cursor()
@@ -541,7 +541,7 @@ else:
         with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
         if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
 
-    # 📈 ABA 6: ACURACIDADE ESTOQUE (COM EXPORTAR E EXCLUIR PASTA DO SUPERVISOR)
+    # 📈 ABA 6: ACURACIDADE ESTOQUE
     with abas_gui[5]:
         st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
         
@@ -566,7 +566,7 @@ else:
                 certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                 certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
                 
-                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
+                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in group.columns else "Não Informado" if 'desc_estoque' not in grupo.columns else grupo.iloc[0]['desc_estoque']
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
@@ -624,6 +624,7 @@ else:
                             
                             c_sup_btn1, c_sup_btn2 = st.columns([1, 4])
                             with c_sup_btn1:
+                                # DISPONÍVEL PARA TODOS OS PERFIS (ALMOXARIFE E SUPERVISOR)
                                 excel_sup_data = converter_para_excel(df_itens_da_pasta)
                                 st.download_button(
                                     label="📥 Exportar para Excel",
@@ -633,6 +634,7 @@ else:
                                     key=f"dl_sup_{pasta_sup['id']}"
                                 )
                             with c_sup_btn2:
+                                # EXCLUSIVO PARA SUPERVISOR / MASTER
                                 if eh_supervisor:
                                     if st.button(f"🗑️ Excluir Pasta Amostral {pasta_sup['id']}", key=f"del_sup_{pasta_sup['id']}", type="secondary"):
                                         cursor = conn.cursor()
