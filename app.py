@@ -142,7 +142,7 @@ if 'contador_reset' not in st.session_state: st.session_state.contador_reset = 0
 if 'pagina_historico' not in st.session_state: st.session_state.pagina_historico = 0
 if 'pagina_acuracidade_sup' not in st.session_state: st.session_state.pagina_acuracidade_sup = 0
 
-# --- FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL USANDO OPENPYXL NATIVO ---
+# --- FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL ---
 def converter_para_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -156,7 +156,7 @@ st.markdown("""
         background-color: #d35400; border-color: #d35400; color: white; font-weight: bold;
     }
     div.stButton > button:first-child[kind="primary"]:hover {
-        background-color: #e67e22; border-color: #e67e22;
+        background-color: #e67e22; border-color: #e67e22; color: white;
     }
     .bloco-info {
         background-color: #ebf5fb; padding: 15px; border-radius: 8px; border: 1px solid #d4e6f1; margin-bottom: 10px;
@@ -350,7 +350,15 @@ else:
                 it = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip() == prod_l]
                 if not it.empty:
                     row = it.iloc[0]
-                    st.markdown(f"### 📦 {row[c_desc]} ({row[c_un]})")
+                    
+                    # --- APRESENTAÇÃO DE DADOS COMPLETOS DO PRODUTO SOLICITADA ---
+                    c_b1, c_b2, c_b3, c_b4 = st.columns(4)
+                    c_b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{prod_l}</div></div>', unsafe_allow_html=True)
+                    c_b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO / LOCAL</div><div class="bloco-valor" style="font-size:22px;">{row[c_loc]}</div></div>', unsafe_allow_html=True)
+                    c_b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{row[c_un]}</div></div>', unsafe_allow_html=True)
+                    c_b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. ESTOQUE</div><div class="bloco-valor">{row[c_est]}</div></div>', unsafe_allow_html=True)
+                    
+                    st.markdown(f"**Descrição Detalhada do Material:** {row[c_desc]}")
                     
                     tem_ativo_na_base = False
                     if c_atv_b in it.columns:
@@ -358,7 +366,8 @@ else:
                         if val_at and val_at.lower() != "nan" and val_at != "": tem_ativo_na_base = True
 
                     with st.form("f_salva_contagem", clear_on_submit=True):
-                        q_cont = st.number_input("Quantidade Física Encontrada", min_value=0, step=1, value=1)
+                        # --- MODIFICADO: VALOR PADRÃO INICIA EM 0 PARA EXIGIR INTERAÇÃO OPERACIONAL ---
+                        q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
                         if tem_ativo_na_base:
                             n_ativ = st.text_input("🔢 Número do Ativo (OBRIGATÓRIO)")
                         else:
@@ -366,7 +375,10 @@ else:
                         obs = st.text_input("Observação")
                         
                         if st.form_submit_button("Confirmar Lançamento", type="primary"):
-                            if tem_ativo_na_base and not n_ativ.strip():
+                            # --- VALIDAÇÃO EXIGIDA CONTRA LANÇAMENTOS ZERADOS SEM ALTERAÇÃO ---
+                            if q_cont == 0:
+                                st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
+                            elif tem_ativo_na_base and not n_ativ.strip():
                                 st.error("❌ Erro: O campo Ativo é obrigatório para este produto!")
                             else:
                                 cursor = conn.cursor()
@@ -377,10 +389,12 @@ else:
                                 """, (id_inventario_atual.replace('#',''), str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, n_ativ.strip().upper(), obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
                                 conn.commit()
                                 st.success("Contagem salva com sucesso!")
-                                st.session_state.contador_reset += 1; st.rerun()
+                                # Zera o estado do contador para limpar de forma limpa os dados na tela para o próximo bip
+                                st.session_state.contador_reset += 1
+                                st.rerun()
                 else: st.error("Material/Produto não localizado na base de dados carregada.")
 
-    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO (AJUSTADA: FICA VISÍVEL MESMO FECHADA)
+    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO
     with abas_gui[1]:
         if id_inventario_atual:
             st.subheader(f"📊 Progresso em Tempo Real - Lote {id_inventario_atual}")
@@ -411,7 +425,7 @@ else:
                     st.success("🎉 **Excelente!** 100% dos itens da planilha base foram contabilizados.")
                 st.markdown("---")
 
-                # REGRA DOS BOTÕES DE FECHAMENTO (SÓ EXIBE SE ESTIVER ABERTO)
+                # REGRA DE FECHAMENTO
                 if inventario_selected_obj is not None and inventario_selected_obj['status'] == 'Aberto':
                     if total_faltantes > 0:
                         if eh_supervisor:
@@ -440,7 +454,7 @@ else:
         if st.session_state.base_sistema is not None: st.dataframe(st.session_state.base_sistema, use_container_width=True)
         else: st.info("Nenhuma base carregada.")
 
-    # 📁 ABA 4: HISTÓRICO GERAL (COM EXPORTAR E EXCLUIR PASTA DINÂMICO)
+    # 📁 ABA 4: HISTÓRICO GERAL
     with abas_gui[3]:
         st.title("📁 Arquivo Geral de Movimentações")
         c_dt1, c_dt2 = st.columns(2)
@@ -469,7 +483,6 @@ else:
                         if not df_det.empty:
                             st.dataframe(df_det.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
                             
-                            # Ações na Pasta
                             c_btn1, c_btn2 = st.columns([1, 4])
                             with c_btn1:
                                 excel_data = converter_para_excel(df_det.drop(columns=['unidade'], errors='ignore'))
@@ -496,7 +509,7 @@ else:
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM inventarios WHERE id = ? AND unidade = ?", (inv['id'], st.session_state.unidade_selecionada))
                                     conn.commit()
-                                    st.success(f"Pasta vazia removida!")
+                                    st.success("Pasta vazia removida!")
                                     st.rerun()
                 
                 st.write("")
@@ -541,7 +554,7 @@ else:
         with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
         if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
 
-    # 📈 ABA 6: ACURACIDADE ESTOQUE (CORRIGIDA: ALTERADO 'group.columns' PARA 'grupo.columns')
+    # 📈 ABA 6: ACURACIDADE ESTOQUE (CORRIGIDA - MARCADOR DE VARIÁVEL HIGIENIZADO)
     with abas_gui[5]:
         st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
         
@@ -566,7 +579,7 @@ else:
                 certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                 certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
                 
-                # CORREÇÃO EFETUADA AQUI: mudado 'group.columns' para 'grupo.columns'
+                # REPARADO: variável normalizada para 'grupo.columns' eliminando o bug de travamento de tela
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
@@ -614,9 +627,9 @@ else:
                 
                 for idx, pasta_sup in df_pastas_paginadas.iterrows():
                     df_itens_da_pasta = pd.read_sql_query(
-                        "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora' FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", 
+                        "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora' FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", 
                         conn, 
-                        params=(pasta_sup['id'],)
+                        params=(pasta_sup['id'], st.session_state.unidade_selecionada)
                     )
                     
                     with st.expander(f"📁 Pasta Amostral: {pasta_sup['id']} – {pasta_sup['nome']} ({pasta_sup['status']}) | {len(df_itens_da_pasta)} itens auditados"):
