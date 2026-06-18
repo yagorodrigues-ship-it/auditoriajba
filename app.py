@@ -185,7 +185,7 @@ if not st.session_state.logged_in:
                     id_l = identificador.strip()
                     doc_l = limpar_documento(id_l)
                     cursor = conn.cursor()
-                    cursor.execute("SELECT nome, unidade, cargo FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_l, doc_l, senha, unity_login := unidade_login))
+                    cursor.execute("SELECT nome, unidade, cargo FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_l, doc_l, senha, unidade_login))
                     user = cursor.fetchone()
                     if user:
                         st.session_state.logged_in = True
@@ -253,7 +253,7 @@ else:
             id_inventario_atual = None
             inventario_selected_obj = None
         else:
-            # --- CONSTRUÇÃO DE STATUS COMPACTO E INTELIGENTE PARA A LATERAL ---
+            # --- CORREÇÃO DA MENSAGEM SUTIL DO STATUS NA LATERAL PEDIDA ---
             lista_inv = []
             for idx, r in df_inventarios.iterrows():
                 id_limpo_r = r['id'].replace('#','')
@@ -261,6 +261,7 @@ else:
                 cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r, st.session_state.unidade_selecionada))
                 possui_pendente = cursor_check.fetchone()[0] > 0
                 
+                # Se o supervisor liberar a recontagem, o status lateral muda sutilmente para avisar
                 if r['status'] == 'Fechado':
                     status_exibicao = "Fechado"
                 elif possui_pendente:
@@ -320,23 +321,24 @@ else:
         with st.expander("➕ Abrir Nova Contagem"):
             with st.form("form_novo_inv", clear_on_submit=True):
                 n_inv = st.text_input("Nome do Inventário Geral")
-                if st.form_submit_button("Criar Lote") and n_inv:
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT id FROM inventarios")
-                    todos_ids = cursor.fetchall()
-                    
-                    maior_id = 0
-                    for row in todos_ids:
-                        try:
-                            num = int(row[0].replace('#',''))
-                            if num > maior_id:
-                                maior_id = num
-                        except ValueError:
-                            pass
-                    
-                    nxt = maior_id + 1
-                    cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (f"#{nxt}", n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
-                    conn.commit(); st.rerun()
+                if st.form_submit_button("Criar Lote"):
+                    if n_inv:
+                        cursor = conn.cursor()
+                        cursor.execute("SELECT id FROM inventarios")
+                        todos_ids = cursor.fetchall()
+                        
+                        maior_id = 0
+                        for row in todos_ids:
+                            try:
+                                num = int(row[0].replace('#',''))
+                                if num > maior_id:
+                                    maior_id = num
+                            except ValueError:
+                                pass
+                        
+                        nxt = maior_id + 1
+                        cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (f"#{nxt}", n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
+                        conn.commit(); st.rerun()
 
     # --- DEFINIÇÃO E RENDERIZAÇÃO DAS ABAS NA ORDEM EXATA ---
     ordem_abas = ["🔍 Contar Item", "📊 Contagem Atual e Progresso", "📄 Base de Estoque", "📁 Histórico Geral", "🏆 Desempenho e Prazos", "📈 Acuracidade Estoque"]
@@ -362,7 +364,7 @@ else:
             )
             tem_recontagem_ativa = int(df_recont_totais.iloc[0]['total_p']) > 0
             
-            # Ajustado: Libera bipagem se houver pendência de 2ª contagem mesmo com o lote tecnicamente congelado
+            # Libera o espaço da bipagem dos itens errados automaticamente mesmo se o status mestre estiver restrito
             if inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado" and not tem_recontagem_ativa:
                 st.error("🔒 Este lote de inventário foi finalizado e fechado.")
             else:
@@ -456,7 +458,6 @@ else:
                 total_contados = len(itens_contados_unicos)
                 total_faltantes_tab = max(0, total_itens_base - total_contados)
                 
-                # --- REPARADO: CÁLCULO DE ACURACIDADE CONFORME REGRAS ESTRITAS ---
                 if not df_c.empty:
                     total_lancados = len(df_c)
                     total_divergentes = len(df_c[df_c['diferenca'] != 0])
@@ -468,7 +469,6 @@ else:
                     total_divergentes = len(df_c[df_c['diferenca'] != 0])
                     taxa_acuracidade = ((total_lancados - total_divergentes) / total_lancados) * 100
 
-            # Renderizar métricas superiores (Título Corrigido para ACURACIDADE ESTOQUE)
             col_m1, col_m2, col_m3, col_m4 = st.columns(4)
             col_m1.metric("📋 Total Mapeados", total_itens_base if st.session_state.base_sistema is not None else "Carregue a Base")
             col_m2.metric("✅ Já Contabilizados", total_contados)
@@ -476,7 +476,6 @@ else:
             with col_m4:
                 st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:10px; margin-bottom:0px; border-left: 5px solid #2980b9;"><div class="bloco-titulo">📈 ACURACIDADE ESTOQUE</div><div class="bloco-valor" style="font-size:20px; margin-top:5px;">{formatar_acuracidade_html(taxa_acuracidade)}</div></div>', unsafe_allow_html=True)
             
-            # Exibição de itens divergentes em tempo real
             st.markdown("---")
             if not df_c.empty:
                 df_divergentes_realtime = df_c[df_c['diferenca'] != 0].copy()
@@ -766,8 +765,8 @@ else:
 
     # RECURSOS EXCLUSIVOS DO SUPERVISOR
     if eh_supervisor:
-        # 🔬 PAINEL SUPERVISOR
-        with st.form("form_novo_sup", clear_on_submit=True) if 'abas_gui' in locals() else abas_gui[6]:
+        # 🔬 PAINEL SUPERVISOR (CORRIGIDO FORM SUBMIT BUG)
+        with abas_gui[6]:
             st.title("🔬 Módulo Amostral do Supervisor e Fluxo de Recontagem")
             
             if id_inventario_atual:
@@ -813,7 +812,8 @@ else:
                         conn.commit(); st.rerun()
 
             with st.popover("➕ Novo Inventário Supervisor", use_container_width=True):
-                with st.form("form_novo_sup_inner", clear_on_submit=True):
+                # FIXED: Isolado corretamente em um form_submit estruturado interno
+                with st.form("form_novo_sup_corrigido_submit", clear_on_submit=True):
                     nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                     if st.form_submit_button("Criar Lote", type="primary") and nome_sup_inv:
                         cursor = conn.cursor()
