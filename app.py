@@ -185,16 +185,24 @@ if not st.session_state.logged_in:
                     id_l = identificador.strip()
                     doc_l = limpar_documento(id_l)
                     cursor = conn.cursor()
-                    cursor.execute("SELECT nome, unidade, cargo FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_l, doc_l, senha, unidade_login))
+                    
+                    # CORREÇÃO DO LOGIN: Uso de UPPER para evitar problemas com acentos ou caixa baixa
+                    cursor.execute("""
+                        SELECT nome, unidade, cargo 
+                        FROM usuarios 
+                        WHERE (email = ? OR cpf = ?) AND senha = ? AND UPPER(unidade) = ?
+                    """, (id_l, doc_l, senha, unidade_login.upper()))
+                    
                     user = cursor.fetchone()
                     if user:
                         st.session_state.logged_in = True
                         st.session_state.operador = user[0]
                         st.session_state.unidade_selecionada = user[1]
                         st.session_state.cargo_usuario = user[2]
+                        st.success("✅ Autenticado com sucesso!")
                         st.rerun()
                     else:
-                        st.error("❌ Credenciais incorretas ou não cadastradas nesta unidade!")
+                        st.error("❌ Credenciais incorretas ou usuário não cadastrado nesta unidade!")
             
             c_cad, c_rec = st.columns(2)
             with c_cad:
@@ -404,7 +412,7 @@ else:
                                 cursor = conn.cursor()
                                 val_ativo_inserido = n_ativ.strip().upper()
                                 
-                                # --- FLUXO DE VALIDAÇÃO DE DUPLICIDADE CORRIGIDO ---
+                                # --- CORREÇÃO DE DUPLICIDADE DE ATIVOS E ITENS NORMAS ---
                                 if not is_fluxo_recontagem:
                                     if tem_ativo_na_base:
                                         if not val_ativo_inserido:
@@ -684,7 +692,7 @@ else:
                 certos_qtd = len(grupo[grupo['diferenca'] == 0])
                 certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                 certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
-                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
+                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in group.columns else "Não Informado"
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
@@ -790,7 +798,7 @@ else:
             st.title("🔬 Módulo Amostral do Supervisor e Fluxo de Recontagem")
             
             if id_inventario_atual:
-                st.write(f"### 🔄 Gestão de Recontagem Inteligente do Lote Active ({id_inventario_atual})")
+                st.write(f"### 🔄 Gestão de Recontagem Inteligente do Lote Ativo ({id_inventario_atual})")
                 id_p_limpo = id_inventario_atual.replace('#','')
                 
                 df_erros_lote = pd.read_sql_query(
@@ -813,7 +821,7 @@ else:
                     else:
                         st.info("ℹ️ Todos os itens divergentes já foram enviados para a recontagem.")
                 else:
-                    st.success("🎉 Nenhuma divergência activa encontrada neste lote até o momento.")
+                    st.success("🎉 Nenhuma divergência ativa encontrada neste lote até o momento.")
                     
             st.markdown("---")
             if df_inventarios_sup.empty:
