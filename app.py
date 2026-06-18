@@ -214,7 +214,6 @@ if not st.session_state.logged_in:
                             st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta ativa!")
                         else:
                             try:
-                                # CORRIGIDO: alterado unidade_cadastro para o nome correto da variável
                                 cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
                                 conn.commit()
                                 st.success("✅ Cadastrado!")
@@ -264,14 +263,16 @@ else:
             st.session_state.logged_in = False; st.rerun()
             
         st.markdown("---")
-        st.write("📂 **Base Geral (Planilha Mãe)**")
+        # MODIFICADO: Retirado o texto "(Planilha Mãe)"
+        st.write("📂 **Base Geral**")
         ar_excel = st.file_uploader("Upload Excel Geral", type=["xlsx"], label_visibility="collapsed")
         if ar_excel:
             st.session_state.base_sistema = pd.read_excel(ar_excel)
             
         st.markdown("---")
         st.write("📁 **Selecione o Inventário**")
-        if df_inventarios.empty:
+        # AJUSTADO: Verificação robusta para evitar erro de KeyError caso o dataframe venha corrompido ou sem linhas válidas
+        if df_inventarios.empty or 'id' not in df_inventarios.columns:
             id_inventario_atual = None
             inventario_selected_obj = None
         else:
@@ -298,12 +299,12 @@ else:
 
         st.markdown("---")
         st.write("⚙️ **Criar Inventário**")
-        with st.expander("➕ Abrir Novo Lote"):
+        # MODIFICADO: Alterado "+ Abrir Novo Lote" para "+ Abrir Nova Contagem"
+        with st.expander("➕ Abrir Nova Contagem"):
             with st.form("form_novo_inv", clear_on_submit=True):
                 n_inv = st.text_input("Nome do Inventário Geral")
                 if st.form_submit_button("Criar Lote") and n_inv:
                     cursor = conn.cursor()
-                    # AJUSTADO: Seleciona todos para encontrar o maior sequencial numérico real
                     cursor.execute("SELECT id FROM inventarios")
                     todos_ids = cursor.fetchall()
                     
@@ -316,7 +317,6 @@ else:
                         except ValueError:
                             pass
                     
-                    # Começa rigorosamente do 1 se o banco estiver limpo
                     nxt = maior_id + 1
                     cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (f"#{nxt}", n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
                     conn.commit(); st.rerun()
@@ -337,7 +337,7 @@ else:
             st.warning("⚠️ **Bloqueado:** Nenhum lote de inventário selecionado ou ativo. Use a barra lateral para criar ou selecionar um lote.")
         elif st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a Base Geral no menu lateral para iniciar as bipagens.")
-        elif inventario_selected_obj['status'] == "Fechado":
+        elif inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado":
             st.error("🔒 Este lote de inventário foi finalizado e fechado.")
         else:
             st.subheader(f"📝 Lançamento de Contagem Ativa – Lote {id_inventario_atual}")
@@ -364,7 +364,7 @@ else:
                         
                         if st.form_submit_button("Confirmar Lançamento", type="primary"):
                             if tem_ativo_na_base and not n_ativ.strip():
-                                st.error("❌ Erro: O campo Ativo é obrigatório para este produto!")
+                                st.error("❌ Erro: O campo Ativo é maior do que o permitido ou obrigatório para este produto!")
                             else:
                                 cursor = conn.cursor()
                                 q_sis = int(row[c_qtd]) if pd.notna(row[c_qtd]) else 0
@@ -409,7 +409,7 @@ else:
                 st.markdown("---")
 
                 # REGRA DE FECHAMENTO
-                if inventario_selected_obj and inventario_selected_obj['status'] == 'Aberto':
+                if inventario_selected_obj is not None and inventario_selected_obj['status'] == 'Aberto':
                     if total_faltantes > 0:
                         if eh_supervisor:
                             st.warning("⚠️ **Aviso de Supervisor:** O inventário está incompleto, mas você possui permissão de nível hierárquico para forçar o fechamento.")
@@ -442,32 +442,35 @@ else:
         with c_dt1: data_inicio_filtro = st.date_input("Data Inicial (Opcional)", value=None, key="blank_dt_ini")
         with c_dt2: data_fim_filtro = st.date_input("Data Final (Opcional)", value=None, key="blank_dt_fim")
         
-        df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
-        df_filtrados = df_inventarios[df_inventarios['unidade'] == st.session_state.unidade_selecionada]
-        if data_inicio_filtro: df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] >= data_inicio_filtro]
-        if data_fim_filtro: df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] <= data_fim_filtro]
-            
-        st.write(f"Total de pastas nesta unidade: {len(df_filtrados)}")
-        if not df_filtrados.empty:
-            tamanho_pagina = 15
-            total_paginas = (len(df_filtrados) - 1) // tamanho_pagina + 1
-            if st.session_state.pagina_historico >= total_paginas:
-                st.session_state.pagina_historico = 0
+        if not df_inventarios.empty and 'data' in df_inventarios.columns:
+            df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
+            df_filtrados = df_inventarios[df_inventarios['unidade'] == st.session_state.unidade_selecionada]
+            if data_inicio_filtro: df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] >= data_inicio_filtro]
+            if data_fim_filtro: df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] <= data_fim_filtro]
                 
-            df_pag = df_filtrados.iloc[st.session_state.pagina_historico*tamanho_pagina : (st.session_state.pagina_historico+1)*tamanho_pagina]
-            for idx, inv in df_pag.iterrows():
-                id_p = inv['id'].replace('#','')
-                df_det = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_p, st.session_state.unidade_selecionada))
-                with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} ({len(df_det)} contados)"):
-                    st.dataframe(df_det.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
-            
-            st.write("")
-            cp1, cp2, cp3 = st.columns([2, 6, 2])
-            with cp1:
-                if st.button("◀ Anterior", disabled=(st.session_state.pagina_historico==0), key="btn_ant_hist"): st.session_state.pagina_historico-=1; st.rerun()
-            with cp2: st.markdown(f"<p style='text-align:center;'>Página {st.session_state.pagina_historico+1} de {total_paginas}</p>", unsafe_allow_html=True)
-            with cp3:
-                if st.button("Próximo ▶", disabled=(st.session_state.pagina_historico>=total_paginas-1), key="btn_prox_hist"): st.session_state.pagina_historico+=1; st.rerun()
+            st.write(f"Total de pastas nesta unidade: {len(df_filtrados)}")
+            if not df_filtrados.empty:
+                tamanho_pagina = 15
+                total_paginas = (len(df_filtrados) - 1) // tamanho_pagina + 1
+                if st.session_state.pagina_historico >= total_paginas:
+                    st.session_state.pagina_historico = 0
+                    
+                df_pag = df_filtrados.iloc[st.session_state.pagina_historico*tamanho_pagina : (st.session_state.pagina_historico+1)*tamanho_pagina]
+                for idx, inv in df_pag.iterrows():
+                    id_p = inv['id'].replace('#','')
+                    df_det = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_p, st.session_state.unidade_selecionada))
+                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} ({len(df_det)} contados)"):
+                        st.dataframe(df_det.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+                
+                st.write("")
+                cp1, cp2, cp3 = st.columns([2, 6, 2])
+                with cp1:
+                    if st.button("◀ Anterior", disabled=(st.session_state.pagina_historico==0), key="btn_ant_hist"): st.session_state.pagina_historico-=1; st.rerun()
+                with cp2: st.markdown(f"<p style='text-align:center;'>Página {st.session_state.pagina_historico+1} de {total_paginas}</p>", unsafe_allow_html=True)
+                with cp3:
+                    if st.button("Próximo ▶", disabled=(st.session_state.pagina_historico>=total_paginas-1), key="btn_prox_hist"): st.session_state.pagina_historico+=1; st.rerun()
+        else:
+            st.info("Nenhum histórico registrado até o momento.")
 
     # 🏆 ABA 5: DESEMPENHO E PRAZOS
     with abas_gui[4]:
@@ -546,7 +549,6 @@ else:
             
         st.markdown("---")
         
-        # Filtros posicionados abaixo da acuracidade gerencial
         st.subheader("🔍 Filtrar Pastas por Período")
         f_col1, f_col2 = st.columns(2)
         with f_col1: dt_ini_ac = st.date_input("Filtrar Data Inicial", value=None, key="dt_ini_ac")
@@ -555,47 +557,50 @@ else:
         st.markdown("---")
         st.subheader("📁 Histórico de Pastas Contabilizadas (Supervisor)")
         
-        df_inventarios_sup['dt_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
-        df_pastas_filtradas = df_inventarios_sup.copy()
-        if dt_ini_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] >= dt_ini_ac]
-        if dt_fim_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] <= dt_fim_ac]
+        if not df_inventarios_sup.empty and 'data' in df_inventarios_sup.columns:
+            df_inventarios_sup['dt_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
+            df_pastas_filtradas = df_inventarios_sup.copy()
+            if dt_ini_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] >= dt_ini_ac]
+            if dt_fim_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] <= dt_fim_ac]
 
-        if not df_pastas_filtradas.empty:
-            tamanho_pag_sup = 10
-            total_pag_sup = (len(df_pastas_filtradas) - 1) // tamanho_pag_sup + 1
-            
-            if st.session_state.pagina_acuracidade_sup >= total_pag_sup:
-                st.session_state.pagina_acuracidade_sup = 0
+            if not df_pastas_filtradas.empty:
+                tamanho_pag_sup = 10
+                total_pag_sup = (len(df_pastas_filtradas) - 1) // tamanho_pag_sup + 1
                 
-            df_pastas_paginadas = df_pastas_filtradas.iloc[
-                st.session_state.pagina_acuracidade_sup * tamanho_pag_sup : (st.session_state.pagina_acuracidade_sup + 1) * tamanho_pag_sup
-            ]
-            
-            for idx, pasta_sup in df_pastas_paginadas.iterrows():
-                df_itens_da_pasta = pd.read_sql_query(
-                    "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora' FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", 
-                    conn, 
-                    params=(pasta_sup['id'],)
-                )
+                if st.session_state.pagina_acuracidade_sup >= total_pag_sup:
+                    st.session_state.pagina_acuracidade_sup = 0
+                    
+                df_pastas_paginadas = df_pastas_filtradas.iloc[
+                    st.session_state.pagina_acuracidade_sup * tamanho_pag_sup : (st.session_state.pagina_acuracidade_sup + 1) * tamanho_pag_sup
+                ]
                 
-                with st.expander(f"📁 Pasta: {pasta_sup['id']} – {pasta_sup['nome']} ({pasta_sup['status']}) | {len(df_itens_da_pasta)} itens auditados"):
-                    if not df_itens_da_pasta.empty:
-                        st.dataframe(df_itens_da_pasta, use_container_width=True, hide_index=True)
-                    else:
-                        st.info("Nenhum item contabilizado nesta pasta amostral ainda.")
-            
-            st.write("")
-            cs1, cs2, cs3 = st.columns([2, 6, 2])
-            with cs1:
-                if st.button("◀ Anterior", disabled=(st.session_state.pagina_acuracidade_sup == 0), key="btn_ant_ac_sup"):
-                    st.session_state.pagina_acuracidade_sup -= 1; st.rerun()
-            with cs2:
-                st.markdown(f"<p style='text-align:center;'>Exibindo página {st.session_state.pagina_acuracidade_sup + 1} de {total_pag_sup}</p>", unsafe_allow_html=True)
-            with cs3:
-                if st.button("Próximo ▶", disabled=(st.session_state.pagina_acuracidade_sup >= total_pag_sup - 1), key="btn_prox_ac_sup"):
-                    st.session_state.pagina_acuracidade_sup += 1; st.rerun()
+                for idx, pasta_sup in df_pastas_paginadas.iterrows():
+                    df_itens_da_pasta = pd.read_sql_query(
+                        "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora' FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", 
+                        conn, 
+                        params=(pasta_sup['id'],)
+                    )
+                    
+                    with st.expander(f"📁 Pasta: {pasta_sup['id']} – {pasta_sup['nome']} ({pasta_sup['status']}) | {len(df_itens_da_pasta)} itens auditados"):
+                        if not df_itens_da_pasta.empty:
+                            st.dataframe(df_itens_da_pasta, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Nenhum item contabilizado nesta pasta amostral ainda.")
+                
+                st.write("")
+                cs1, cs2, cs3 = st.columns([2, 6, 2])
+                with cs1:
+                    if st.button("◀ Anterior", disabled=(st.session_state.pagina_acuracidade_sup == 0), key="btn_ant_ac_sup"):
+                        st.session_state.pagina_acuracidade_sup -= 1; st.rerun()
+                with cs2:
+                    st.markdown(f"<p style='text-align:center;'>Exibindo página {st.session_state.pagina_acuracidade_sup + 1} de {total_pag_sup}</p>", unsafe_allow_html=True)
+                with cs3:
+                    if st.button("Próximo ▶", disabled=(st.session_state.pagina_acuracidade_sup >= total_pag_sup - 1), key="btn_prox_ac_sup"):
+                        st.session_state.pagina_acuracidade_sup += 1; st.rerun()
+            else:
+                st.info("Nenhuma pasta localizada para os critérios de filtragem atuais.")
         else:
-            st.info("Nenhuma pasta localizada para os critérios de filtragem atuais.")
+            st.info("Nenhum inventário de supervisor cadastrado.")
 
     # RECURSOS EXCLUSIVOS DO SUPERVISOR
     if eh_supervisor:
