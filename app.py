@@ -185,7 +185,7 @@ if not st.session_state.logged_in:
                     id_l = identificador.strip()
                     doc_l = limpar_documento(id_l)
                     cursor = conn.cursor()
-                    cursor.execute("SELECT nome, unidade, cargo FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_l, doc_l, senha, unidade_login))
+                    cursor.execute("SELECT nome, unidade, cargo FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_l, doc_l, senha, unity_login := unidade_login))
                     user = cursor.fetchone()
                     if user:
                         st.session_state.logged_in = True
@@ -412,45 +412,56 @@ else:
                                     st.rerun()
                     else: st.error("Material/Produto não localizado na base de dados carregada.")
 
-    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO (ATUALIZADA: ACURACIDADE E DIVERGÊNCIAS EM TEMPO REAL)
+    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO (CORRIGIDA)
     with abas_gui[1]:
-        if id_inventario_atual:
+        if not id_inventario_atual:
+            st.info("ℹ️ Nenhum inventário/lote selecionado na barra lateral.")
+        else:
             st.subheader(f"📊 Progresso em Tempo Real - Lote {id_inventario_atual}")
             df_c = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
             
+            # 1. Funções de formatação declaradas com segurança no topo da aba
+            def formatar_acuracidade_html(porcentagem):
+                if porcentagem == 100.0:
+                    return f"<span style='color:green; font-weight:bold;'>🟢 {porcentagem:.1f}% (Acuracidade Perfeita)</span>"
+                elif porcentagem >= 95.0:
+                    return f"<span style='color:#d4ac0d; font-weight:bold;'>🟡 {porcentagem:.1f}% (Dentro da Tolerância)</span>"
+                else:
+                    return f"<span style='color:red; font-weight:bold;'>🔴 {porcentagem:.1f}% (Atenção: Nível Crítico)</span>"
+
+            # 2. Inicialização segura de variáveis de contagem
+            total_itens_base = 0
+            total_contados = 0
+            total_faltantes_tab = 0
+            taxa_acuracidade = 100.0
+            
+            # Se a base geral estiver carregada, calcula os indicadores completos
             if st.session_state.base_sistema is not None:
                 total_itens_base = len(st.session_state.base_sistema)
                 itens_contados_unicos = df_c['cod_produto'].unique() if not df_c.empty else []
                 total_contados = len(itens_contados_unicos)
                 total_faltantes_tab = max(0, total_itens_base - total_contados)
                 
-                # Cálculo de acuracidade em tempo real do lote atual
                 total_divergentes = len(df_c[df_c['diferenca'] != 0]) if not df_c.empty else 0
                 total_auditados_lote = len(df_c) if not df_c.empty else 0
                 
                 if total_auditados_lote > 0:
                     taxa_acuracidade = ((total_auditados_lote - total_divergentes) / total_auditados_lote) * 100
-                else:
-                    taxa_acuracidade = 100.0
+            else:
+                # Se não houver base, apenas conta os registros da tabela de contagens atuais
+                total_contados = len(df_c['cod_produto'].unique()) if not df_c.empty else 0
 
-                def formatar_acuracidade_html(porcentagem):
-                    if porcentagem == 100.0:
-                        return f"<span style='color:green; font-weight:bold;'>🟢 {porcentagem:.1f}% (Acuracidade Perfeita)</span>"
-                    elif porcentagem >= 95.0:
-                        return f"<span style='color:#d4ac0d; font-weight:bold;'>🟡 {porcentagem:.1f}% (Dentro da Tolerância)</span>"
-                    else:
-                        return f"<span style='color:red; font-weight:bold;'>🔴 {porcentagem:.1f}% (Atenção: Nível Crítico)</span>"
-
-                # Renderizar métricas superiores ampliadas
-                col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-                col_m1.metric("📋 Total Mapeados", total_itens_base)
-                col_m2.metric("✅ Já Contabilizados", total_contados)
-                col_m3.metric("⏳ Itens Pendentes", total_faltantes_tab)
-                with col_m4:
-                    st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:10px; margin-bottom:0px; border-left: 5px solid #2980b9;"><div class="bloco-titulo">📈 ACURACIDADE DO LOTE</div><div class="bloco-valor" style="font-size:20px; margin-top:5px;">{formatar_acuracidade_html(taxa_acuracidade)}</div></div>', unsafe_allow_html=True)
-                
-                # --- EXIBIÇÃO DE ITENS DIVERGENTES EM TEMPO REAL ---
-                st.markdown("---")
+            # 3. Renderizar métricas superiores (Sempre visível)
+            col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+            col_m1.metric("📋 Total Mapeados", total_itens_base if st.session_state.base_sistema is not None else "Carregue a Base")
+            col_m2.metric("✅ Já Contabilizados", total_contados)
+            col_m3.metric("⏳ Itens Pendentes", total_faltantes_tab if st.session_state.base_sistema is not None else "Carregue a Base")
+            with col_m4:
+                st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:10px; margin-bottom:0px; border-left: 5px solid #2980b9;"><div class="bloco-titulo">📈 ACURACIDADE DO LOTE</div><div class="bloco-valor" style="font-size:20px; margin-top:5px;">{formatar_acuracidade_html(taxa_acuracidade)}</div></div>', unsafe_allow_html=True)
+            
+            # 4. Exibição de itens divergentes em tempo real
+            st.markdown("---")
+            if not df_c.empty:
                 df_divergentes_realtime = df_c[df_c['diferenca'] != 0].copy()
                 if not df_divergentes_realtime.empty:
                     st.markdown("### 🚨 Itens com Divergência de Saldo Detectada (Aguardando Correção)")
@@ -461,24 +472,26 @@ else:
                     )
                 else:
                     st.success("🎉 **Excelente!** Nenhum erro ou divergência de saldo foi detectado nas contagens deste lote.")
+            else:
+                st.info("💡 Nenhuma contagem realizada para este lote ainda.")
 
+            # 5. Lista de Pendentes (Caso a base exista)
+            if st.session_state.base_sistema is not None and total_faltantes_tab > 0:
+                st.markdown("---")
+                st.error(f"⚠️ **Atenção:** Ainda restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
                 codigos_base = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().tolist()
-                codigos_contados = [str(x).upper().strip() for x in itens_contados_unicos]
+                codigos_contados = [str(x).upper().strip() for x in df_c['cod_produto'].unique()] if not df_c.empty else []
                 codigos_faltantes = [c for c in codigos_base if c not in codigos_contados]
                 
-                st.markdown("---")
-                if total_faltantes_tab > 0:
-                    st.error(f"⚠️ **Atenção:** Ainda restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
-                    df_faltantes_exibir = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().isin(codigos_faltantes)]
-                    st.write("### 📋 Lista de Itens Faltantes para Concluir:")
-                    st.dataframe(df_faltantes_exibir[[c_cod, c_desc, c_loc]], use_container_width=True, hide_index=True)
-                
-                if inventario_selected_obj is not None and inventario_selected_obj['status'] != 'Aberto':
-                    st.info("🔒 **Status do Lote:** Este inventário encontra-se **Fechado/Finalizado**. As contagens e dados acima são apenas para consulta.")
+                df_faltantes_exibir = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().isin(codigos_faltantes)]
+                st.write("### 📋 Lista de Itens Faltantes para Concluir:")
+                st.dataframe(df_faltantes_exibir[[c_cod, c_desc, c_loc]], use_container_width=True, hide_index=True)
+            
+            if inventario_selected_obj is not None and inventario_selected_obj['status'] != 'Aberto':
+                st.info("🔒 **Status do Lote:** Este inventário encontra-se **Fechado/Finalizado**.")
             
             st.write("### 📑 Histórico de Lançamentos Registrados")
             st.dataframe(df_c.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
-        else: st.info("Nenhum inventário selecionado.")
 
     # 📄 ABA 3: BASE DE ESTOQUE
     with abas_gui[2]:
