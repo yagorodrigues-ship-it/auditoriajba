@@ -313,7 +313,7 @@ if not st.session_state.logged_in:
                     id_limpo = identificador.strip()
                     doc_limpo = limpar_documento(id_limpo)
                     cursor = conn.cursor()
-                    cursor.execute("SELECT nome, unidade FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_limpo, doc_limpo, senha, unity_login := unity_login if 'unity_login' in locals() else unidade_login))
+                    cursor.execute("SELECT nome, unidade FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_limpo, doc_limpo, senha, unidade_login))
                     user = cursor.fetchone()
                     if user:
                         st.session_state.logged_in = True
@@ -353,7 +353,7 @@ if not st.session_state.logged_in:
                     else:
                         try:
                             cursor = conn.cursor()
-                            cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade) VALUES (?, ?, ?, ?, ?)", (novo_nome.strip(), cpf_l, novo_email.strip(), nova_senha, unity_cadastro := unity_cadastro if 'unity_cadastro' in locals() else unidade_cadastro))
+                            cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade) VALUES (?, ?, ?, ?, ?)", (novo_nome.strip(), cpf_l, novo_email.strip(), nova_senha, unidade_cadastro))
                             conn.commit()
                             st.success("✅ Cadastrado com sucesso!")
                             st.session_state.tela_acesso = "login"
@@ -526,8 +526,8 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    # Determinar abas disponíveis (Inclui aba de gestão se for você)
-    lista_abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho"]
+    # Determinar abas disponíveis
+    lista_abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque", "🏆 Desempenho e Prazos"]
     if eh_supervisor:
         lista_abas.append("⚙️ Gestão de Usuários")
         
@@ -718,44 +718,127 @@ else:
             st.subheader("📄 Espelho Base de Saldo")
             st.dataframe(st.session_state.base_sistema, use_container_width=True)
 
-    # --- ABA 7: DESEMPENHO ---
+    # --- ABA 7: DESEMPENHO E PRAZOS (COMPLETAMENTE REESTRUTURADA E AUTOMATIZADA) ---
     with abas_render[6]:
-        st.title("🏆 Desempenho e Prazos")
-        df_ultimas_contagens = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as ultima_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
-        st.dataframe(df_ultimas_contagens, use_container_width=True)
+        st.title("🏆 Desempenho e Prazos por Estoque")
+        
+        # Mapeamento estático e estruturado dos 36 Almoxarifados / Estoques fornecidos
+        lista_estoques_fixa = [
+            {"id": "1077", "desc": "JBA - CLASSE D"}, {"id": "1078", "desc": "JBA - COPA E COZINHA"},
+            {"id": "1080", "desc": "JBA - DADOS - CLIENTE"}, {"id": "1082", "desc": "JBA - VIVO VITA - CLIENTE"},
+            {"id": "1084", "desc": "JBA - EPI-EPC"}, {"id": "1086", "desc": "JBA - EQUIPAMENTOS"},
+            {"id": "1088", "desc": "JBA - FERRAMENTAL"}, {"id": "1089", "desc": "JBA - KIT FERRAMENTAL CONTRATACOES"},
+            {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
+            {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
+            {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
+            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
+            {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
+            {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
+            {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
+            {"id": "2185", "desc": "JBA - PROPRIO FATURA B PLANTA EXTERNA - BDI"}, {"id": "2188", "desc": "1071 - IMPLANTACAO JBA CLIENTE RESERVADO"},
+            {"id": "2189", "desc": "JBA - DEFEITO"}, {"id": "2190", "desc": "JBA - DEPARTAMENTO T.I"},
+            {"id": "2194", "desc": "JBA - KITS FERRAMENTAL - DEVOLUCAO"}, {"id": "2197", "desc": "JBA - EQUIPAMENTOS TI"},
+            {"id": "2641", "desc": "1259 - IMPLANTACAO JBA - MATERIAL REUTILIZACAO"}, {"id": "2643", "desc": "1724 - MANUTENCAO JBA - MATERIAL REUTILIZACAO"},
+            {"id": "2725", "desc": "JBA - RESERVA TIM"}, {"id": "2983", "desc": "JBA - FORNECEDORES P/ MANUTENCAO - RECARGA"},
+            {"id": "3193", "desc": "JBA - PROPRIO MATERIAL REAPROVEITAVEL"}, {"id": "3395", "desc": "LPA - FTTX - CLIENTE"},
+            {"id": "3484", "desc": "JBA - CELULARES DEFEITO"}, {"id": "3546", "desc": "JBA - CELULARES"}
+        ]
+        
+        # Consultar no banco a última data em que cada ID de estoque foi lançado por um almoxarife
+        df_ultimas_contagens = pd.read_sql_query("""
+            SELECT id_estoque, MAX(data_hora) as ultima_data 
+            FROM contagens 
+            WHERE unidade = ? 
+            GROUP BY id_estoque
+        """, conn, params=(st.session_state.unidade_selecionada,))
+        
+        mapa_datas = dict(zip(df_ultimas_contagens['id_estoque'].astype(str).str.strip(), df_ultimas_contagens['ultima_data']))
+        
+        hoje_dt = datetime.datetime.now()
+        linhas_planilha_desempenho = []
+        
+        # Contadores de Resumo para os KPIs
+        bom_count, auditar_count, criticos_count = 0, 0, 0
+        
+        for est in lista_estoques_fixa:
+            est_id = est["id"]
+            est_desc = est["desc"]
+            
+            ultima_data_str = mapa_datas.get(est_id, None)
+            
+            if ultima_data_str:
+                try:
+                    dt_contagem = datetime.datetime.strptime(ultima_data_str, "%Y-%m-%d %H:%M:%S")
+                    dias_passados = (hoje_dt - dt_contagem).days
+                    data_formatada = dt_contagem.strftime("%d/%m/%Y %H:%M")
+                except:
+                    dias_passados = 999
+                    data_formatada = "Sem Histórico Válido"
+            else:
+                dias_passados = 999
+                data_formatada = "Nunca Contabilizado"
+                
+            # Regras de Criticidade
+            if dias_passados <= 7:
+                status_final = "🟢 Bom"
+                bom_count += 1
+            elif dias_passados <= 14:
+                status_final = "🟡 Precisa contar"
+                auditar_count += 1
+            else:
+                status_final = "🔴 Crítico"
+                criticos_count += 1
+                
+            linhas_planilha_desempenho.append({
+                "Id. Estoque Físico": est_id,
+                "Descrição do Estoque Físico": est_desc,
+                "Última Contagem Lançada": data_formatada,
+                "Dias sem Contabilizar": dias_passados if dias_passados != 999 else "—",
+                "Status": status_final
+            })
+            
+        df_desempenho_final = pd.DataFrame(linhas_planilha_desempenho)
+        
+        # Renderização dos Cards Resumos (KPIs) no Topo
+        k1, k2, k3 = st.columns(3)
+        with k1:
+            st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🟢 EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
+        with k2:
+            st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #f1c40f;"><div class="bloco-titulo">🟡 PRECISA CONTAR</div><div class="bloco-valor" style="color: #f39c12;">{auditar_count}</div></div>', unsafe_allow_html=True)
+        with k3:
+            st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
+            
+        st.write("")
+        st.markdown("### 📊 Planilha Temporal Automatizada de Inventários")
+        # Exibe a planilha de controle integrada e automatizada na tela
+        st.dataframe(df_desempenho_final, use_container_width=True, hide_index=True)
+        
+        # Gráfico de produtividade mantido na base da aba
+        st.markdown("---")
+        st.write("### 🏆 Lançamentos Totais por Operador")
+        df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(id) as [Lançamentos Feitos] FROM contagens WHERE unidade = ? GROUP BY operador", conn, params=(st.session_state.unidade_selecionada,))
+        if not df_ops.empty:
+            st.bar_chart(data=df_ops, x='Operador', y='Lançamentos Feitos', color="#d35400")
 
     # --- ABA NOVA EXCLUSIVA PARA O YAGO: GESTÃO DE LOGINS ---
     if eh_supervisor:
         with abas_render[7]:
             st.title("⚙️ Painel de Controle e Gestão de Usuários")
-            st.info("💡 Como Administrador Master, aqui você visualiza todas as contas criadas em todas as unidades e pode alterar suas credenciais ou promovê-los.")
-            
-            # Trazer todos os logins do sistema
             df_usuarios_all = pd.read_sql_query("SELECT id, nome, cpf, email, senha, unidade FROM usuarios ORDER BY unidade, nome", conn)
-            st.write("### 👥 Todos os Usuários Cadastrados")
             st.dataframe(df_usuarios_all, use_container_width=True, hide_index=True)
             
             st.markdown("---")
             st.write("### 🛠️ Alterar Dados e Permissões")
-            
             with st.form("form_edit_user"):
                 usuario_alvo_id = st.selectbox("Escolha o usuário para alterar", df_usuarios_all['id'].tolist(), format_func=lambda x: f"ID {x} - {df_usuarios_all[df_usuarios_all['id']==x]['nome'].values[0]} ({df_usuarios_all[df_usuarios_all['id']==x]['unidade'].values[0]})")
-                
-                # Resgatar dados atuais do usuário selecionado para preencher o formulário
                 u_row = df_usuarios_all[df_usuarios_all['id'] == usuario_alvo_id].iloc[0]
-                
-                st.write(f"✏️ **Modificando:** {u_row['nome']} | CPF: {u_row['cpf']}")
-                novo_nome_user = st.text_input("Nome Completo (Inclua a palavra 'Supervisor' ou 'Admin' no nome se quiser torná-lo ADM)", value=u_row['nome'])
+                novo_nome_user = st.text_input("Nome Completo", value=u_row['nome'])
                 nova_senha_user = st.text_input("Nova Senha de Acesso", value=u_row['senha'])
                 nova_unid_user = st.selectbox("Mudar Unidade / Localidade", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"], index=["JURUBATUBA", "JUNDIAI", "CUBATÃO"].index(u_row['unidade']))
                 
                 if st.form_submit_button("💾 Salvar Alterações Definitivas", type="primary"):
                     cursor = conn.cursor()
-                    cursor.execute("""
-                        UPDATE usuarios 
-                        SET nome = ?, senha = ?, unidade = ? 
-                        WHERE id = ?
-                    """, (novo_nome_user.strip(), nova_senha_user.strip(), nova_unid_user, usuario_alvo_id))
+                    cursor.execute("UPDATE usuarios SET nome = ?, senha = ?, unidade = ? WHERE id = ?", (novo_nome_user.strip(), nova_senha_user.strip(), nova_unid_user, usuario_alvo_id))
                     conn.commit()
                     st.success("✅ Usuário atualizado com sucesso no banco de dados!")
                     st.rerun()
