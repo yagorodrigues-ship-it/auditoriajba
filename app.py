@@ -231,7 +231,7 @@ else:
 
     # --- MAPEAMENTO DE COLUNAS DA BASE ---
     c_cod, c_desc, c_un, c_est, c_qtd, c_loc = "", "", "", "", "", ""
-    possui_coluna_lote = False
+    possui_coluna_ativo_real = False
     
     if st.session_state.base_sistema is not None:
         c_cod = encontrar_coluna(st.session_state.base_sistema, ['códproduto', 'codproduto', 'codigo', 'cod'], 0)
@@ -241,12 +241,8 @@ else:
         c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
         c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
         
-        # Validação inteligente das colunas de Lote solicitadas
-        colunas_lote_alvo = ['lote', 'situaçãolote', 'lotefornecedoraux', 'lotefornecedor']
-        possui_coluna_lote = any(
-            any(alvo in str(col).lower().replace(" ", "").replace("ã", "a") for alvo in colunas_lote_alvo)
-            for col in st.session_state.base_sistema.columns
-        )
+        # Só considera se a coluna contiver EXATAMENTE "ativo" (ignorando maiúsculas/minúsculas)
+        possui_coluna_ativo_real = any(str(col).strip().upper() == "ATIVO" for col in st.session_state.base_sistema.columns)
 
     # INTERFACE LATERAL (SIDEBAR)
     with st.sidebar:
@@ -407,17 +403,21 @@ else:
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
                             
-                            # Condicional dinâmica: Exibe o campo como opcional apenas se houver coluna de lote na base
+                            # Condicional dinâmica: Só exibe e exige se for rigorosamente a coluna "ATIVO"
                             val_ativo = ""
-                            if possui_coluna_lote:
-                                val_ativo = st.text_input("🔢 Número do Ativo / Lote (Opcional)")
+                            if possui_coluna_ativo_real:
+                                val_ativo = st.text_input("🔢 Número do Ativo (OBRIGATÓRIO)")
                                 
                             obs = st.text_input("Observação")
                             
                             if st.form_submit_button("Confirmar Lançamento", type="primary"):
                                 cursor = conn.cursor()
                                 
-                                # --- VALIDAÇÃO SIMPLIFICADA SEM TRANCAR SE ESTIVER DUPLICADO ---
+                                # --- VALIDAÇÕES DE SEGURANÇA ---
+                                if possui_coluna_ativo_real and not val_ativo.strip():
+                                    st.error("❌ Erro: O campo 'Número do Ativo' é obrigatório para as planilhas desta categoria!")
+                                    st.stop()
+                                    
                                 if not is_fluxo_recontagem:
                                     cursor.execute("""
                                         SELECT COUNT(*) FROM contagens 
@@ -548,7 +548,7 @@ else:
                 cod_chave = str(linha_cod).upper().strip()
                 if cod_chave in map_operadores:
                     rec_status = f" (2ª Contagem)" if map_recont.get(cod_chave) == 'Realizada' else ""
-                    return f"🟩 Contado ({map_quantidades[cod_chave]}) por {map_operadores[cod_chave]}{rec_status}"
+                    return f"🟩 Contado ({map_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}{rec_status}"
                 return "🟥 Não Contado"
             
             df_base_realtime = st.session_state.base_sistema.copy()
@@ -656,7 +656,7 @@ else:
         k1, k2, k3 = st.columns(3)
         with k1: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🟢 EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
         with k2: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #f1c40f;"><div class="bloco-titulo">🟡 PRECISA CONTAR</div><div class="bloco-valor" style="color: #f39c12;">{auditar_count}</div></div>', unsafe_allow_html=True)
-        with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
+        with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #e74c3c;">{criticos_count}</div></div>', unsafe_allow_html=True)
         if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
 
     # 📈 ABA 6: ACURACIDADE ESTOQUE
