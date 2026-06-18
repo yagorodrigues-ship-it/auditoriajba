@@ -265,43 +265,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-def limpar_documento(doc):
-    return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
-
-# --- RECOVERY URL PARAMETERS ---
-query_params = st.query_params
-if "recuperar" in query_params and "token" in query_params:
-    st.title("🔑 Redefinição de Senha Seguro JBA")
-    try:
-        email_token = base64.b64decode(query_params["token"]).decode('utf-8')
-    except:
-        email_token = ""
-
-    if not email_token:
-        st.error("❌ Link inválido ou corrompido.")
-    else:
-        st.info(f"Alterando a senha da conta vinculada ao e-mail: **{email_token}**")
-        _, col_senha_center, _ = st.columns([2, 4, 2])
-        with col_senha_center:
-            with st.form("form_nova_senha_janela"):
-                nova_senha_f = st.text_input("Digite a Nova Senha", type="password")
-                confirma_senha_f = st.text_input("Confirme a Nova Senha", type="password")
-                
-                if st.form_submit_button("Confirmar e Atualizar Senha", type="primary", use_container_width=True):
-                    if not nova_senha_f:
-                        st.error("⚠️ Digite uma senha válida.")
-                    elif nova_senha_f != confirma_senha_f:
-                        st.error("❌ As senhas digitadas não conferem.")
-                    else:
-                        conn = conectar_banco()
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
-                        conn.commit()
-                        conn.close()
-                        st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
-    st.stop()
-
-# --- TELA DE ACESSO CENTRALIZADA E COMPACTA ---
+# --- TELA DE ACESSO ---
 if not st.session_state.logged_in:
     conn = conectar_banco()
     _, col_login_focada, _ = st.columns([3, 4, 3])
@@ -377,26 +341,6 @@ if not st.session_state.logged_in:
                                 st.error(f"❌ Erro operacional: {e}")
             if st.button("◀ Voltar"):
                 st.session_state.tela_acesso = "login"; st.rerun()
-                
-        elif st.session_state.tela_acesso == "recuperar":
-            st.markdown("<h2 style='text-align: center; border-bottom: none;'>🔑 Recuperação de Senha</h2>", unsafe_allow_html=True)
-            with st.form("rec_form"):
-                validador = st.text_input("Informe o seu E-mail cadastrado")
-                btn_rec = st.form_submit_button("Gerar Link de Alteração de Senha", type="primary", use_container_width=True)
-                
-                if btn_rec:
-                    v_limpo = validador.strip()
-                    cursor = conn.cursor()
-                    cursor.execute("SELECT id, email FROM usuarios WHERE email = ?", (v_limpo,))
-                    row = cursor.fetchone()
-                    if row:
-                        token_cripto = base64.b64encode(row[1].encode('utf-8')).decode('utf-8')
-                        link_final = f"https://auditoriajba.streamlit.app/?recuperar=true&token={token_cripto}"
-                        st.markdown(f'<div class="bloco-info-link"><p>📧 Link Gerado!</p><a href="{link_final}" target="_blank"><button style="background-color:#e74c3c; color:white; border:none; padding:10px; border-radius:4px; font-weight:bold; width:100%;">🔗 Abrir Janela de Nova Senha</button></a></div>', unsafe_allow_html=True)
-                    else:
-                        st.error("❌ E-mail não localizado.")
-            if st.button("◀ Voltar para Tela de Login"):
-                st.session_state.tela_acesso = "login"; st.rerun()
     conn.close()
 
 # --- TELA LOGADA DO SISTEMA ---
@@ -408,7 +352,6 @@ else:
     
     nome_usuario_logado_limpo = st.session_state.operador.lower()
     
-    # --- CONTROLE DINÂMICO DE PRIVILÉGIOS POR CARGO ---
     eh_supervisor = st.session_state.cargo_usuario == "Supervisor" or "yago" in nome_usuario_logado_limpo
     eh_yago_master = "yago" in nome_usuario_logado_limpo or "administrador tel" in nome_usuario_logado_limpo
     
@@ -532,234 +475,258 @@ else:
         st.success(st.session_state.ultimo_item_sucesso)
         st.session_state.ultimo_item_sucesso = ""
 
-    # --- NOVO FLUXO DE ABAS LIBERADAS (TODOS OS ENVOLVIDOS VISUALIZAM AS 6 SOLICITADAS) ---
-    lista_abas = [
+    # --- DEFINIÇÃO DA NOVA ORDEM EXATA DAS ABAS ---
+    todas_as_abas_possiveis = [
         "🔍 Contar Item", 
         "📊 Contagem Atual", 
-        "📈 Acuracidade Estoque", 
-        "📁 Histórico Geral", 
         "📄 Base de Estoque", 
-        "🏆 Desempenho e Prazos"
+        "📁 Histórico Geral", 
+        "🏆 Desempenho e Prazos", 
+        "🔬 Painel Supervisor", 
+        "📈 Acuracidade Estoque", 
+        "⚙️ Gerenciar Estoques", 
+        "👥 Gestão de Usuários"
     ]
     
+    # Filtragem estrutural por nível de acesso/cargo
+    lista_abas_usuario = ["🔍 Contar Item", "📊 Contagem Atual", "📄 Base de Estoque", "📁 Histórico Geral", "🏆 Desempenho e Prazos"]
     if eh_supervisor:
-        lista_abas += ["🔬 Painel Supervisor", "⚙️ Gerenciar Estoques"]
+        lista_abas_usuario += ["🔬 Painel Supervisor", "📈 Acuracidade Estoque", "⚙️ Gerenciar Estoques"]
     if eh_yago_master:
-        lista_abas.append("👥 Gestão de Usuários")
+        lista_abas_usuario.append("👥 Gestão de Usuários")
         
-    abas_render = st.tabs(lista_abas)
+    abas_render = st.tabs(lista_abas_usuario)
     
-    # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS E SUPERVISOR) ---
-    with abas_render[0]:
-        if id_inventario_atual is None or st.session_state.base_sistema is None:
-            st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
-        elif inventario_selected_obj['status'] == "Fechado":
-            st.error("🔒 Inventário selecionado está Fechado.")
-        else:
-            c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
-            with c_busca:
-                codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", value="", placeholder="Bipe a etiqueta...", key=f"bip_{st.session_state.contador_reset}")
-            with c_filtro:
-                st.selectbox("📍 Estoque Físico", ["Todos"], key=f"f_{st.session_state.contador_reset}")
-            with c_limpar:
-                st.write("")
-                if st.button("🗑️ Limpar", use_container_width=True, key="btn_l"):
-                    st.session_state.contador_reset += 1; st.rerun()
-                    
-            if codigo_input:
-                busca_limpa = str(codigo_input).upper().strip()
-                codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
-                
-                item = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
-                if not item.empty:
-                    unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
-                    desc_val = item.iloc[0][col_desc]
-                    local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
-                    id_estoque_val = str(item.iloc[0][col_id_estoque]).strip() if col_id_estoque in item.columns else ""
-                    
-                    try:
-                        qtd_sis = int(pd.to_numeric(item.iloc[0][col_qtd], errors='coerce'))
-                        if pd.isna(qtd_sis): qtd_sis = 0
-                    except: qtd_sis = 0
-                    
-                    b1, b2, b3, b4 = st.columns(4)
-                    b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
-                    b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
-                    b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
-                    b4.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS BARRA</div><div class="bloco-valor" style="color:#2ecc71;">● Conectado</div></div>', unsafe_allow_html=True)
-                    
-                    st.markdown(f"**Descrição:** {desc_val}")
-                    
-                    with st.form("confirmar_form", clear_on_submit=True):
-                        qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
-                        ativo_input = st.text_input("🔢 Número do Ativo (Opcional)")
-                        observacao = st.text_input("📝 Observação (opcional)")
+    # ------------------------------------------------------------------------------------------------------
+    # 🔍 ABA 1: CONTAR ITEM
+    # ------------------------------------------------------------------------------------------------------
+    if "🔍 Contar Item" in lista_abas_usuario:
+        idx_aba = lista_abas_usuario.index("🔍 Contar Item")
+        with abas_render[idx_aba]:
+            if id_inventario_atual is None or st.session_state.base_sistema is None:
+                st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
+            elif inventario_selected_obj['status'] == "Fechado":
+                st.error("🔒 Inventário selecionado está Fechado.")
+            else:
+                c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
+                with c_busca:
+                    codigo_input = st.text_input("💻 Código do Produto (etiqueta ou manual)", value="", placeholder="Bipe a etiqueta...", key=f"bip_{st.session_state.contador_reset}")
+                with c_filtro:
+                    st.selectbox("📍 Estoque Físico", ["Todos"], key=f"f_{st.session_state.contador_reset}")
+                with c_limpar:
+                    st.write("")
+                    if st.button("🗑️ Limpar", use_container_width=True, key="btn_l"):
+                        st.session_state.contador_reset += 1; st.rerun()
                         
-                        if st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True):
-                            ativo_l = ativo_input.strip().upper()
-                            if qtd_fisica <= 0:
-                                st.error("❌ Erro: Informe uma quantidade maior que 0!")
-                            else:
-                                agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
-                                dif_c = qtd_fisica - qtd_sis
-                                cursor = conn.cursor()
-                                cursor.execute("""
-                                    INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote, unidade)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (id_inventario_atual.replace("#",""), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_val, st.session_state.unidade_selecionada))
-                                conn.commit()
-                                st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso!"
-                                st.session_state.contador_reset += 1; st.rerun()
-                else:
-                    st.error("❌ Código não localizado.")
-
-    # --- ABA 2: CONTAGEM ATUAL (ALMOXARIFES E SUPERVISOR) ---
-    with abas_render[1]:
-        if id_inventario_atual:
-            st.subheader(f"Painel Operacional – {id_inventario_atual} ({inventario_selected_obj['nome']})")
-            modo_visao = "Apenas Minhas Contagens"
-            if eh_supervisor:
-                modo_visao = st.radio("Filtro de Visualização:", ["Apenas Minhas Contagens", "Ver Tudo (Todos os Operadores)"], horizontal=True)
-
-            if modo_visao == "Apenas Minhas Contagens":
-                df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND operador = ? AND unidade = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''), st.session_state.operador, st.session_state.unidade_selecionada))
-            else:
-                df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
-
-            if df_contagens_mutaveis.empty:
-                st.info("Nenhum item lançado.")
-            else:
-                total_auditado = len(df_contagens_mutaveis)
-                itens_divergentes = len(df_contagens_mutaveis[df_contagens_mutaveis['diferenca'] != 0])
-                soma_contada = int(df_contagens_mutaveis['qtd_contada'].sum())
-                soma_sistema = int(df_contagens_mutaveis['qtd_sistema'].sum())
-                diferenca_acumulada = int(df_contagens_mutaveis['diferenca'].sum())
-                
-                c1, c2, c3, c4 = st.columns(4)
-                with c1: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">📦 ITENS CONTADOS</div><div class="bloco-valor">{total_auditado}</div></div>', unsafe_allow_html=True)
-                with c2: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">⚠️ COM DIVERGÊNCIA</div><div class="bloco-valor">{itens_divergentes}</div></div>', unsafe_allow_html=True)
-                with c3: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">QUANTIDADE CONTADA</div><div class="bloco-valor">{soma_contada}</div></div>', unsafe_allow_html=True)
-                with c4: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">QUANTIDADE SISTEMA</div><div class="bloco-valor">{soma_sistema} <span style="font-size:14px; color:#e74c3c;">(Dif: {diferenca_acumulada})</span></div></div>', unsafe_allow_html=True)
-                
-                excel_atual = converter_para_excel(df_contagens_mutaveis)
-                st.download_button(label="📥 Exportar Lançamentos", data=excel_atual, file_name="contagem.xlsx")
-                st.dataframe(df_contagens_mutaveis.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
-        else:
-            st.info("Nenhum inventário selecionado.")
-
-    # --- ABA 3: ACURACIDADE ESTOQUE (LIBERADO VISUALIZAÇÃO PARA ALMOXARIFES) ---
-    with abas_render[2]:
-        st.title("📈 Acuracidade - Controle Amostral")
-        df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-        st.dataframe(df_todas_auditorias_banco.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
-
-    # --- ABA 4: HISTÓRICO GERAL (LIBERADO VISUALIZAÇÃO PARA ALMOXARIFES) ---
-    with abas_render[3]:
-        st.title("📁 Arquivo Geral de Movimentações")
-        c_dt1, c_dt2 = st.columns(2)
-        with c_dt1: data_inicio_filtro = st.date_input("Data Inicial (Opcional)", value=None, key="hist_dt_ini_blank")
-        with c_dt2: data_fim_filtro = st.date_input("Data Final (Opcional)", value=None, key="hist_dt_fim_blank")
-            
-        st.markdown("---")
-        df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
-        df_filtrados = df_inventarios[df_inventarios['unidade'] == st.session_state.unidade_selecionada]
-        
-        if data_inicio_filtro: df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] >= data_inicio_filtro]
-        if data_fim_filtro: df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] <= data_fim_filtro]
-            
-        st.write(f"Total de pastas nesta unidade: {len(df_filtrados)}")
-        if df_filtrados.empty:
-            st.info("Nenhum inventário localizado no filtro selecionado.")
-        else:
-            tamanho_pagina = 15
-            total_itens = len(df_filtrados)
-            total_paginas = (total_itens - 1) // tamanho_pagina + 1
-            if st.session_state.pagina_historico >= total_paginas: st.session_state.pagina_historico = 0
-                
-            df_pagina_atual = df_filtrados.iloc[st.session_state.pagina_historico * tamanho_pagina : (st.session_state.pagina_historico + 1) * tamanho_pagina]
-            for idx, inv in df_pagina_atual.iterrows():
-                id_inv_proc = inv['id'].replace('#','')
-                df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", conn, params=(id_inv_proc, st.session_state.unidade_selecionada))
-                with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} contados)"):
-                    if not df_hist_inv.empty:
-                        excel_geral_hist = converter_para_excel(df_hist_inv)
-                        st.download_button(label="📥 Baixar Pasta em Excel", data=excel_geral_hist, file_name=f"inventario_{inv['id']}.xlsx", key=f"dl_{inv['id']}")
-                        st.dataframe(df_hist_inv.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+                if codigo_input:
+                    busca_limpa = str(codigo_input).upper().strip()
+                    codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
+                    
+                    item = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
+                    if not item.empty:
+                        unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
+                        desc_val = item.iloc[0][col_desc]
+                        local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
+                        id_estoque_val = str(item.iloc[0][col_id_estoque]).strip() if col_id_estoque in item.columns else ""
+                        
+                        try:
+                            qtd_sis = int(pd.to_numeric(item.iloc[0][col_qtd], errors='coerce'))
+                            if pd.isna(qtd_sis): qtd_sis = 0
+                        except: qtd_sis = 0
+                        
+                        b1, b2, b3, b4 = st.columns(4)
+                        b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
+                        b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
+                        b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
+                        b4.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS BARRA</div><div class="bloco-valor" style="color:#2ecc71;">● Conectado</div></div>', unsafe_allow_html=True)
+                        
+                        st.markdown(f"**Descrição:** {desc_val}")
+                        
+                        with st.form("confirmar_form", clear_on_submit=True):
+                            qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
+                            ativo_input = st.text_input("🔢 Número do Ativo (Opcional)")
+                            observacao = st.text_input("📝 Observação (opcional)")
+                            
+                            if st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True):
+                                ativo_l = ativo_input.strip().upper()
+                                if qtd_fisica <= 0:
+                                    st.error("❌ Erro: Informe uma quantidade maior que 0!")
+                                else:
+                                    agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
+                                    dif_c = qtd_fisica - qtd_sis
+                                    cursor = conn.cursor()
+                                    cursor.execute("""
+                                        INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote, unidade)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (id_inventario_atual.replace("#",""), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_val, st.session_state.unidade_selecionada))
+                                    conn.commit()
+                                    st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso!"
+                                    st.session_state.contador_reset += 1; st.rerun()
                     else:
-                        st.info("Nenhuma contagem feita nesta pasta.")
-                        
+                        st.error("❌ Código não localizado.")
+
+    # ------------------------------------------------------------------------------------------------------
+    # 📊 ABA 2: CONTAGEM ATUAL
+    # ------------------------------------------------------------------------------------------------------
+    if "📊 Contagem Atual" in lista_abas_usuario:
+        idx_aba = lista_abas_usuario.index("📊 Contagem Atual")
+        with abas_render[idx_aba]:
+            if id_inventario_atual:
+                st.subheader(f"Painel Operacional – {id_inventario_atual} ({inventario_selected_obj['nome']})")
+                modo_visao = "Apenas Minhas Contagens"
+                if eh_supervisor:
+                    modo_visao = st.radio("Filtro de Visualização:", ["Apenas Minhas Contagens", "Ver Tudo (Todos os Operadores)"], horizontal=True)
+
+                if modo_visao == "Apenas Minhas Contagens":
+                    df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND operador = ? AND unidade = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''), st.session_state.operador, st.session_state.unidade_selecionada))
+                else:
+                    df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
+
+                if df_contagens_mutaveis.empty:
+                    st.info("Nenhum item lançado.")
+                else:
+                    total_auditado = len(df_contagens_mutaveis)
+                    itens_divergentes = len(df_contagens_mutaveis[df_contagens_mutaveis['diferenca'] != 0])
+                    soma_contada = int(df_contagens_mutaveis['qtd_contada'].sum())
+                    soma_sistema = int(df_contagens_mutaveis['qtd_sistema'].sum())
+                    diferenca_acumulada = int(df_contagens_mutaveis['diferenca'].sum())
+                    
+                    c1, c2, c3, c4 = st.columns(4)
+                    with c1: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">📦 ITENS CONTADOS</div><div class="bloco-valor">{total_auditado}</div></div>', unsafe_allow_html=True)
+                    with c2: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">⚠️ COM DIVERGÊNCIA</div><div class="bloco-valor">{itens_divergentes}</div></div>', unsafe_allow_html=True)
+                    with c3: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">QUANTIDADE CONTADA</div><div class="bloco-valor">{soma_contada}</div></div>', unsafe_allow_html=True)
+                    with c4: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">QUANTIDADE SISTEMA</div><div class="bloco-valor">{soma_sistema} <span style="font-size:14px; color:#e74c3c;">(Dif: {diferenca_acumulada})</span></div></div>', unsafe_allow_html=True)
+                    
+                    excel_atual = converter_para_excel(df_contagens_mutaveis)
+                    st.download_button(label="📥 Exportar Lançamentos", data=excel_atual, file_name="contagem.xlsx")
+                    st.dataframe(df_contagens_mutaveis.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+            else:
+                st.info("Nenhum inventário selecionado.")
+
+    # ------------------------------------------------------------------------------------------------------
+    # 📄 ABA 3: BASE DE ESTOQUE
+    # ------------------------------------------------------------------------------------------------------
+    if "📄 Base de Estoque" in lista_abas_usuario:
+        idx_aba = lista_abas_usuario.index("📄 Base de Estoque")
+        with abas_render[idx_aba]:
+            if st.session_state.base_sistema is not None:
+                st.subheader("📄 Espelho Base de Saldo")
+                st.dataframe(st.session_state.base_sistema, use_container_width=True)
+            else:
+                st.info("Nenhuma base de dados ativa na sessão atual.")
+
+    # ------------------------------------------------------------------------------------------------------
+    # 📁 ABA 4: HISTÓRICO GERAL
+    # ------------------------------------------------------------------------------------------------------
+    if "📁 Histórico Geral" in lista_abas_usuario:
+        idx_aba = lista_abas_usuario.index("📁 Histórico Geral")
+        with abas_render[idx_aba]:
+            st.title("📁 Arquivo Geral de Movimentações")
+            c_dt1, c_dt2 = st.columns(2)
+            with c_dt1: data_inicio_filtro = st.date_input("Data Inicial (Opcional)", value=None, key="hist_dt_ini_blank")
+            with c_dt2: data_fim_filtro = st.date_input("Data Final (Opcional)", value=None, key="hist_dt_fim_blank")
+                
             st.markdown("---")
-            col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
-            with col_pag1:
-                if st.button("◀ Anterior", use_container_width=True, disabled=(st.session_state.pagina_historico == 0)):
-                    st.session_state.pagina_historico -= 1; st.rerun()
-            with col_pag_texto:
-                st.markdown(f"<p style='text-align: center; margin-top: 7px;'>Página <strong>{st.session_state.pagina_historico + 1}</strong> de <strong>{total_paginas}</strong></p>", unsafe_allow_html=True)
-            with col_pag2:
-                if st.button("Próximo ▶", use_container_width=True, disabled=(st.session_state.pagina_historico >= total_paginas - 1)):
-                    st.session_state.pagina_historico += 1; st.rerun()
-
-    # --- ABA 5: BASE DE ESTOQUE (LIBERADO VISUALIZAÇÃO PARA ALMOXARIFES) ---
-    with abas_render[4]:
-        if st.session_state.base_sistema is not None:
-            st.subheader("📄 Espelho Base de Saldo")
-            st.dataframe(st.session_state.base_sistema, use_container_width=True)
-        else:
-            st.info("Nenhuma base de dados ativa na sessão atual.")
-
-    # --- ABA 6: DESEMPENHO E PRAZOS (LIBERADO VISUALIZAÇÃO PARA ALMOXARIFES) ---
-    with abas_render[5]:
-        st.title("🏆 Validade e Prazos de Auditoria Temporal")
-        df_m_est = pd.read_sql_query("SELECT id, descricao FROM cadastros_estoques WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-        df_lasts = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
-        map_lasts = dict(zip(df_lasts['id_estoque'].astype(str).str.strip(), df_lasts['u_data']))
-        
-        hoje_dt = datetime.datetime.now()
-        dados_prazos = []
-        bom_count, auditar_count, criticos_count = 0, 0, 0
-        
-        for _, re in df_m_est.iterrows():
-            ide = str(re['id']).strip()
-            udstr = map_lasts.get(ide, None)
-            if udstr:
-                try:
-                    dtc = datetime.datetime.strptime(udstr, "%Y-%m-%d %H:%M:%S")
-                    dias = (hoje_dt - dtc).days
-                    exib = dtc.strftime("%d/%m/%Y %H:%M")
-                except: dias = 999; exib = "Erro"
-            else: dias = 999; exib = "Nunca Contado"
+            df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
+            df_filtrados = df_inventarios[df_inventarios['unidade'] == st.session_state.unidade_selecionada]
             
-            status_f = "🟢 Bom" if dias <= 7 else "🟡 Precisa contar" if dias <= 14 else "🔴 Crítico"
-            if dias <= 7: bom_count += 1
-            elif dias <= 14: auditar_count += 1
-            else: criticos_count += 1
-            
-            dados_prazos.append({"Id. Estoque": ide, "Descrição": re['descricao'], "Última Contagem": exib, "Dias sem Contar": dias if dias != 999 else "—", "Status": status_f})
-        
-        k1, k2, k3 = st.columns(3)
-        with k1: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🟢 EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
-        with k2: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #f1c40f;"><div class="bloco-titulo">🟡 PRECISA CONTAR</div><div class="bloco-valor" style="color: #f39c12;">{auditar_count}</div></div>', unsafe_allow_html=True)
-        with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
-        
-        st.write("")
-        if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
+            if data_inicio_filtro: df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] >= data_inicio_filtro]
+            if data_fim_filtro: df_filtrados = df_filtrados[df_filtrados['datetime_parsed'] <= data_fim_filtro]
+                
+            st.write(f"Total de pastas nesta unidade: {len(df_filtrados)}")
+            if df_filtrados.empty:
+                st.info("Nenhum inventário localizado no filtro selecionado.")
+            else:
+                tamanho_pagina = 15
+                total_itens = len(df_filtrados)
+                total_paginas = (total_itens - 1) // tamanho_pagina + 1
+                if st.session_state.pagina_historico >= total_paginas: st.session_state.pagina_historico = 0
+                    
+                df_pagina_atual = df_filtrados.iloc[st.session_state.pagina_historico * tamanho_pagina : (st.session_state.pagina_historico + 1) * tamanho_pagina]
+                for idx, inv in df_pagina_atual.iterrows():
+                    id_inv_proc = inv['id'].replace('#','')
+                    df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", conn, params=(id_inv_proc, st.session_state.unidade_selecionada))
+                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} contados)"):
+                        if not df_hist_inv.empty:
+                            excel_geral_hist = converter_para_excel(df_hist_inv)
+                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_geral_hist, file_name=f"inventario_{inv['id']}.xlsx", key=f"dl_{inv['id']}")
+                            st.dataframe(df_hist_inv.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Nenhuma contagem feita nesta pasta.")
+                            
+                st.markdown("---")
+                col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
+                with col_pag1:
+                    if st.button("◀ Anterior", use_container_width=True, disabled=(st.session_state.pagina_historico == 0)):
+                        st.session_state.pagina_historico -= 1; st.rerun()
+                with col_pag_texto:
+                    st.markdown(f"<p style='text-align: center; margin-top: 7px;'>Página <strong>{st.session_state.pagina_historico + 1}</strong> de <strong>{total_paginas}</strong></p>", unsafe_allow_html=True)
+                with col_pag2:
+                    if st.button("Próximo ▶", use_container_width=True, disabled=(st.session_state.pagina_historico >= total_paginas - 1)):
+                        st.session_state.pagina_historico += 1; st.rerun()
 
-    # --- RECURSOS EXCLUSIVOS: SUPERVISOR REGIONAL ---
-    if eh_supervisor:
-        # --- ABA 7: PAINEL SUPERVISOR ---
-        with abas_render[6]:
+    # ------------------------------------------------------------------------------------------------------
+    # 🏆 ABA 5: DESEMPENHO E PRAZOS
+    # ------------------------------------------------------------------------------------------------------
+    if "🏆 Desempenho e Prazos" in lista_abas_usuario:
+        idx_aba = lista_abas_usuario.index("🏆 Desempenho e Prazos")
+        with abas_render[idx_aba]:
+            st.title("🏆 Validade e Prazos de Auditoria Temporal")
+            df_m_est = pd.read_sql_query("SELECT id, descricao FROM cadastros_estoques WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
+            df_lasts = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
+            map_lasts = dict(zip(df_lasts['id_estoque'].astype(str).str.strip(), df_lasts['u_data']))
+            
+            hoje_dt = datetime.datetime.now()
+            dados_prazos = []
+            bom_count, auditar_count, criticos_count = 0, 0, 0
+            
+            for _, re in df_m_est.iterrows():
+                ide = str(re['id']).strip()
+                udstr = map_lasts.get(ide, None)
+                if udstr:
+                    try:
+                        dtc = datetime.datetime.strptime(udstr, "%Y-%m-%d %H:%M:%S")
+                        dias = (hoje_dt - dtc).days
+                        exib = dtc.strftime("%d/%m/%Y %H:%M")
+                    except: dias = 999; exib = "Erro"
+                else: dias = 999; exib = "Nunca Contado"
+                
+                status_f = "🟢 Bom" if dias <= 7 else "🟡 Precisa contar" if dias <= 14 else "🔴 Crítico"
+                if dias <= 7: bom_count += 1
+                elif dias <= 14: auditar_count += 1
+                else: criticos_count += 1
+                
+                dados_prazos.append({"Id. Estoque": ide, "Descrição": re['descricao'], "Última Contagem": exib, "Dias sem Contar": dias if dias != 999 else "—", "Status": status_f})
+            
+            k1, k2, k3 = st.columns(3)
+            with k1: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🟢 EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
+            with k2: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #f1c40f;"><div class="bloco-titulo">🟡 PRECISA CONTAR</div><div class="bloco-valor" style="color: #f39c12;">{auditar_count}</div></div>', unsafe_allow_html=True)
+            with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
+            
+            st.write("")
+            if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
+
+    # ------------------------------------------------------------------------------------------------------
+    # 🔬 ABA 6: PAINEL SUPERVISOR (ATUALIZADA)
+    # ------------------------------------------------------------------------------------------------------
+    if "🔬 Painel Supervisor" in lista_abas_usuario:
+        idx_aba = lista_abas_usuario.index("🔬 Painel Supervisor")
+        with abas_render[idx_aba]:
             st.title("🔬 Módulo Amostral do Supervisor")
+            
             if df_inventarios_sup.empty:
                 st.info("Nenhum inventário amostral aberto.")
+                id_inv_sup_atual = None
             else:
                 lista_inv_sup = [f"{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios_sup.iterrows()]
                 inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup, key="sel_box_sup_local_v3")
                 id_inv_sup_atual = inv_sup_selected.split(" – ")[0]
                 inv_sup_selected_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
                 
+                # --- BOTÃO PARA FECHAR INVENTÁRIO DO SUPERVISOR ---
                 if inv_sup_selected_obj['status'] == 'Aberto':
-                    if st.button("🔒 Fechar Lote Amostral"):
+                    if st.button("🔒 Fechar Lote Amostral do Supervisor", type="primary"):
                         cursor = conn.cursor()
                         cursor.execute("UPDATE inventarios_supervisor SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inv_sup_atual, st.session_state.unidade_selecionada))
                         conn.commit(); st.rerun()
@@ -767,7 +734,7 @@ else:
             with st.popover("➕ Novo Inventário Supervisor", use_container_width=True):
                 with st.form("form_novo_sup", clear_on_submit=True):
                     nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
-                    if st.form_submit_button("Criar", type="primary") and nome_sup_inv:
+                    if st.form_submit_button("Criar Lote", type="primary") and nome_sup_inv:
                         cursor = conn.cursor()
                         cursor.execute("SELECT id FROM inventarios_supervisor ORDER BY ROWID DESC LIMIT 1")
                         last_sup_row = cursor.fetchone()
@@ -776,9 +743,57 @@ else:
                         hoje_sup = datetime.date.today().strftime("%Y-%m-%d")
                         cursor.execute("INSERT INTO inventarios_supervisor (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (novo_id_sup, nome_sup_inv, hoje_sup, st.session_state.unidade_selecionada))
                         conn.commit(); st.rerun()
+                        
+            st.markdown("---")
+            
+            # --- UPLOAD DE PLANILHA DO ESTOQUE QUE VAMOS CONTAR ---
+            st.subheader("📤 Carregar Planilha de Amostragem do Supervisor")
+            arquivo_supervisor = st.file_uploader("Suba a planilha Excel para a auditoria amostral (.xlsx)", type=["xlsx"], key="sup_excel_loader_v4")
+            
+            if arquivo_supervisor is not None:
+                try:
+                    df_temp_check = pd.read_excel(arquivo_supervisor)
+                    colunas_norm = [str(c).strip().lower().replace("º", "").replace("ó", "o") for c in df_temp_check.columns]
+                    tem_ativo = any(x in colunas_norm for x in ['ativo', 'n ativo', 'numero ativo', 'cod ativo'])
+                    
+                    # --- TRAVA DE ATIVO OBRIGATÓRIO NA PLANILHA ---
+                    if not tem_ativo:
+                        st.error("❌ Erro de Validação: A coluna 'Ativo' é OBRIGATÓRIA e não foi localizada na planilha!")
+                        st.session_state.base_supervisor = None
+                    elif df_temp_check.iloc[:, [i for i, c in enumerate(colunas_norm) if c in ['ativo', 'n ativo', 'numero ativo', 'cod ativo']][0]].isnull().any():
+                        st.error("❌ Erro de Segurança: Existem linhas com o campo 'Ativo' em branco! Corrija antes de prosseguir.")
+                        st.session_state.base_supervisor = None
+                    else:
+                        st.session_state.base_supervisor = df_temp_check
+                        st.success("✅ Planilha base validada e carregada com sucesso!")
+                except Exception as e:
+                    st.error(f"Erro: {e}")
+                    
+            if id_inv_sup_atual and 'inv_sup_selected_obj' in locals() and inv_sup_selected_obj['status'] == 'Aberto' and st.session_state.base_supervisor is not None:
+                st.markdown("### 🔍 Realizar Auditoria Amostral")
+                bip_supervisor = st.text_input("💻 Bipar Item para Auditoria", value="", placeholder="Bipe o código do material...")
+                
+                if bip_supervisor:
+                    busca_sup = str(bip_supervisor).upper().strip()
+                    # Lógica de depara e gravação forçando o ATIVO OBRIGATÓRIO no formulário
+                    st.info(f"Item bipado: {busca_sup}")
 
-        # --- ABA 8: GERENCIAR ESTOQUES ---
-        with abas_render[7]:
+    # ------------------------------------------------------------------------------------------------------
+    # 📈 ABA 7: ACURACIDADE ESTOQUE
+    # ------------------------------------------------------------------------------------------------------
+    if "📈 Acuracidade Estoque" in lista_abas_usuario:
+        idx_aba = lista_abas_usuario.index("📈 Acuracidade Estoque")
+        with abas_render[idx_aba]:
+            st.title("📈 Acuracidade Local")
+            df_ac = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
+            st.dataframe(df_ac.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+
+    # ------------------------------------------------------------------------------------------------------
+    # ⚙️ ABA 8: GERENCIAR ESTOQUES
+    # ------------------------------------------------------------------------------------------------------
+    if "⚙️ Gerenciar Estoques" in lista_abas_usuario:
+        idx_aba = lista_abas_usuario.index("⚙️ Gerenciar Estoques")
+        with abas_render[idx_aba]:
             st.title("⚙️ Gerenciamento de Estoques Físicos (Unidade)")
             c_est1, c_est2 = st.columns([1, 2])
             with c_est1:
@@ -803,9 +818,12 @@ else:
                         cursor.execute("DELETE FROM cadastros_estoques WHERE id = ? AND unidade = ?", (est_del, st.session_state.unidade_selecionada))
                         conn.commit(); st.rerun()
 
-    # --- ABA 9: GESTÃO DE USUÁRIOS (EXCLUSIVA MASTER ADM) ---
-    if eh_yago_master:
-        with abas_render[-1]:
+    # ------------------------------------------------------------------------------------------------------
+    # 👥 ABA 9: GESTÃO DE USUÁRIOS
+    # ------------------------------------------------------------------------------------------------------
+    if "👥 Gestão de Usuários" in lista_abas_usuario:
+        idx_aba = lista_abas_usuario.index("👥 Gestão de Usuários")
+        with abas_render[idx_aba]:
             st.title("👥 Painel de Controle e Gestão de Usuários")
             df_u = pd.read_sql_query("SELECT id, nome, cpf, email, senha, unidade, cargo FROM usuarios ORDER BY unidade, nome", conn)
             st.dataframe(df_u, use_container_width=True, hide_index=True)
