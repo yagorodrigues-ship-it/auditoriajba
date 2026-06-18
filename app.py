@@ -391,36 +391,33 @@ else:
                         c_b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{prod_l}</div></div>', unsafe_allow_html=True)
                         c_b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO / LOCAL</div><div class="bloco-valor" style="font-size:22px;">{row[c_loc]}</div></div>', unsafe_allow_html=True)
                         c_b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{row[c_un]}</div></div>', unsafe_allow_html=True)
-                        c_b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. ESTOQUE</div><div class="bloco-valor">{row[c_est]}</div></div>', unsafe_allow_html=True)
+                        c_b4.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px;"><div class="bloco-titulo">CÓD. ESTOQUE</div><div class="bloco-valor" style="font-size:20px;">{row[c_est]}</div></div>', unsafe_allow_html=True)
                         
                         st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
-
-                        # --- REGRA REQUISITADA: Identifica estritamente se o cabeçalho se chama exatamente "Ativo" ---
-                        exige_ativo_obrigatorio = False
-                        if "ATIVO" in [str(col).upper().strip() for col in st.session_state.base_sistema.columns]:
-                            exige_ativo_obrigatorio = True
 
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
                             
-                            # Exibição visual sutil na tela
-                            if exige_ativo_obrigatorio:
-                                n_ativ = st.text_input("🔢 Número do Ativo (OBRIGATÓRIO)")
-                            else:
-                                n_ativ = st.text_input("🔢 Número do Ativo (Opcional)")
-                                
+                            # Mantém visualmente limpo para o usuário, mas valida de forma estrita no backend
+                            n_ativ = st.text_input("🔢 Número do Ativo (Opcional - Necessário apenas se o item possuir Ativo na planilha)")
                             obs = st.text_input("Observação")
                             
                             if st.form_submit_button("Confirmar Lançamento", type="primary"):
                                 cursor = conn.cursor()
                                 val_ativo_inserido = n_ativ.strip().upper()
                                 
-                                # --- FLUXO DE VALIDAÇÃO DE DUPLICIDADE BLINDADO ---
+                                # --- REVISÃO E BLINDAGEM COMPLETA DA DUPLICIDADE E OBRIGATORIEDADE POR ITEM ---
+                                tem_ativo_na_base = False
+                                if c_atv_b in it.columns and not pd.isna(row[c_atv_b]):
+                                    val_at_linha = str(row[c_atv_b]).strip()
+                                    if val_at_linha and val_at_linha.lower() != "nan" and val_at_linha != "":
+                                        tem_ativo_na_base = True
+
                                 if not is_fluxo_recontagem:
-                                    if exige_ativo_obrigatorio:
-                                        # Se a planilha tem a coluna "Ativo", bloqueia se o operador tentar salvar sem digitar o número
+                                    if tem_ativo_na_base:
+                                        # Se o produto ESPECÍFICO tem ativo preenchido na linha do Excel, exige a digitação
                                         if not val_ativo_inserido:
-                                            st.error("❌ Erro: O preenchimento do número do Ativo é obrigatório para as planilhas que contém esta coluna!")
+                                            st.error("❌ Erro: O preenchimento do número do Ativo é obrigatório para este produto específico!")
                                             st.stop()
                                             
                                         cursor.execute("""
@@ -432,15 +429,16 @@ else:
                                             st.error(f"❌ Erro: O ativo '{val_ativo_inserido}' para este produto já foi contabilizado neste lote!")
                                             st.stop()
                                     else:
-                                        # Se a planilha NÃO contém a coluna "Ativo", o campo vira opcional e barra duplicidade simples de código
+                                        # Se o produto NÃO tem ativo (Ex: botina, uniforme), passa sem dar erro e valida apenas se o código já foi contado
                                         cursor.execute("""
                                             SELECT COUNT(*) FROM contagens 
                                             WHERE inventario_id = ? AND cod_produto = ? AND unidade = ?
                                         """, (id_p_limpo, prod_l, st.session_state.unidade_selecionada))
                                         
                                         if cursor.fetchone()[0] > 0:
-                                            st.error("❌ Erro: Este item já foi contabilizado neste lote!")
+                                            st.error("❌ Erro: Este item sem ativo já foi contabilizado neste lote!")
                                             st.stop()
+                                # ---------------------------------------------------------------------------------------
 
                                 if q_cont == 0:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
@@ -915,7 +913,7 @@ else:
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                     """, (id_inv_sup_atual, str(row_sup[col_id_est_sup]), str(row_sup[col_local_sup]), sup_bl, str(row_sup[col_desc_sup]), q_s_v, qtd_aud_sup, qtd_aud_sup - q_s_v, etiq_check, loc_check, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f_ativo_sup.strip().upper(), st.session_state.unidade_selecionada))
                                     conn.commit()
-                                    st.success("✅ Lançamento enviado para a Acuracidade!")
+                                    st.success("¼ Lançamento enviado para a Acuracidade!")
                                     st.rerun()
                     else: st.error("❌ Produto não localizado na planilha de amostragem.")
 
