@@ -142,7 +142,7 @@ if 'contador_reset' not in st.session_state: st.session_state.contador_reset = 0
 if 'pagina_historico' not in st.session_state: st.session_state.pagina_historico = 0
 if 'pagina_acuracidade_sup' not in st.session_state: st.session_state.pagina_acuracidade_sup = 0
 
-# --- FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL ---
+# --- FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL USANDO OPENPYXL NATIVO ---
 def converter_para_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -351,7 +351,6 @@ else:
                 if not it.empty:
                     row = it.iloc[0]
                     
-                    # --- APRESENTAÇÃO DE DADOS COMPLETOS DO PRODUTO SOLICITADA ---
                     c_b1, c_b2, c_b3, c_b4 = st.columns(4)
                     c_b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{prod_l}</div></div>', unsafe_allow_html=True)
                     c_b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO / LOCAL</div><div class="bloco-valor" style="font-size:22px;">{row[c_loc]}</div></div>', unsafe_allow_html=True)
@@ -366,7 +365,6 @@ else:
                         if val_at and val_at.lower() != "nan" and val_at != "": tem_ativo_na_base = True
 
                     with st.form("f_salva_contagem", clear_on_submit=True):
-                        # --- MODIFICADO: VALOR PADRÃO INICIA EM 0 PARA EXIGIR INTERAÇÃO OPERACIONAL ---
                         q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
                         if tem_ativo_na_base:
                             n_ativ = st.text_input("🔢 Número do Ativo (OBRIGATÓRIO)")
@@ -375,7 +373,6 @@ else:
                         obs = st.text_input("Observação")
                         
                         if st.form_submit_button("Confirmar Lançamento", type="primary"):
-                            # --- VALIDAÇÃO EXIGIDA CONTRA LANÇAMENTOS ZERADOS SEM ALTERAÇÃO ---
                             if q_cont == 0:
                                 st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
                             elif tem_ativo_na_base and not n_ativ.strip():
@@ -389,7 +386,6 @@ else:
                                 """, (id_inventario_atual.replace('#',''), str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, n_ativ.strip().upper(), obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
                                 conn.commit()
                                 st.success("Contagem salva com sucesso!")
-                                # Zera o estado do contador para limpar de forma limpa os dados na tela para o próximo bip
                                 st.session_state.contador_reset += 1
                                 st.rerun()
                 else: st.error("Material/Produto não localizado na base de dados carregada.")
@@ -449,10 +445,36 @@ else:
             st.dataframe(df_c.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
         else: st.info("Nenhum inventário selecionado.")
 
-    # 📄 ABA 3: BASE DE ESTOQUE
+    # 📄 ABA 3: BASE DE ESTOQUE (ATUALIZADA: DINÂMICA DE STATUS EM TEMPO REAL)
     with abas_gui[2]:
-        if st.session_state.base_sistema is not None: st.dataframe(st.session_state.base_sistema, use_container_width=True)
-        else: st.info("Nenhuma base carregada.")
+        if st.session_state.base_sistema is not None:
+            st.subheader("📄 Espelho Base de Saldo - Status de Contagem Atualizado")
+            
+            # Puxar dados das contagens para cruzar em tempo real
+            if id_inventario_atual:
+                df_lancados_base = pd.read_sql_query("SELECT cod_produto, operador, qtd_contada FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
+                mapa_operadores = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['operador']))
+                mapa_quantidades = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['qtd_contada']))
+            else:
+                mapa_operadores = {}
+                mapa_quantidades = {}
+            
+            # Função para processar a linha da base
+            def mapear_status_gerencial(linha_cod):
+                cod_chave = str(linha_cod).upper().strip()
+                if cod_chave in mapa_operadores:
+                    return f"🟩 Contado ({mapa_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}"
+                return "🟥 Não Contado"
+            
+            # Aplicar mapeamento de dados na cópia visual
+            df_base_realtime = st.session_state.base_sistema.copy()
+            df_base_realtime["Status de Auditoria (Lote Atual)"] = df_base_realtime[c_cod].apply(mapear_status_gerencial)
+            
+            # Ordenar para jogar a coluna de status na frente de tudo
+            cols_ordenadas = ["Status de Auditoria (Lote Atual)"] + [col for col in df_base_realtime.columns if col != "Status de Auditoria (Lote Atual)"]
+            st.dataframe(df_base_realtime[cols_ordenadas], use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhuma base carregada na barra lateral.")
 
     # 📁 ABA 4: HISTÓRICO GERAL
     with abas_gui[3]:
@@ -554,7 +576,7 @@ else:
         with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
         if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
 
-    # 📈 ABA 6: ACURACIDADE ESTOQUE (CORRIGIDA - MARCADOR DE VARIÁVEL HIGIENIZADO)
+    # 📈 ABA 6: ACURACIDADE ESTOQUE
     with abas_gui[5]:
         st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
         
@@ -579,7 +601,6 @@ else:
                 certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
                 certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
                 
-                # REPARADO: variável normalizada para 'grupo.columns' eliminando o bug de travamento de tela
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
@@ -690,7 +711,7 @@ else:
                 id_inv_sup_atual = None
             else:
                 lista_inv_sup = [f"{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios_sup.iterrows()]
-                inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup)
+                inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup, key="selectbox_sup_amostral_v5")
                 id_inv_sup_atual = inv_sup_selected.split(" – ")[0]
                 inv_sup_selected_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
                 
