@@ -340,17 +340,12 @@ else:
             st.warning("⚠️ Carregue a Base Geral no menu lateral para iniciar as bipagens.")
         else:
             id_p_limpo = id_inventario_atual.replace('#','')
-            
-            # --- CORREÇÃO DO BLOQUEIO DA IMAGEM image_d4feb9.png ---
-            # Verifica se existem segundas contagens ainda ativas ('Pendente') criadas pelo supervisor neste lote
             df_recont_totais = pd.read_sql_query(
                 "SELECT COUNT(*) as total_p FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", 
                 conn, params=(id_p_limpo, st.session_state.unidade_selecionada)
             )
             tem_recontagem_ativa = int(df_recont_totais.iloc[0]['total_p']) > 0
             
-            # Se o lote estiver Fechado E não houver nenhuma recontagem ativa pendente, bloqueia a tela.
-            # Caso o lote esteja fechado mas HÁ recontagem pendente, o sistema ignora o bloqueio e permite bipar!
             if inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado" and not tem_recontagem_ativa:
                 st.error("🔒 Este lote de inventário foi finalizado e fechado.")
             else:
@@ -362,9 +357,7 @@ else:
                     if not it.empty:
                         row = it.iloc[0]
                         
-                        # Verifica se este material específico está em fluxo de 2ª Contagem ordenada pelo Supervisor
                         df_recont_check = pd.read_sql_query("SELECT id, recontagem FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND unidade = ? ORDER BY id DESC LIMIT 1", conn, params=(id_p_limpo, prod_l, st.session_state.unidade_selecionada))
-                        
                         is_fluxo_recontagem = False
                         if not df_recont_check.empty and df_recont_check.iloc[0]['recontagem'] == 'Pendente':
                             is_fluxo_recontagem = True
@@ -419,7 +412,7 @@ else:
                                     st.rerun()
                     else: st.error("Material/Produto não localizado na base de dados carregada.")
 
-    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO
+    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO (ATUALIZADA: ACURACIDADE E DIVERGÊNCIAS EM TEMPO REAL)
     with abas_gui[1]:
         if id_inventario_atual:
             st.subheader(f"📊 Progresso em Tempo Real - Lote {id_inventario_atual}")
@@ -431,11 +424,44 @@ else:
                 total_contados = len(itens_contados_unicos)
                 total_faltantes_tab = max(0, total_itens_base - total_contados)
                 
-                m1, m2, m3 = st.columns(3)
-                m1.metric("📋 Total de Itens Mapeados", total_itens_base)
-                m2.metric("✅ Itens Já Contabilizados", total_contados)
-                m3.metric("⏳ Itens Pendentes (Falta Contar)", total_faltantes_tab)
+                # Cálculo de acuracidade em tempo real do lote atual
+                total_divergentes = len(df_c[df_c['diferenca'] != 0]) if not df_c.empty else 0
+                total_auditados_lote = len(df_c) if not df_c.empty else 0
                 
+                if total_auditados_lote > 0:
+                    taxa_acuracidade = ((total_auditados_lote - total_divergentes) / total_auditados_lote) * 100
+                else:
+                    taxa_acuracidade = 100.0
+
+                def formatar_acuracidade_html(porcentagem):
+                    if porcentagem == 100.0:
+                        return f"<span style='color:green; font-weight:bold;'>🟢 {porcentagem:.1f}% (Acuracidade Perfeita)</span>"
+                    elif porcentagem >= 95.0:
+                        return f"<span style='color:#d4ac0d; font-weight:bold;'>🟡 {porcentagem:.1f}% (Dentro da Tolerância)</span>"
+                    else:
+                        return f"<span style='color:red; font-weight:bold;'>🔴 {porcentagem:.1f}% (Atenção: Nível Crítico)</span>"
+
+                # Renderizar métricas superiores ampliadas
+                col_m1, col_m2, col_m3, col_m4 = st.columns(4)
+                col_m1.metric("📋 Total Mapeados", total_itens_base)
+                col_m2.metric("✅ Já Contabilizados", total_contados)
+                col_m3.metric("⏳ Itens Pendentes", total_faltantes_tab)
+                with col_m4:
+                    st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:10px; margin-bottom:0px; border-left: 5px solid #2980b9;"><div class="bloco-titulo">📈 ACURACIDADE DO LOTE</div><div class="bloco-valor" style="font-size:20px; margin-top:5px;">{formatar_acuracidade_html(taxa_acuracidade)}</div></div>', unsafe_allow_html=True)
+                
+                # --- EXIBIÇÃO DE ITENS DIVERGENTES EM TEMPO REAL ---
+                st.markdown("---")
+                df_divergentes_realtime = df_c[df_c['diferenca'] != 0].copy()
+                if not df_divergentes_realtime.empty:
+                    st.markdown("### 🚨 Itens com Divergência de Saldo Detectada (Aguardando Correção)")
+                    st.dataframe(
+                        df_divergentes_realtime[['cod_produto', 'desc_produto', 'desc_estoque', 'qtd_sistema', 'qtd_contada', 'diferenca', 'operador', 'data_hora']], 
+                        use_container_width=True, 
+                        hide_index=True
+                    )
+                else:
+                    st.success("🎉 **Excelente!** Nenhum erro ou divergência de saldo foi detectado nas contagens deste lote.")
+
                 codigos_base = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().tolist()
                 codigos_contados = [str(x).upper().strip() for x in itens_contados_unicos]
                 codigos_faltantes = [c for c in codigos_base if c not in codigos_contados]
@@ -446,9 +472,6 @@ else:
                     df_faltantes_exibir = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().isin(codigos_faltantes)]
                     st.write("### 📋 Lista de Itens Faltantes para Concluir:")
                     st.dataframe(df_faltantes_exibir[[c_cod, c_desc, c_loc]], use_container_width=True, hide_index=True)
-                else:
-                    st.success("🎉 **Excelente!** 100% dos itens da planilha base foram contabilizados.")
-                st.markdown("---")
                 
                 if inventario_selected_obj is not None and inventario_selected_obj['status'] != 'Aberto':
                     st.info("🔒 **Status do Lote:** Este inventário encontra-se **Fechado/Finalizado**. As contagens e dados acima são apenas para consulta.")
