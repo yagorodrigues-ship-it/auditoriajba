@@ -348,7 +348,7 @@ else:
         
     abas_gui = st.tabs(ordem_abas)
 
-    # 🔍 ABA 1: CONTAR ITEM (COM AS VALIDAÇÕES DE DUPLICIDADE REQUISITADAS)
+    # 🔍 ABA 1: CONTAR ITEM
     with abas_gui[0]:
         if id_inventario_atual is None:
             st.warning("⚠️ **Bloqueado:** Nenhum lote de inventário selecionado ou ativo. Use a barra lateral para criar ou selecionar um lote.")
@@ -404,25 +404,31 @@ else:
                                 cursor = conn.cursor()
                                 val_ativo_inserido = n_ativ.strip().upper()
                                 
-                                # --- NOVO FLUXO DE VALIDAÇÃO DE DUPLICIDADE SOLICITADO ---
+                                # --- FLUXO DE VALIDAÇÃO DE DUPLICIDADE CORRIGIDO ---
                                 if not is_fluxo_recontagem:
-                                    if not tem_ativo_na_base:
-                                        # Item normal sem ativo: Não pode repetir o mesmo código de produto de jeito nenhum
-                                        cursor.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND unidade = ?", (id_p_limpo, prod_l, st.session_state.unidade_selecionada))
-                                        if cursor.fetchone()[0] > 0:
-                                            st.error("❌ Erro: Este item já foi contabilizado neste lote!")
-                                            st.stop()
-                                    else:
-                                        # Item possui ativo: Pode repetir o código, DESDE QUE o número do ativo seja diferente
+                                    if tem_ativo_na_base:
                                         if not val_ativo_inserido:
-                                            st.error("❌ Erro: O campo Ativo é obrigatório para este produto!")
+                                            st.error("❌ Erro: O preenchimento do número do Ativo é obrigatório para este produto!")
                                             st.stop()
                                             
-                                        cursor.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND ativo = ? AND unidade = ?", (id_p_limpo, prod_l, val_ativo_inserido, st.session_state.unidade_selecionada))
+                                        cursor.execute("""
+                                            SELECT COUNT(*) FROM contagens 
+                                            WHERE inventario_id = ? AND cod_produto = ? AND ativo = ? AND unidade = ?
+                                        """, (id_p_limpo, prod_l, val_ativo_inserido, st.session_state.unidade_selecionada))
+                                        
                                         if cursor.fetchone()[0] > 0:
                                             st.error(f"❌ Erro: O ativo '{val_ativo_inserido}' para este produto já foi contabilizado neste lote!")
                                             st.stop()
-                                # ---------------------------------------------------------
+                                    else:
+                                        cursor.execute("""
+                                            SELECT COUNT(*) FROM contagens 
+                                            WHERE inventario_id = ? AND cod_produto = ? AND unidade = ?
+                                        """, (id_p_limpo, prod_l, st.session_state.unidade_selecionada))
+                                        
+                                        if cursor.fetchone()[0] > 0:
+                                            st.error("❌ Erro: Este item sem ativo já foi contabilizado neste lote!")
+                                            st.stop()
+                                # ---------------------------------------------------
 
                                 if q_cont == 0:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
@@ -807,7 +813,7 @@ else:
                     else:
                         st.info("ℹ️ Todos os itens divergentes já foram enviados para a recontagem.")
                 else:
-                    st.success("🎉 Nenhuma divergência ativa encontrada neste lote até o momento.")
+                    st.success("🎉 Nenhuma divergência activa encontrada neste lote até o momento.")
                     
             st.markdown("---")
             if df_inventarios_sup.empty:
