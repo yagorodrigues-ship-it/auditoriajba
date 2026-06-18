@@ -214,7 +214,7 @@ if not st.session_state.logged_in:
                             st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta ativa!")
                         else:
                             try:
-                                cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
+                                cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidad_cadastro))
                                 conn.commit()
                                 st.success("✅ Cadastrado!")
                                 st.session_state.tela_acesso = "login"; st.rerun()
@@ -243,6 +243,17 @@ else:
             return list(df.columns)[def_i] if def_i < len(df.columns) else ""
         return ""
 
+    # --- MAPEAMENTO DE COLUNAS DA BASE ---
+    c_cod, c_desc, c_un, c_est, c_qtd, c_loc, c_atv_b = "", "", "", "", "", "", ""
+    if st.session_state.base_sistema is not None:
+        c_cod = encontrar_coluna(st.session_state.base_sistema, ['códproduto', 'codproduto', 'codigo', 'cod'], 0)
+        c_desc = encontrar_coluna(st.session_state.base_sistema, ['descproduto', 'descricao'], 1)
+        c_un = encontrar_coluna(st.session_state.base_sistema, ['unidmedida', 'unidade', 'un'], 3)
+        c_est = encontrar_coluna(st.session_state.base_sistema, ['idestoquefísico', 'idestoque'], 0)
+        c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
+        c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
+        c_atv_b = encontrar_coluna(st.session_state.base_sistema, ['ativo', 'patrimonio', 'n ativo'], -1)
+
     # INTERFACE LATERAL (SIDEBAR)
     with st.sidebar:
         if st.button("🔄 Atualizar Dados", type="primary", use_container_width=True): st.rerun()
@@ -252,7 +263,7 @@ else:
             st.session_state.logged_in = False; st.rerun()
             
         st.markdown("---")
-        st.write("📂 **Base Geral (Funcionários)**")
+        st.write("📂 **Base Geral (Planilha Mãe)**")
         ar_excel = st.file_uploader("Upload Excel Geral", type=["xlsx"], label_visibility="collapsed")
         if ar_excel:
             st.session_state.base_sistema = pd.read_excel(ar_excel)
@@ -268,36 +279,38 @@ else:
             id_inventario_atual = inv_sel.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        if eh_supervisor:
-            st.markdown("---")
-            st.write("⚙️ **Painel de Controle de Lotes**")
-            with st.expander("➕ Criar Novo Lote Geral"):
-                with st.form("form_novo_inv", clear_on_submit=True):
-                    n_inv = st.text_input("Nome do Inventário Geral")
-                    if st.form_submit_button("Criar Lote") and n_inv:
-                        cursor = conn.cursor()
-                        cursor.execute("SELECT id FROM inventarios ORDER BY ROWID DESC LIMIT 1")
-                        last = cursor.fetchone()
-                        nxt = int(last[0].replace('#','')) + 1 if last else 39
-                        cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (f"#{nxt}", n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
-                        conn.commit(); st.rerun()
+        # --- SEÇÃO DINÂMICA DE PROGRESSO REAL NA BARRA LATERAL ---
+        if id_inventario_atual and st.session_state.base_sistema is not None:
+            df_c_side = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
+            total_itens_base = len(st.session_state.base_sistema)
+            itens_contados_unicos = df_c_side['cod_produto'].unique() if not df_c_side.empty else []
+            total_contados = len(itens_contados_unicos)
+            total_faltantes = max(0, total_itens_base - total_contados)
+            
+            st.markdown("📊 **Progresso do Lote Atual**")
+            st.caption(f"📋 Mapeados: **{total_itens_base}**")
+            st.caption(f"✅ Contados: **{total_contados}**")
+            if total_faltantes > 0:
+                st.caption(f"⏳ Pendentes: <span style='color:#e74c3c;font-weight:bold;'>{total_faltantes}</span>", unsafe_allow_html=True)
+            else:
+                st.caption("🎉 Status: <span style='color:#2ecc71;font-weight:bold;'>100% Concluído</span>", unsafe_allow_html=True)
 
-    # --- MAPEAMENTO DE COLUNAS DA BASE ---
-    c_cod, c_desc, c_un, c_est, c_qtd, c_loc, c_atv_b = "", "", "", "", "", "", ""
-    if st.session_state.base_sistema is not None:
-        c_cod = encontrar_coluna(st.session_state.base_sistema, ['códproduto', 'codproduto', 'codigo', 'cod'], 0)
-        c_desc = encontrar_coluna(st.session_state.base_sistema, ['descproduto', 'descricao'], 1)
-        c_un = encontrar_coluna(st.session_state.base_sistema, ['unidmedida', 'unidade', 'un'], 3)
-        c_est = encontrar_coluna(st.session_state.base_sistema, ['idestoquefísico', 'idestoque'], 0)
-        c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
-        c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
-        c_atv_b = encontrar_coluna(st.session_state.base_sistema, ['ativo', 'patrimonio', 'n ativo'], -1)
+        st.markdown("---")
+        # Liberado para Almoxarife e Supervisor criarem contagens/lotes
+        st.write("⚙️ **Criar Inventário**")
+        with st.expander("➕ Abrir Novo Lote"):
+            with st.form("form_novo_inv", clear_on_submit=True):
+                n_inv = st.text_input("Nome do Inventário Geral")
+                if st.form_submit_button("Criar Lote") and n_inv:
+                    cursor = conn.cursor()
+                    cursor.execute("SELECT id FROM inventarios ORDER BY ROWID DESC LIMIT 1")
+                    last = cursor.fetchone()
+                    nxt = int(last[0].replace('#','')) + 1 if last else 39
+                    cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (f"#{nxt}", n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
+                    conn.commit(); st.rerun()
 
     # --- DEFINIÇÃO E RENDERIZAÇÃO DAS ABAS NA ORDEM EXATA SOLICITADA ---
-    ordem_abas = ["🔍 Contar Item", "📊 Contagem Atual e Progresso", "📄 Base de Estoque", "📁 Histórico Geral", "🏆 Desempenho e Prazos"]
-    
-    # A aba de Acuracidade agora é liberada para os almoxarifes visualizarem também!
-    ordem_abas += ["📈 Acuracidade Estoque"]
+    ordem_abas = ["🔍 Contar Item", "📊 Contagem Atual e Progresso", "📄 Base de Estoque", "📁 Histórico Geral", "🏆 Desempenho e Prazos", "📈 Acuracidade Estoque"]
     
     if eh_supervisor:
         ordem_abas += ["🔬 Painel Supervisor", "⚙️ Gerenciar Estoques"]
@@ -309,11 +322,11 @@ else:
     # 🔍 ABA 1: CONTAR ITEM
     with abas_gui[0]:
         if id_inventario_atual is None:
-            st.warning("⚠️ **Bloqueado:** Nenhum lote de inventário selecionado ou ativo. Aguarde o Supervisor abrir um Lote para iniciar os trabalhos.")
+            st.warning("⚠️ **Bloqueado:** Nenhum lote de inventário selecionado ou ativo. Use a barra lateral para criar ou selecionar um lote.")
         elif st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a Base Geral no menu lateral para iniciar as bipagens.")
         elif inventario_selected_obj['status'] == "Fechado":
-            st.error("🔒 Este lote de inventário foi finalizado e fechado pelo Supervisor.")
+            st.error("🔒 Este lote de inventário foi finalizado e fechado.")
         else:
             st.subheader(f"📝 Lançamento de Contagem Ativa – Lote {id_inventario_atual}")
             bip_prod = st.text_input("💻 Bipar Código do Produto", key=f"bip_op_{st.session_state.contador_reset}")
@@ -383,17 +396,24 @@ else:
                     st.success("🎉 **Excelente!** 100% dos itens da planilha base foram contabilizados.")
                 st.markdown("---")
 
-                if eh_supervisor and inventario_selected_obj['status'] == 'Aberto':
+                # REGRA DE FECHAMENTO ATUALIZADA
+                if inventario_selected_obj and inventario_selected_obj['status'] == 'Aberto':
                     if total_faltantes > 0:
-                        st.button("🔒 Encerrar e Fechar Lote Geral", disabled=True, help="Não é permitido fechar o inventário incompleto!")
-                        st.caption("🔴 O botão de encerramento está bloqueado porque existem itens pendentes de contagem.")
+                        if eh_supervisor:
+                            st.warning("⚠️ **Aviso de Supervisor:** O inventário está incompleto, mas você possui permissão de nível hierárquico para forçar o fechamento.")
+                            if st.button("🔒 Forçar Encerramento do Lote (Supervisor)", type="primary", use_container_width=True):
+                                cursor = conn.cursor()
+                                cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
+                                conn.commit(); st.success("Lote encerrado com pendências pelo Supervisor!"); st.rerun()
+                        else:
+                            st.button("🔒 Encerrar Lote Geral (Incompleto)", disabled=True, use_container_width=True)
+                            st.caption("🔴 **Acesso Restrito:** Este lote possui pendências. Apenas o **Supervisor** tem autorização para encerrar inventários incompletos.")
                     else:
-                        if st.button("🔒 Encerrar e Fechar Lote Geral", type="primary", use_container_width=True):
+                        # Se estiver 100% completo, qualquer um (Almoxarife ou Supervisor) pode fechar
+                        if st.button("🔒 Encerrar e Fechar Lote Geral (100% Concluído)", type="primary", use_container_width=True):
                             cursor = conn.cursor()
                             cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
-                            conn.commit()
-                            st.success("Lote fechado com sucesso!")
-                            st.rerun()
+                            conn.commit(); st.success("Lote concluído e fechado com sucesso!"); st.rerun()
             
             st.write("### 📑 Histórico de Lançamentos Registrados")
             st.dataframe(df_c.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
@@ -442,7 +462,7 @@ else:
     with abas_gui[4]:
         st.title("🏆 Validade e Prazos de Auditoria Temporal")
         df_m_est = pd.read_sql_query("SELECT id, descricao FROM cadastros_estoques WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
-        df_lasts = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE warmth=1 AND unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,)) if 'warmth' in pd.read_sql_query("PRAGMA table_info(contagens)", conn)['name'].tolist() else pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE warmth=1 AND unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,)) if 'warmth' in pd.read_sql_query("PRAGMA table_info(contagens)", conn)['name'].tolist() else pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
+        df_lasts = pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE warmth=1 AND unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,)) if 'warmth' in pd.read_sql_query("PRAGMA table_info(contagens)", conn)['name'].tolist() else pd.read_sql_query("SELECT id_estoque, MAX(data_hora) as u_data FROM contagens WHERE unidade = ? GROUP BY id_estoque", conn, params=(st.session_state.unidade_selecionada,))
         map_lasts = dict(zip(df_lasts['id_estoque'].astype(str).str.strip(), df_lasts['u_data']))
         
         hoje_dt = datetime.datetime.now()
@@ -470,14 +490,10 @@ else:
         with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
         if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
 
-
-    # 📈 ABA 6: ACURACIDADE ESTOQUE (VISÍVEL PARA ALMOXARIFE E SUPERVISOR)
-    # Posição correta da aba no índice da lista `abas_gui`
-    idx_aba_acuracidade = 5
-    with abas_gui[idx_aba_acuracidade]:
+    # 📈 ABA 6: ACURACIDADE ESTOQUE (COMPARTILHADA COM ALMOXARIFES)
+    with abas_gui[5]:
         st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
         
-        # Puxar todos os dados brutos de acuracidade salvos no banco para esta unidade
         df_ac = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
         
         if df_ac.empty:
@@ -493,7 +509,6 @@ else:
                 else:
                     return f"<span style='color:red; font-weight:bold;'>🔴 {porcentagem:.1f}%</span>"
             
-            # Montagem estrita da tabela mãe gerencial acima de tudo
             for dep_id, grupo in df_ac.groupby('id_estoque'):
                 total_itens_dep = len(grupo)
                 certos_qtd = len(grupo[grupo['diferenca'] == 0])
@@ -520,7 +535,7 @@ else:
             
         st.markdown("---")
         
-        # FILTROS JOGADOS EXATAMENTE AQUI (ABAIXO DA PLANILHA GERENCIAL)
+        # Filtros posicionados abaixo da acuracidade gerencial
         st.subheader("🔍 Filtrar Pastas por Período")
         f_col1, f_col2 = st.columns(2)
         with f_col1: dt_ini_ac = st.date_input("Filtrar Data Inicial", value=None, key="dt_ini_ac")
@@ -529,14 +544,13 @@ else:
         st.markdown("---")
         st.subheader("📁 Histórico de Pastas Contabilizadas (Supervisor)")
         
-        # Filtrar o histórico de pastas com base nas datas selecionadas
         df_inventarios_sup['dt_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
         df_pastas_filtradas = df_inventarios_sup.copy()
         if dt_ini_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] >= dt_ini_ac]
         if dt_fim_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] <= dt_fim_ac]
 
         if not df_pastas_filtradas.empty:
-            # --- PAGINAÇÃO EXATA DE 10 EM 10 PASTAS ---
+            # Paginação de 10 em 10 pastas
             tamanho_pag_sup = 10
             total_pag_sup = (len(df_pastas_filtradas) - 1) // tamanho_pag_sup + 1
             
@@ -558,24 +572,20 @@ else:
                     if not df_itens_da_pasta.empty:
                         st.dataframe(df_itens_da_pasta, use_container_width=True, hide_index=True)
                     else:
-                        st.info("Nenhum item foi inserido ou contabilizado nesta pasta amostral ainda.")
+                        st.info("Nenhum item contabilizado nesta pasta amostral ainda.")
             
-            # Controles de navegação de páginas (A partir do 11º lote vai para a pág 2)
             st.write("")
             cs1, cs2, cs3 = st.columns([2, 6, 2])
             with cs1:
                 if st.button("◀ Anterior", disabled=(st.session_state.pagina_acuracidade_sup == 0), key="btn_ant_ac_sup"):
-                    st.session_state.pagina_acuracidade_sup -= 1
-                    st.rerun()
+                    st.session_state.pagina_acuracidade_sup -= 1; st.rerun()
             with cs2:
-                st.markdown(f"<p style='text-align:center;'>Exibindo página {st.session_state.pagina_acuracidade_sup + 1} de {total_pag_sup} (Total de Lotes: {len(df_pastas_filtradas)})</p>", unsafe_allow_html=True)
+                st.markdown(f"<p style='text-align:center;'>Exibindo página {st.session_state.pagina_acuracidade_sup + 1} de {total_pag_sup}</p>", unsafe_allow_html=True)
             with cs3:
                 if st.button("Próximo ▶", disabled=(st.session_state.pagina_acuracidade_sup >= total_pag_sup - 1), key="btn_prox_ac_sup"):
-                    st.session_state.pagina_acuracidade_sup += 1
-                    st.rerun()
+                    st.session_state.pagina_acuracidade_sup += 1; st.rerun()
         else:
-            st.info("Nenhuma pasta mapeada ou localizada com estes critérios.")
-
+            st.info("Nenhuma pasta localizada para os critérios de filtragem atuais.")
 
     # RECURSOS EXCLUSIVOS DO SUPERVISOR
     if eh_supervisor:
