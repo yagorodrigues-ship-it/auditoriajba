@@ -214,7 +214,8 @@ if not st.session_state.logged_in:
                             st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta ativa!")
                         else:
                             try:
-                                cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidad_cadastro))
+                                # CORRIGIDO: alterado unidade_cadastro para o nome correto da variável
+                                cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
                                 conn.commit()
                                 st.success("✅ Cadastrado!")
                                 st.session_state.tela_acesso = "login"; st.rerun()
@@ -296,20 +297,31 @@ else:
                 st.caption("🎉 Status: <span style='color:#2ecc71;font-weight:bold;'>100% Concluído</span>", unsafe_allow_html=True)
 
         st.markdown("---")
-        # Liberado para Almoxarife e Supervisor criarem contagens/lotes
         st.write("⚙️ **Criar Inventário**")
         with st.expander("➕ Abrir Novo Lote"):
             with st.form("form_novo_inv", clear_on_submit=True):
                 n_inv = st.text_input("Nome do Inventário Geral")
                 if st.form_submit_button("Criar Lote") and n_inv:
                     cursor = conn.cursor()
-                    cursor.execute("SELECT id FROM inventarios ORDER BY ROWID DESC LIMIT 1")
-                    last = cursor.fetchone()
-                    nxt = int(last[0].replace('#','')) + 1 if last else 39
+                    # AJUSTADO: Seleciona todos para encontrar o maior sequencial numérico real
+                    cursor.execute("SELECT id FROM inventarios")
+                    todos_ids = cursor.fetchall()
+                    
+                    maior_id = 0
+                    for row in todos_ids:
+                        try:
+                            num = int(row[0].replace('#',''))
+                            if num > maior_id:
+                                maior_id = num
+                        except ValueError:
+                            pass
+                    
+                    # Começa rigorosamente do 1 se o banco estiver limpo
+                    nxt = maior_id + 1
                     cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (f"#{nxt}", n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
                     conn.commit(); st.rerun()
 
-    # --- DEFINIÇÃO E RENDERIZAÇÃO DAS ABAS NA ORDEM EXATA SOLICITADA ---
+    # --- DEFINIÇÃO E RENDERIZAÇÃO DAS ABAS NA ORDEM EXATA ---
     ordem_abas = ["🔍 Contar Item", "📊 Contagem Atual e Progresso", "📄 Base de Estoque", "📁 Histórico Geral", "🏆 Desempenho e Prazos", "📈 Acuracidade Estoque"]
     
     if eh_supervisor:
@@ -396,7 +408,7 @@ else:
                     st.success("🎉 **Excelente!** 100% dos itens da planilha base foram contabilizados.")
                 st.markdown("---")
 
-                # REGRA DE FECHAMENTO ATUALIZADA
+                # REGRA DE FECHAMENTO
                 if inventario_selected_obj and inventario_selected_obj['status'] == 'Aberto':
                     if total_faltantes > 0:
                         if eh_supervisor:
@@ -409,7 +421,6 @@ else:
                             st.button("🔒 Encerrar Lote Geral (Incompleto)", disabled=True, use_container_width=True)
                             st.caption("🔴 **Acesso Restrito:** Este lote possui pendências. Apenas o **Supervisor** tem autorização para encerrar inventários incompletos.")
                     else:
-                        # Se estiver 100% completo, qualquer um (Almoxarife ou Supervisor) pode fechar
                         if st.button("🔒 Encerrar e Fechar Lote Geral (100% Concluído)", type="primary", use_container_width=True):
                             cursor = conn.cursor()
                             cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
@@ -490,7 +501,7 @@ else:
         with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
         if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
 
-    # 📈 ABA 6: ACURACIDADE ESTOQUE (COMPARTILHADA COM ALMOXARIFES)
+    # 📈 ABA 6: ACURACIDADE ESTOQUE
     with abas_gui[5]:
         st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
         
@@ -550,7 +561,6 @@ else:
         if dt_fim_ac: df_pastas_filtradas = df_pastas_filtradas[df_pastas_filtradas['dt_parsed'] <= dt_fim_ac]
 
         if not df_pastas_filtradas.empty:
-            # Paginação de 10 em 10 pastas
             tamanho_pag_sup = 10
             total_pag_sup = (len(df_pastas_filtradas) - 1) // tamanho_pag_sup + 1
             
@@ -612,9 +622,18 @@ else:
                     nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                     if st.form_submit_button("Criar Lote", type="primary") and nome_sup_inv:
                         cursor = conn.cursor()
-                        cursor.execute("SELECT id FROM inventarios_supervisor ORDER BY ROWID DESC LIMIT 1")
-                        last_sup_row = cursor.fetchone()
-                        maior_id_sup = int(last_sup_row[0].replace('SUP-#','')) if last_sup_row else 0
+                        cursor.execute("SELECT id FROM inventarios_supervisor")
+                        todos_ids_sup = cursor.fetchall()
+                        
+                        maior_id_sup = 0
+                        for row in todos_ids_sup:
+                            try:
+                                num = int(row[0].replace('SUP-#',''))
+                                if num > maior_id_sup:
+                                    maior_id_sup = num
+                            except ValueError:
+                                pass
+                                
                         novo_id_sup = f"SUP-#{maior_id_sup + 1}"
                         cursor.execute("INSERT INTO inventarios_supervisor (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (novo_id_sup, nome_sup_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
                         conn.commit(); st.rerun()
