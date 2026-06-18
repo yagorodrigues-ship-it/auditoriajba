@@ -263,9 +263,9 @@ else:
         else:
             lista_inv = []
             for idx, r in df_inventarios.iterrows():
-                id_limpo_r = r['id'].replace('#','#')
+                id_limpo_r = r['id'].replace('#','')
                 cursor_check = conn.cursor()
-                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r.replace('#',''), st.session_state.unidade_selecionada))
+                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r, st.session_state.unidade_selecionada))
                 possui_pendente = cursor_check.fetchone()[0] > 0
                 
                 if r['status'] == 'Fechado':
@@ -523,7 +523,7 @@ else:
 
             if st.session_state.base_sistema is not None and c_cod and total_faltantes_tab > 0:
                 st.markdown("---")
-                st.error(f"⚠️ **Atenção:** Ainda restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
+                st.error(f"⚠️ **Atenção:** Still restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
                 codigos_base = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().tolist()
                 codigos_contados = [str(x).upper().strip() for x in df_c['cod_produto'].unique()] if not df_c.empty else []
                 codigos_faltantes = [c for c in codigos_base if c not in codigos_contados]
@@ -942,7 +942,7 @@ else:
                     if st.button("🗑️ Excluir Estoque"):
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM cadastros_estoques WHERE id = ? AND unidade = ?", (est_del, st.session_state.unidade_selecionada))
-                        conn.commit(); st.rerun()
+                        conn.commit(); st.rerun() # --- CORRIGIDO: de r.rerun() para st.rerun() ---
 
     # 👥 ABA 9: GESTÃO DE USUÁRIOS
     if eh_yago_master:
