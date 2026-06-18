@@ -243,7 +243,6 @@ else:
         c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
         c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
         
-        # Mapeamento de colunas para exibição e regras
         for col in st.session_state.base_sistema.columns:
             c_clean = str(col).strip().upper().replace(" ", "").replace("Ã", "A")
             if c_clean == "ATIVO":
@@ -311,7 +310,7 @@ else:
             id_inventario_atual = inv_sel.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # --- SEÇÃO DINÂMICA DE PROGRESSO REAL NA BARRA LATERAL ---
+        # --- SEÇÃO DINÂMICA DE PROGRESSO REAL ---
         total_faltantes = 0
         if id_inventario_atual and st.session_state.base_sistema is not None:
             df_c_side = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
@@ -360,7 +359,8 @@ else:
                 if st.form_submit_button("Criar Lote"):
                     if n_inv:
                         cursor = conn.cursor()
-                        cursor.execute("SELECT id FROM inventarios WHERE unidade = ?", (st.session_state.unidade_selecionada,))
+                        # CORREÇÃO CRUCIAL: Busca sem o WHERE unit para garantir exclusividade global do ID sequencial
+                        cursor.execute("SELECT id FROM inventarios")
                         todos_ids = cursor.fetchall()
                         
                         maior_id = 0
@@ -486,7 +486,6 @@ else:
                                     conn.commit()
                                     st.success("Contagem processada e armazenada com sucesso!")
                                     
-                                    # --- ATUALIZA AUTOMATICAMENTE PARA SUTOR E REMOVER VISIBILIDADE DOS BLOCOS ---
                                     st.session_state.contador_reset += 1
                                     st.rerun()
                     else: st.error("Material/Produto não localizado na base de dados carregada.")
@@ -865,6 +864,7 @@ else:
                     nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                     if st.form_submit_button("Criar Lote", type="primary") and nome_sup_inv:
                         cursor = conn.cursor()
+                        # CORREÇÃO CRUCIAL: Busca sem o WHERE unit para garantir exclusividade global do ID sequencial
                         cursor.execute("SELECT id FROM inventarios_supervisor")
                         todos_ids_sup = cursor.fetchall()
                         
