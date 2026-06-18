@@ -394,33 +394,30 @@ else:
                         c_b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. ESTOQUE</div><div class="bloco-valor">{row[c_est]}</div></div>', unsafe_allow_html=True)
                         
                         st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
-                        
-                        # --- CORREÇÃO COMPLETA: Validação estrita por linha ignorando strings literais 'nan' ---
-                        tem_ativo_na_base = False
-                        if c_atv_b in it.columns and not pd.isna(row[c_atv_b]):
-                            val_at_linha = str(row[c_atv_b]).strip()
-                            if val_at_linha and val_at_linha.lower() != "nan" and val_at_linha != "":
-                                tem_ativo_na_base = True
 
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
                             
-                            # Atualização visual em tempo real no formulário
-                            if tem_ativo_na_base:
-                                n_ativ = st.text_input("🔢 Número do Ativo (OBRIGATÓRIO)")
-                            else:
-                                n_ativ = st.text_input("🔢 Número do Ativo (Opcional)")
+                            # --- SEÇÃO VISUAL TOTALMENTE FLEXÍVEL (Sempre exibe texto genérico para não quebrar a tela) ---
+                            n_ativ = st.text_input("🔢 Número do Ativo (Opcional - Necessário apenas se o item possuir Ativo na planilha)")
                             obs = st.text_input("Observação")
                             
                             if st.form_submit_button("Confirmar Lançamento", type="primary"):
                                 cursor = conn.cursor()
                                 val_ativo_inserido = n_ativ.strip().upper()
                                 
-                                # --- FLUXO DE VALIDAÇÃO DE DUPLICIDADE ---
+                                # --- BLINDAGEM DA INTELIGÊNCIA NO MOMENTO DE SALVAR ---
+                                tem_ativo_na_base = False
+                                if c_atv_b in it.columns and not pd.isna(row[c_atv_b]):
+                                    val_at_linha = str(row[c_atv_b]).strip()
+                                    if val_at_linha and val_at_linha.lower() != "nan" and val_at_linha != "":
+                                        tem_ativo_na_base = True
+
                                 if not is_fluxo_recontagem:
                                     if tem_ativo_na_base:
+                                        # Se o produto TEM ativo preenchido na linha do Excel, o preenchimento aqui vira obrigatório
                                         if not val_ativo_inserido:
-                                            st.error("❌ Erro: O preenchimento do número do Ativo é obrigatório para este produto!")
+                                            st.error("❌ Erro: O preenchimento do número do Ativo é obrigatório para este produto específico!")
                                             st.stop()
                                             
                                         cursor.execute("""
@@ -432,14 +429,16 @@ else:
                                             st.error(f"❌ Erro: O ativo '{val_ativo_inserido}' para este produto já foi contabilizado neste lote!")
                                             st.stop()
                                     else:
+                                        # Se o produto NÃO TEM ativo (Ex: botina, uniforme, etc.), salva direto e barra apenas duplicidade simples do código
                                         cursor.execute("""
                                             SELECT COUNT(*) FROM contagens 
                                             WHERE inventario_id = ? AND cod_produto = ? AND unidade = ?
                                         """, (id_p_limpo, prod_l, st.session_state.unidade_selecionada))
                                         
                                         if cursor.fetchone()[0] > 0:
-                                            st.error("❌ Erro: Este item sem ativo já foi contabilizado neste lote!")
+                                            st.error("❌ Erro: Este item comum sem ativo já foi contabilizado neste lote!")
                                             st.stop()
+                                # ---------------------------------------------------------------------------------------
 
                                 if q_cont == 0:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
@@ -786,7 +785,7 @@ else:
         else:
             st.info("Nenhum inventário de supervisor cadastrado.")
 
-    # RECURSOS EXCLUSIVOS DO SUPERVISOR
+    # RECURSO EXCLUSIVO DO SUPERVISOR
     if eh_supervisor:
         # 🔬 PAINEL SUPERVISOR
         with abas_gui[6]:
