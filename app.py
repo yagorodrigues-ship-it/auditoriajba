@@ -211,7 +211,7 @@ if not st.session_state.logged_in:
                         cursor.execute("SELECT email, cpf FROM usuarios WHERE cpf = ? OR email = ?", (cpf_l, email_l))
                         usuario_existente = cursor.fetchone()
                         if usuario_existente:
-                            st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta activa!")
+                            st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta ativa!")
                         else:
                             try:
                                 cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
@@ -279,7 +279,7 @@ else:
             id_inventario_atual = inv_sel.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # --- SEÇÃO DINÂMICA DE PROGRESSO ATUALIZADA (EXIBE PARA SUPERVISOR E ALMOXARIFE) ---
+        # --- REPARADO: PROGRESSO UNIVERSAL NA BARRA LATERAL (EXIBE PARA ADM MASTER TAMBÉM) ---
         if id_inventario_atual and st.session_state.base_sistema is not None:
             df_c_side = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
             total_itens_base = len(st.session_state.base_sistema)
@@ -287,7 +287,6 @@ else:
             total_contados = len(itens_contados_unicos)
             total_faltantes = max(0, total_itens_base - total_contados)
             
-            # ATUALIZAÇÃO DA DESCRIÇÃO PEDIDA
             st.markdown("**📊 Progresso do Inventário Atual**")
             st.caption(f"📋 Mapeados: **{total_itens_base}**")
             st.caption(f"✅ Contados: **{total_contados}**")
@@ -750,6 +749,6 @@ else:
                 if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
                     cursor.execute("UPDATE usuarios SET nome=?, senha=?, unidade=?, cargo=? WHERE id=?", (n_nome.strip(), n_senha.strip(), n_unid, n_cargo, id_a))
-                    conn.commit(); st.success("Usuário Atualizado!"); st.rerun()
+                    conn.commit(); st.success("Usuário Updated!"); st.rerun()
                     
     conn.close()
