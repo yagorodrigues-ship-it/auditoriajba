@@ -129,13 +129,6 @@ def inicializar_banco():
         except:
             pass
 
-    # Administradores padrão
-    try:
-        cursor.execute("UPDATE usuarios SET cargo = 'Supervisor' WHERE nome LIKE '%Yago%' OR nome LIKE '%Administrador%'")
-        conn.commit()
-    except:
-        pass
-
     conn.close()
 
 inicializar_banco()
@@ -148,7 +141,6 @@ if 'base_sistema' not in st.session_state: st.session_state.base_sistema = None
 if 'base_supervisor' not in st.session_state: st.session_state.base_supervisor = None
 if 'contador_reset' not in st.session_state: st.session_state.contador_reset = 0
 if 'pagina_historico' not in st.session_state: st.session_state.pagina_historico = 0
-if 'ultimo_item_sucesso' not in st.session_state: st.session_state.ultimo_item_sucesso = ""
 
 # --- ESTILIZAÇÃO INTERFACE ---
 st.markdown("""
@@ -200,9 +192,6 @@ if not st.session_state.logged_in:
             with c_cad:
                 if st.button("📝 Criar conta", use_container_width=True):
                     st.session_state.tela_acesso = "cadastro"; st.rerun()
-            with c_rec:
-                if st.button("🔑 Alterar Senha", use_container_width=True):
-                    st.session_state.tela_acesso = "recuperar"; st.rerun()
                     
         elif st.session_state.tela_acesso == "cadastro":
             st.markdown("<h2 style='text-align: center;'>📝 Cadastro de Colaborador</h2>", unsafe_allow_html=True)
@@ -222,9 +211,6 @@ if not st.session_state.logged_in:
                         usuario_existente = cursor.fetchone()
                         if usuario_existente:
                             st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta ativa!")
-                            token_cripto = base64.b64encode(email_l.encode('utf-8')).decode('utf-8')
-                            link_direto_cadastro = f"https://auditoriajba.streamlit.app/?recuperar=true&token={token_cripto}"
-                            st.markdown(f'<a href="{link_direto_cadastro}" target="_blank"><button style="width:100%; background-color:#e74c3c; color:white; border:none; padding:8px; border-radius:4px; font-weight:bold;">🔗 Gerar Nova Senha Agora</button></a>', unsafe_allow_html=True)
                         else:
                             try:
                                 cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
@@ -271,7 +257,7 @@ else:
             st.session_state.base_sistema = pd.read_excel(ar_excel)
             
         st.markdown("---")
-        st.write("📁 **Seleccione o Inventário**")
+        st.write("📁 **Selecione o Inventário**")
         if df_inventarios.empty:
             id_inventario_atual = None
             inventario_selected_obj = None
@@ -281,11 +267,14 @@ else:
             id_inventario_atual = inv_sel.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
+        # RECONEXÃO DOS BOTÕES DE GERENCIAMENTO: EXCLUSIVO DO SUPERVISOR DA LOCALIDADE
         if eh_supervisor:
-            with st.expander("➕ Novo Lote de Inventário"):
+            st.markdown("---")
+            st.write("⚙️ **Painel de Controle de Lotes**")
+            with st.expander("➕ Criar Novo Lote Geral"):
                 with st.form("form_novo_inv", clear_on_submit=True):
-                    n_inv = st.text_input("Nome")
-                    if st.form_submit_button("Criar") and n_inv:
+                    n_inv = st.text_input("Nome do Inventário Geral")
+                    if st.form_submit_button("Criar Lote") and n_inv:
                         cursor = conn.cursor()
                         cursor.execute("SELECT id FROM inventarios ORDER BY ROWID DESC LIMIT 1")
                         last = cursor.fetchone()
@@ -293,8 +282,19 @@ else:
                         cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (f"#{nxt}", n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
                         conn.commit(); st.rerun()
 
+    # --- MAPEAMENTO DE COLUNAS DA BASE ---
+    c_cod, c_desc, c_un, c_est, c_qtd, c_loc, c_atv_b = "", "", "", "", "", "", ""
+    if st.session_state.base_sistema is not None:
+        c_cod = encontrar_coluna(st.session_state.base_sistema, ['códproduto', 'codproduto', 'codigo', 'cod'], 0)
+        c_desc = encontrar_coluna(st.session_state.base_sistema, ['descproduto', 'descricao'], 1)
+        c_un = encontrar_coluna(st.session_state.base_sistema, ['unidmedida', 'unidade', 'un'], 3)
+        c_est = encontrar_coluna(st.session_state.base_sistema, ['idestoquefísico', 'idestoque'], 0)
+        c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
+        c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
+        c_atv_b = encontrar_coluna(st.session_state.base_sistema, ['ativo', 'patrimonio', 'n ativo'], -1)
+
     # --- DEFINIÇÃO E RENDERIZAÇÃO DAS ABAS NA ORDEM EXATA SOLICITADA ---
-    ordem_abas = ["🔍 Contar Item", "📊 Contagem Atual", "📄 Base de Estoque", "📁 Histórico Geral", "🏆 Desempenho e Prazos"]
+    ordem_abas = ["🔍 Contar Item", "📊 Contagem Atual e Progresso", "📄 Base de Estoque", "📁 Histórico Geral", "🏆 Desempenho e Prazos"]
     if eh_supervisor:
         ordem_abas += ["🔬 Painel Supervisor", "📈 Acuracidade Estoque", "⚙️ Gerenciar Estoques"]
     if eh_yago_master:
@@ -304,19 +304,14 @@ else:
 
     # 🔍 ABA 1: CONTAR ITEM
     with abas_gui[0]:
-        if id_inventario_atual is None or st.session_state.base_sistema is None:
-            st.warning("⚠️ Selecione a base e o inventário na barra lateral.")
+        if id_inventario_atual is None:
+            st.warning("⚠️ **Bloqueado:** Nenhum lote de inventário selecionado ou ativo. Aguarde o Supervisor abrir um Lote para iniciar os trabalhos.")
+        elif st.session_state.base_sistema is None:
+            st.warning("⚠️ Carregue a Base Geral no menu lateral para iniciar as bipagens.")
         elif inventario_selected_obj['status'] == "Fechado":
-            st.error("🔒 Inventário Fechado.")
+            st.error("🔒 Este lote de inventário foi finalizado e fechado pelo Supervisor.")
         else:
-            c_cod = encontrar_coluna(st.session_state.base_sistema, ['códproduto', 'codproduto', 'codigo', 'cod'], 0)
-            c_desc = encontrar_coluna(st.session_state.base_sistema, ['descproduto', 'descricao'], 1)
-            c_un = encontrar_coluna(st.session_state.base_sistema, ['unidmedida', 'unidade', 'un'], 3)
-            c_est = encontrar_coluna(st.session_state.base_sistema, ['idestoquefísico', 'idestoque'], 0)
-            c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
-            c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
-            c_atv_b = encontrar_coluna(st.session_state.base_sistema, ['ativo', 'patrimonio', 'n ativo'], -1)
-
+            st.subheader(f"📝 Lançamento de Contagem Ativa – Lote {id_inventario_atual}")
             bip_prod = st.text_input("💻 Bipar Código do Produto", key=f"bip_op_{st.session_state.contador_reset}")
             if bip_prod:
                 prod_l = str(bip_prod).strip().upper()
@@ -331,7 +326,7 @@ else:
                         if val_at and val_at.lower() != "nan" and val_at != "": tem_ativo_na_base = True
 
                     with st.form("f_salva_contagem", clear_on_submit=True):
-                        q_cont = st.number_input("Quantidade Física", min_value=0, step=1)
+                        q_cont = st.number_input("Quantidade Física Encontrada", min_value=0, step=1, value=1)
                         if tem_ativo_na_base:
                             n_ativ = st.text_input("🔢 Número do Ativo (OBRIGATÓRIO)")
                         else:
@@ -349,14 +344,60 @@ else:
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """, (id_inventario_atual.replace('#',''), str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, n_ativ.strip().upper(), obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
                                 conn.commit()
-                                st.success("Contagem salva!")
+                                st.success("Contagem salva com sucesso!")
                                 st.session_state.contador_reset += 1; st.rerun()
-                else: st.error("Produto não localizado na base.")
+                else: st.error("Material/Produto não localizado na base de dados carregada.")
 
-    # 📊 ABA 2: CONTAGEM ATUAL
+    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO (ACOMPANHAMENTO EM TEMPO REAL)
     with abas_gui[1]:
         if id_inventario_atual:
+            st.subheader(f"📊 Progresso em Tempo Real - Lote {id_inventario_atual}")
+            
+            # Puxar contagens salvas
             df_c = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
+            
+            # Se houver base carregada, calcular itens faltantes
+            if st.session_state.base_sistema is not None:
+                total_itens_base = len(st.session_state.base_sistema)
+                itens_contados_unicos = df_c['cod_produto'].unique() if not df_c.empty else []
+                total_contados = len(itens_contados_unicos)
+                total_faltantes = max(0, total_itens_base - total_contados)
+                
+                m1, m2, m3 = st.columns(3)
+                m1.metric("📋 Total de Itens Mapeados", total_itens_base)
+                m2.metric("✅ Itens Já Contabilizados", total_contados)
+                m3.metric("⏳ Itens Pendentes (Falta Contar)", total_faltantes)
+                
+                # Identificar os itens faltantes
+                codigos_base = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().tolist()
+                codigos_contados = [str(x).upper().strip() for x in itens_contados_unicos]
+                
+                codigos_faltantes = [c for c in codigos_base if c not in codigos_contados]
+                
+                st.markdown("---")
+                if total_faltantes > 0:
+                    st.error(f"⚠️ **Atenção:** Ainda restam {total_faltantes} itens sem nenhuma contagem realizada.")
+                    df_faltantes_exibir = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().isin(codigos_faltantes)]
+                    st.write("### 📋 Lista de Itens Faltantes para Concluir:")
+                    st.dataframe(df_faltantes_exibir[[c_cod, c_desc, c_loc]], use_container_width=True, hide_index=True)
+                else:
+                    st.success("🎉 **Excelente!** 100% dos itens da planilha base foram contabilizados.")
+                st.markdown("---")
+
+                # REGRAS DE FECHAMENTO EXCLUSIVAS DO SUPERVISOR
+                if eh_supervisor and inventario_selected_obj['status'] == 'Aberto':
+                    if total_faltantes > 0:
+                        st.button("🔒 Encerrar e Fechar Lote Geral", disabled=True, help="Não é permitido fechar o inventário incompleto! Finalize a contagem de todos os itens.")
+                        st.caption("🔴 O botão de encerramento está bloqueado porque existem itens pendentes de contagem.")
+                    else:
+                        if st.button("🔒 Encerrar e Fechar Lote Geral", type="primary", use_container_width=True):
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
+                            conn.commit()
+                            st.success("Lote fechado com sucesso!")
+                            st.rerun()
+            
+            st.write("### 📑 Histórico de Lançamentos Registrados")
             st.dataframe(df_c.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
         else: st.info("Nenhum inventário selecionado.")
 
@@ -365,7 +406,7 @@ else:
         if st.session_state.base_sistema is not None: st.dataframe(st.session_state.base_sistema, use_container_width=True)
         else: st.info("Nenhuma base carregada.")
 
-    # 📁 ABA 4: HISTÓRICO GERAL (LIVRE DE DATAS POR PADRÃO)
+    # 📁 ABA 4: HISTÓRICO GERAL
     with abas_gui[3]:
         st.title("📁 Arquivo Geral de Movimentações")
         c_dt1, c_dt2 = st.columns(2)
@@ -430,7 +471,7 @@ else:
 
     # RECURSOS EXCLUSIVOS DO SUPERVISOR
     if eh_supervisor:
-        # 🔬 ABA 6: PAINEL SUPERVISOR (FLEXIBILIDADE DE ATIVO REVISADA - ENTRA CONFORME SOLICITADO)
+        # 🔬 ABA 6: PAINEL SUPERVISOR
         with abas_gui[5]:
             st.title("🔬 Módulo Amostral do Supervisor")
             if df_inventarios_sup.empty:
@@ -467,7 +508,6 @@ else:
             if arquivo_supervisor is not None:
                 try:
                     df_temp_check = pd.read_excel(arquivo_supervisor)
-                    # --- ATUALIZAÇÃO SOLICITADA: EXCEL LIBERADO SEM TRAVAR EXIGÊNCIA DE COLUNA FIXA NO UPLOAD ---
                     st.session_state.base_supervisor = df_temp_check
                     st.success("✅ Planilha de amostragem pré-carregada com sucesso!")
                 except Exception as e: st.error(f"Erro: {e}")
@@ -493,7 +533,6 @@ else:
                         row_sup = match_sup.iloc[0]
                         st.info(f"📋 **Item:** {sup_bl} - {row_sup[col_desc_sup]} | **Saldo Sistema:** {row_sup[col_qtd_sup]}")
                         
-                        # --- VERIFICAÇÃO OPERACIONAL DINÂMICA DO ATIVO SE ELE CONSTAR NO MODELO ---
                         tem_ativo_na_planilha_sup = False
                         if col_atv_sup in match_sup.columns:
                             v_at_s = str(row_sup[col_atv_sup]).strip()
@@ -507,12 +546,12 @@ else:
                             else:
                                 f_ativo_sup = st.text_input("🔢 Número do Ativo (Opcional)")
                                 
-                            etiq_check = st.selectbox("🏷️ A etiqueta de identificação está correta?", ["Sim", "Não"])
-                            loc_check = st.selectbox("📍 O material está na localização física correta?", ["Sim", "Não"])
+                            etiq_check = st.selectbox("A etiqueta de identificação está correta?", ["Sim", "Não"])
+                            loc_check = st.selectbox("O material está na localização física correta?", ["Sim", "Não"])
                             
                             if st.form_submit_button("💾 Salvar na Acuracidade", type="primary"):
                                 if tem_ativo_na_planilha_sup and not f_ativo_sup.strip():
-                                    st.error("❌ Erro: O preenchimento do Ativo é obrigatório para este material, pois ele consta no saldo mapeado!")
+                                    st.error("❌ Erro: O preenchimento do Ativo é obrigatório para este material!")
                                 else:
                                     q_s_v = int(row_sup[col_qtd_sup]) if pd.notna(row_sup[col_qtd_sup]) else 0
                                     cursor = conn.cursor()
@@ -531,16 +570,40 @@ else:
 
         # 📈 ABA 7: ACURACIDADE ESTOQUE
         with abas_gui[6]:
-            st.title("📈 Acuracidade Local")
-            df_ac = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ? ORDER BY id DESC", conn, params=(st.session_state.unidade_selecionada,))
-            if not df_ac.empty:
-                total_aud = len(df_ac)
-                certos_etiq = len(df_ac[df_ac['etiqueta_correta'] == "Sim"])
-                certos_local = len(df_ac[df_ac['localizacao_correta'] == "Sim"])
-                c_ac1, c_ac2 = st.columns(2)
-                c_ac1.metric("Acuracidade de Etiquetas", f"{(certos_etiq / total_aud)*100:.1f}%")
-                c_ac2.metric("Acuracidade de Localização", f"{(certos_local / total_aud)*100:.1f}%")
-            st.dataframe(df_ac.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+            st.title("📈 Acuracidade Local por Estoque")
+            df_ac = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE unidade = ?", conn, params=(st.session_state.unidade_selecionada,))
+            
+            if df_ac.empty:
+                st.info("💡 Nenhuma amostragem de acuracidade coletada no banco de dados para esta unidade.")
+            else:
+                linhas_acuracidade_gerencial = []
+                for dep_id, grupo in df_ac.groupby('id_estoque'):
+                    total_itens_dep = len(grupo)
+                    certos_qtd = len(grupo[grupo['diferenca'] == 0])
+                    certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
+                    certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
+                    desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
+                    
+                    pct_saldo = (certos_qtd / total_itens_dep) * 100
+                    pct_etiq = (certos_etiq / total_itens_dep) * 100
+                    pct_local = (certos_local / total_itens_dep) * 100
+                    
+                    cor_saldo = "green" if pct_saldo == 100 else "red"
+                    cor_etiq = "green" if pct_etiq == 100 else "red"
+                    cor_local = "green" if pct_local == 100 else "red"
+                    
+                    linhas_acuracidade_gerencial.append({
+                        "CÓDIGO ESTOQUE": str(dep_id),
+                        "DESCRIÇÃO DO ESTOQUE": desc_dep,
+                        "QUANTIDADE ITENS": total_itens_dep,
+                        "ACURACIDADE SALDO": f"<span style='color:{cor_saldo}; font-weight:bold;'>{pct_saldo:.1f}%</span>",
+                        "ACURACIDADE ETIQUETA": f"<span style='color:{cor_etiq}; font-weight:bold;'>{pct_etiq:.1f}%</span>",
+                        "ACURACIDADE LOCALIZAÇÃO": f"<span style='color:{cor_local}; font-weight:bold;'>{pct_local:.1f}%</span>"
+                    })
+                
+                df_gerencial_final = pd.DataFrame(linhas_acuracidade_gerencial)
+                st.write(df_gerencial_final.to_html(escape=False, index=False), unsafe_allow_html=True)
+                st.write("")
 
         # ⚙️ ABA 8: GERENCIAR ESTOQUES
         with abas_gui[7]:
