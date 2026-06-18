@@ -346,20 +346,47 @@ if not st.session_state.logged_in:
                 btn_cad = st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True)
                 if btn_cad:
                     cpf_l = limpar_documento(novo_cpf)
-                    if not novo_nome or not cpf_l or not novo_email or not nova_senha:
+                    email_l = novo_email.strip()
+                    
+                    if not novo_nome or not cpf_l or not email_l or not nova_senha:
                         st.error("⚠️ Preencha todos os campos!")
                     elif nova_senha != confirma_senha:
                         st.error("❌ As senhas não batem!")
                     else:
-                        try:
-                            cursor = conn.cursor()
-                            cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade) VALUES (?, ?, ?, ?, ?)", (novo_nome.strip(), cpf_l, novo_email.strip(), nova_senha, unidade_cadastro))
-                            conn.commit()
-                            st.success("✅ Cadastrado com sucesso!")
-                            st.session_state.tela_acesso = "login"
-                            st.rerun()
-                        except:
-                            st.error("❌ CPF ou E-mail já existente.")
+                        cursor = conn.cursor()
+                        # --- AJUSTE INTELEGENte CONTRA O ERRO DA IMAGEM ---
+                        # Verifica se o CPF ou E-mail já existem antes de rodar o INSERT para não duplicar
+                        cursor.execute("SELECT email, cpf FROM usuarios WHERE cpf = ? OR email = ?", (cpf_l, email_l))
+                        usuario_existente = cursor.fetchone()
+                        
+                        if usuario_existente:
+                            st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta ativa no sistema!")
+                            
+                            # Gera automaticamente o link de redefinição para o e-mail duplicado de forma direta
+                            token_cripto = base64.b64encode(email_l.encode('utf-8')).decode('utf-8')
+                            link_direto_cadastro = f"https://auditoriajba.streamlit.app/?recuperar=true&token={token_cripto}"
+                            
+                            st.markdown(f"""
+                                <div class="bloco-info-link" style="margin-top: 5px;">
+                                    <p style="margin:0; color:#c0392b; font-weight:bold; font-size:14px;">🔄 Deseja alterar a senha desta conta existente?</p>
+                                    <p style="margin:4px 0 10px 0; color:#7b241c; font-size:12px;">Para a sua segurança, o cadastro duplicado foi bloqueado. Clique no botão abaixo para abrir a janela de redefinição imediata.</p>
+                                    <a href="{link_direto_cadastro}" target="_blank" style="text-decoration:none;">
+                                        <button style="background-color:#e74c3c; color:white; border:none; padding:8px 15px; border-radius:4px; font-weight:bold; cursor:pointer; width:100%;">
+                                            🔗 Gerar Nova Senha Agora
+                                        </button>
+                                    </a>
+                                </div>
+                            """, unsafe_allow_html=True)
+                        else:
+                            try:
+                                cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade) VALUES (?, ?, ?, ?, ?)", (novo_nome.strip(), cpf_l, email_l, nova_senha, unity_cadastro := unity_cadastro if 'unity_cadastro' in locals() else unidade_cadastro))
+                                conn.commit()
+                                st.success("✅ Cadastrado com sucesso!")
+                                st.session_state.tela_acesso = "login"
+                                st.rerun()
+                            except Exception as e:
+                                st.error(f"❌ Erro operacional: {e}")
+                                
             if st.button("◀ Voltar"):
                 st.session_state.tela_acesso = "login"
                 st.rerun()
@@ -718,11 +745,10 @@ else:
             st.subheader("📄 Espelho Base de Saldo")
             st.dataframe(st.session_state.base_sistema, use_container_width=True)
 
-    # --- ABA 7: DESEMPENHO E PRAZOS (COMPLETAMENTE REESTRUTURADA E AUTOMATIZADA) ---
+    # --- ABA 7: DESEMPENHO E PRAZOS ---
     with abas_render[6]:
         st.title("🏆 Desempenho e Prazos por Estoque")
         
-        # Mapeamento estático e estruturado dos 36 Almoxarifados / Estoques fornecidos
         lista_estoques_fixa = [
             {"id": "1077", "desc": "JBA - CLASSE D"}, {"id": "1078", "desc": "JBA - COPA E COZINHA"},
             {"id": "1080", "desc": "JBA - DADOS - CLIENTE"}, {"id": "1082", "desc": "JBA - VIVO VITA - CLIENTE"},
@@ -744,7 +770,6 @@ else:
             {"id": "3484", "desc": "JBA - CELULARES DEFEITO"}, {"id": "3546", "desc": "JBA - CELULARES"}
         ]
         
-        # Consultar no banco a última data em que cada ID de estoque foi lançado por um almoxarife
         df_ultimas_contagens = pd.read_sql_query("""
             SELECT id_estoque, MAX(data_hora) as ultima_data 
             FROM contagens 
@@ -753,17 +778,13 @@ else:
         """, conn, params=(st.session_state.unidade_selecionada,))
         
         mapa_datas = dict(zip(df_ultimas_contagens['id_estoque'].astype(str).str.strip(), df_ultimas_contagens['ultima_data']))
-        
         hoje_dt = datetime.datetime.now()
         linhas_planilha_desempenho = []
-        
-        # Contadores de Resumo para os KPIs
         bom_count, auditar_count, criticos_count = 0, 0, 0
         
         for est in lista_estoques_fixa:
             est_id = est["id"]
             est_desc = est["desc"]
-            
             ultima_data_str = mapa_datas.get(est_id, None)
             
             if ultima_data_str:
@@ -778,7 +799,6 @@ else:
                 dias_passados = 999
                 data_formatada = "Nunca Contabilizado"
                 
-            # Regras de Criticidade
             if dias_passados <= 7:
                 status_final = "🟢 Bom"
                 bom_count += 1
@@ -798,29 +818,22 @@ else:
             })
             
         df_desempenho_final = pd.DataFrame(linhas_planilha_desempenho)
-        
-        # Renderização dos Cards Resumos (KPIs) no Topo
         k1, k2, k3 = st.columns(3)
-        with k1:
-            st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🟢 EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
-        with k2:
-            st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #f1c40f;"><div class="bloco-titulo">🟡 PRECISA CONTAR</div><div class="bloco-valor" style="color: #f39c12;">{auditar_count}</div></div>', unsafe_allow_html=True)
-        with k3:
-            st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
+        with k1: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🟢 EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
+        with k2: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #f1c40f;"><div class="bloco-titulo">🟡 PRECISA CONTAR</div><div class="bloco-valor" style="color: #f39c12;">{auditar_count}</div></div>', unsafe_allow_html=True)
+        with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
             
         st.write("")
         st.markdown("### 📊 Planilha Temporal Automatizada de Inventários")
-        # Exibe a planilha de controle integrada e automatizada na tela
         st.dataframe(df_desempenho_final, use_container_width=True, hide_index=True)
         
-        # Gráfico de produtividade mantido na base da aba
         st.markdown("---")
         st.write("### 🏆 Lançamentos Totais por Operador")
         df_ops = pd.read_sql_query("SELECT operador as Operador, COUNT(id) as [Lançamentos Feitos] FROM contagens WHERE unidade = ? GROUP BY operador", conn, params=(st.session_state.unidade_selecionada,))
         if not df_ops.empty:
             st.bar_chart(data=df_ops, x='Operador', y='Lançamentos Feitos', color="#d35400")
 
-    # --- ABA NOVA EXCLUSIVA PARA O YAGO: GESTÃO DE LOGINS ---
+    # --- ABA EXCLUSIVA PERMISSÃO SUPERVISOR: GESTÃO DE LOGINS ---
     if eh_supervisor:
         with abas_render[7]:
             st.title("⚙️ Painel de Controle e Gestão de Usuários")
