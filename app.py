@@ -211,7 +211,7 @@ if not st.session_state.logged_in:
                         cursor.execute("SELECT email, cpf FROM usuarios WHERE cpf = ? OR email = ?", (cpf_l, email_l))
                         usuario_existente = cursor.fetchone()
                         if usuario_existente:
-                            st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta ativa!")
+                            st.error("❌ Erro de Cadastro: Este CPF ou E-mail já possui conta activa!")
                         else:
                             try:
                                 cursor.execute("INSERT INTO usuarios (nome, cpf, email, senha, unidade, cargo) VALUES (?, ?, ?, ?, ?, 'Almoxarife')", (novo_nome.strip(), cpf_l, email_l, nova_senha, unidade_cadastro))
@@ -263,7 +263,6 @@ else:
             st.session_state.logged_in = False; st.rerun()
             
         st.markdown("---")
-        # MODIFICADO: Retirado o texto "(Planilha Mãe)"
         st.write("📂 **Base Geral**")
         ar_excel = st.file_uploader("Upload Excel Geral", type=["xlsx"], label_visibility="collapsed")
         if ar_excel:
@@ -271,7 +270,6 @@ else:
             
         st.markdown("---")
         st.write("📁 **Selecione o Inventário**")
-        # AJUSTADO: Verificação robusta para evitar erro de KeyError caso o dataframe venha corrompido ou sem linhas válidas
         if df_inventarios.empty or 'id' not in df_inventarios.columns:
             id_inventario_atual = None
             inventario_selected_obj = None
@@ -281,7 +279,7 @@ else:
             id_inventario_atual = inv_sel.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # --- SEÇÃO DINÂMICA DE PROGRESSO REAL NA BARRA LATERAL ---
+        # --- SEÇÃO DINÂMICA DE PROGRESSO ATUALIZADA (EXIBE PARA SUPERVISOR E ALMOXARIFE) ---
         if id_inventario_atual and st.session_state.base_sistema is not None:
             df_c_side = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
             total_itens_base = len(st.session_state.base_sistema)
@@ -289,7 +287,8 @@ else:
             total_contados = len(itens_contados_unicos)
             total_faltantes = max(0, total_itens_base - total_contados)
             
-            st.markdown("📊 **Progresso do Lote Atual**")
+            # ATUALIZAÇÃO DA DESCRIÇÃO PEDIDA
+            st.markdown("**📊 Progresso do Inventário Atual**")
             st.caption(f"📋 Mapeados: **{total_itens_base}**")
             st.caption(f"✅ Contados: **{total_contados}**")
             if total_faltantes > 0:
@@ -299,7 +298,6 @@ else:
 
         st.markdown("---")
         st.write("⚙️ **Criar Inventário**")
-        # MODIFICADO: Alterado "+ Abrir Novo Lote" para "+ Abrir Nova Contagem"
         with st.expander("➕ Abrir Nova Contagem"):
             with st.form("form_novo_inv", clear_on_submit=True):
                 n_inv = st.text_input("Nome do Inventário Geral")
@@ -364,7 +362,7 @@ else:
                         
                         if st.form_submit_button("Confirmar Lançamento", type="primary"):
                             if tem_ativo_na_base and not n_ativ.strip():
-                                st.error("❌ Erro: O campo Ativo é maior do que o permitido ou obrigatório para este produto!")
+                                st.error("❌ Erro: O campo Ativo é obrigatório para este produto!")
                             else:
                                 cursor = conn.cursor()
                                 q_sis = int(row[c_qtd]) if pd.notna(row[c_qtd]) else 0
