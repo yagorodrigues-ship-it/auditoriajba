@@ -232,6 +232,8 @@ else:
     # --- MAPEAMENTO DE COLUNAS DA BASE ---
     c_cod, c_desc, c_un, c_est, c_qtd, c_loc = "", "", "", "", "", ""
     possui_coluna_ativo_real = False
+    col_lote_detectada = ""
+    col_ativo_detectada = ""
     
     if st.session_state.base_sistema is not None:
         c_cod = encontrar_coluna(st.session_state.base_sistema, ['códproduto', 'codproduto', 'codigo', 'cod'], 0)
@@ -241,16 +243,31 @@ else:
         c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
         c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
         
-        possui_coluna_ativo_real = any(str(col).strip().upper() == "ATIVO" for col in st.session_state.base_sistema.columns)
+        # Mapeamento dinâmico de colunas para exibição amigável
+        for col in st.session_state.base_sistema.columns:
+            c_clean = str(col).strip().upper().replace(" ", "").replace("Ã", "A")
+            if c_clean == "ATIVO":
+                possui_coluna_ativo_real = True
+                col_ativo_detectada = col
+            if c_clean in ["LOTE", "SITUACAOLOTE", "LOTEFORNECEDORAUX", "LOTEFORNECEDOR"]:
+                col_lote_detectada = col
         
-        # --- UNIFICAÇÃO INTELIGENTE POR CÓDIGO (AGRUPAMENTO) ---
-        # Evita linhas repetidas devido a múltiplos lotes na planilha original
+        # --- UNIFICAÇÃO INTELIGENTE COM CONCATENAÇÃO DE LOTES E ATIVOS ---
         st.session_state.base_sistema[c_cod] = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip()
         
+        # Função interna para juntar valores únicos de texto sem repetições vazias
+        def join_unique_strings(series):
+            unique_vals = series.dropna().astype(str).str.strip().unique()
+            filtered_vals = [v for v in unique_vals if v.lower() not in ["", "nan", "none", "-", "0"]]
+            return ", ".join(filtered_vals) if filtered_vals else "—"
+
         agg_dict = {c_qtd: 'sum'}
         for col in st.session_state.base_sistema.columns:
             if col not in [c_cod, c_qtd]:
-                agg_dict[col] = 'first'
+                if col in [col_lote_detectada, col_ativo_detectada] and col != "":
+                    agg_dict[col] = join_unique_strings
+                else:
+                    agg_dict[col] = 'first'
                 
         st.session_state.base_sistema = st.session_state.base_sistema.groupby(c_cod, as_index=False).agg(agg_dict)
 
@@ -410,6 +427,18 @@ else:
                         
                         st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
 
+                        # --- EXIBIÇÃO VISÍVEL E DINÂMICA DE LOTE E ATIVO CASO EXISTAM NO SISTEMA ---
+                        c_dados1, c_dados2 = st.columns(2)
+                        if col_lote_detectada and col_lote_detectada in row:
+                            val_lote_layout = str(row[col_lote_detectada]).strip()
+                            if val_lote_layout and val_lote_layout.lower() not in ["nan", "none", "—"]:
+                                c_dados1.markdown(f'<div class="bloco-info" style="background-color: #fef9e7; border-color: #f1c40f;"><div class="bloco-titulo">📦 LOTE(S) NO SISTEMA</div><div class="bloco-valor" style="font-size: 16px; color: #b7950b;">{val_lote_layout}</div></div>', unsafe_allow_html=True)
+                        
+                        if col_ativo_detectada and col_ativo_detectada in row:
+                            val_ativo_layout = str(row[col_ativo_detectada]).strip()
+                            if val_ativo_layout and val_ativo_layout.lower() not in ["nan", "none", "—"]:
+                                c_dados2.markdown(f'<div class="bloco-info" style="background-color: #f9ebea; border-color: #e74c3c;"><div class="bloco-titulo">🔢 ATIVO(S) NO SISTEMA</div><div class="bloco-valor" style="font-size: 16px; color: #922b21;">{val_ativo_layout}</div></div>', unsafe_allow_html=True)
+
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
                             
@@ -441,18 +470,21 @@ else:
                                 else:
                                     q_sis = int(row[c_qtd]) if pd.notna(row[c_qtd]) else 0
                                     
+                                    # Captura o lote concatenado para salvar no banco histórico
+                                    lote_banco = str(row[col_lote_detectada]).strip() if col_lote_detectada else ""
+                                    
                                     if is_fluxo_recontagem:
                                         id_reg_recont = int(df_recont_check.iloc[0]['id'])
                                         cursor.execute("""
                                             UPDATE contagens 
-                                            SET qtd_contada = ?, diferenca = ?, recontagem = 'Realizada', operador = ?, data_hora = ?, observacao = ?, ativo = ?
+                                            SET qtd_contada = ?, diferenca = ?, recontagem = 'Realizada', operador = ?, data_hora = ?, observacao = ?, ativo = ?, lote = ?
                                             WHERE id = ?
-                                        """, (q_cont, q_cont - q_sis, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"[2a Contagem] {obs}", val_ativo, id_reg_recont))
+                                        """, (q_cont, q_cont - q_sis, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"[2a Contagem] {obs}", val_ativo, lote_banco, id_reg_recont))
                                     else:
                                         cursor.execute("""
-                                            INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?)
-                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, val_ativo, obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
+                                            INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade, lote)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?, ?)
+                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, val_ativo, obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada, lote_banco))
                                     
                                     conn.commit()
                                     st.success("Contagem processada e armazenada com sucesso!")
@@ -556,7 +588,7 @@ else:
                 cod_chave = str(linha_cod).upper().strip()
                 if cod_chave in map_operadores:
                     rec_status = f" (2ª Contagem)" if map_recont.get(cod_chave) == 'Realizada' else ""
-                    return f"🟩 Contado ({map_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}{rec_status}"
+                    return f"🟩 Contado ({map_quantidades[cod_chave]}) por {map_operadores[cod_chave]}{rec_status}"
                 return "🟥 Não Contado"
             
             df_base_realtime = st.session_state.base_sistema.copy()
