@@ -230,7 +230,7 @@ else:
         return ""
 
     # --- MAPEAMENTO DE COLUNAS DA BASE ---
-    c_cod, c_desc, c_un, c_est, c_qtd, c_loc, c_atv_b = "", "", "", "", "", "", ""
+    c_cod, c_desc, c_un, c_est, c_qtd, c_loc = "", "", "", "", "", ""
     if st.session_state.base_sistema is not None:
         c_cod = encontrar_coluna(st.session_state.base_sistema, ['códproduto', 'codproduto', 'codigo', 'cod'], 0)
         c_desc = encontrar_coluna(st.session_state.base_sistema, ['descproduto', 'descricao'], 1)
@@ -238,15 +238,6 @@ else:
         c_est = encontrar_coluna(st.session_state.base_sistema, ['idestoquefísico', 'idestoque'], 0)
         c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
         c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
-        
-        c_atv_b = ""
-        for c in st.session_state.base_sistema.columns:
-            c_upper = str(c).upper().replace(" ", "")
-            if "ATIVO" in c_upper and "LOTE" not in c_upper and "FORNECEDOR" not in c_upper:
-                c_atv_b = c
-                break
-        if not c_atv_b:
-            c_atv_b = encontrar_coluna(st.session_state.base_sistema, ['ativo', 'patrimonio', 'n ativo'], -1)
 
     # INTERFACE LATERAL (SIDEBAR)
     with st.sidebar:
@@ -364,7 +355,7 @@ else:
         
     abas_gui = st.tabs(ordem_abas)
 
-    # 🔍 ABA 1: CONTAR ITEM
+    # 🔍 ABA 1: CONTAR ITEM (CAMPO DE ATIVO TOTALMENTE REMOVIDO)
     with abas_gui[0]:
         if id_inventario_atual is None:
             st.warning("⚠️ **Bloqueado:** Nenhum lote de inventário selecionado ou ativo. Use a barra lateral para criar ou selecionar um lote.")
@@ -403,52 +394,23 @@ else:
                         
                         st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
 
-                        # --- CORREÇÃO FINAL DA REQUISITÃO: O campo na interface é exibido sempre como livre/opcional ---
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
-                            n_ativ = st.text_input("🔢 Número do Ativo (Opcional - Requerido somente para itens patrimoniais identificados)")
                             obs = st.text_input("Observação")
                             
                             if st.form_submit_button("Confirmar Lançamento", type="primary"):
                                 cursor = conn.cursor()
-                                val_ativo_inserido = n_ativ.strip().upper()
                                 
-                                # --- INTELIGÊNCIA EXCLUSIVA DA VALIDAÇÃO POR ITEM (LINHA POR LINHA) ---
-                                tem_ativo_na_base = False
-                                if c_atv_b and c_atv_b in it.columns and not pd.isna(row[c_atv_b]):
-                                    c_atv_upper = str(c_atv_b).upper().replace(" ", "")
-                                    # Desconsidera completamente falsos cabeçalhos como "Lote" ou "Lote Fornecedor"
-                                    if "LOTE" not in c_atv_upper and "FORNECEDOR" not in c_atv_upper:
-                                        val_at_linha = str(row[c_atv_b]).strip()
-                                        if val_at_linha and val_at_linha.lower() != "nan" and val_at_linha != "":
-                                            tem_ativo_na_base = True
-
+                                # --- VALIDAÇÃO SIMPLIFICADA SEM CONTROLE DE ATIVOS ---
                                 if not is_fluxo_recontagem:
-                                    if tem_ativo_na_base:
-                                        # Bloqueia apenas se a linha do produto no Excel exigir ativo e o operador deixar em branco
-                                        if not val_ativo_inserido:
-                                            st.error("❌ Erro: O preenchimento do número do Ativo é obrigatório para este produto específico!")
-                                            st.stop()
-                                            
-                                        cursor.execute("""
-                                            SELECT COUNT(*) FROM contagens 
-                                            WHERE inventario_id = ? AND cod_produto = ? AND ativo = ? AND unidade = ?
-                                        """, (id_p_limpo, prod_l, val_ativo_inserido, st.session_state.unidade_selecionada))
-                                        
-                                        if cursor.fetchone()[0] > 0:
-                                            st.error(f"❌ Erro: O ativo '{val_ativo_inserido}' para este produto já foi contabilizado neste lote!")
-                                            st.stop()
-                                    else:
-                                        # Se o item bipado não exigir ativo no Excel (ex: botina de segurança), pula a trava e salva direto
-                                        cursor.execute("""
-                                            SELECT COUNT(*) FROM contagens 
-                                            WHERE inventario_id = ? AND cod_produto = ? AND unidade = ?
-                                        """, (id_p_limpo, prod_l, st.session_state.unidade_selecionada))
-                                        
-                                        if cursor.fetchone()[0] > 0:
-                                            st.error("❌ Erro: Este item comum sem ativo já foi contabilizado neste lote!")
-                                            st.stop()
-                                # ---------------------------------------------------------------------------------------
+                                    cursor.execute("""
+                                        SELECT COUNT(*) FROM contagens 
+                                        WHERE inventario_id = ? AND cod_produto = ? AND unidade = ?
+                                    """, (id_p_limpo, prod_l, st.session_state.unidade_selecionada))
+                                    
+                                    if cursor.fetchone()[0] > 0:
+                                        st.error("❌ Erro: Este item já foi contabilizado neste lote!")
+                                        st.stop()
 
                                 if q_cont == 0:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
@@ -466,7 +428,7 @@ else:
                                         cursor.execute("""
                                             INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade)
                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?)
-                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, val_ativo_inserido, obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
+                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, "", obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
                                     
                                     conn.commit()
                                     st.success("Contagem processada e armazenada com sucesso!")
@@ -525,7 +487,7 @@ else:
                 if not df_divergentes_realtime.empty:
                     st.markdown("### 🚨 Itens com Divergência de Saldo Detectada (Aguardando Correção)")
                     st.dataframe(
-                        df_divergentes_realtime[['cod_produto', 'desc_produto', 'desc_estoque', 'qtd_sistema', 'qtd_contada', 'diferenca', 'operador', 'data_hora', 'ativo']], 
+                        df_divergentes_realtime[['cod_produto', 'desc_produto', 'desc_estoque', 'qtd_sistema', 'qtd_contada', 'diferenca', 'operador', 'data_hora']], 
                         use_container_width=True, 
                         hide_index=True
                     )
@@ -554,7 +516,7 @@ else:
     # 📄 ABA 3: BASE DE ESTOQUE
     with abas_gui[2]:
         if st.session_state.base_sistema is not None and c_cod:
-            st.subheader("📄 Espelho Base de Saldo - Status de Contagem Atualizado")
+            st.subheader("📄 Espelho Base de Saldo - Status de Contagem Updated")
             
             if id_inventario_atual:
                 df_lancados_base = pd.read_sql_query("SELECT cod_produto, operador, qtd_contada, recontagem FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
@@ -742,7 +704,7 @@ else:
                 
                 for idx, pasta_sup in df_pastas_paginadas.iterrows():
                     df_itens_da_pasta = pd.read_sql_query(
-                        "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora', ativo as 'Ativo' FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", 
+                        "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora' FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", 
                         conn, 
                         params=(pasta_sup['id'], st.session_state.unidade_selecionada)
                     )
@@ -806,7 +768,7 @@ else:
                 id_p_limpo = id_inventario_atual.replace('#','')
                 
                 df_erros_lote = pd.read_sql_query(
-                    "SELECT id, cod_produto, desc_produto, qtd_sistema, qtd_contada, diferenca, recontagem, ativo FROM contagens WHERE inventario_id = ? AND diferenca != 0 AND unidade = ?", 
+                    "SELECT id, cod_produto, desc_produto, qtd_sistema, qtd_contada, diferenca, recontagem FROM contagens WHERE inventario_id = ? AND diferenca != 0 AND unidade = ?", 
                     conn, params=(id_p_limpo, st.session_state.unidade_selecionada)
                 )
                 
@@ -825,7 +787,7 @@ else:
                     else:
                         st.info("ℹ️ Todos os itens divergentes já foram enviados para a recontagem.")
                 else:
-                    st.success("🎉 Nenhuma divergência activa encontrada neste lote até o momento.")
+                    st.success("🎉 Nenhuma divergência ativa encontrada neste lote até o momento.")
                     
             st.markdown("---")
             if df_inventarios_sup.empty:
@@ -885,7 +847,6 @@ else:
                 col_local_sup = encontrar_coluna(df_s, ['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
                 col_qtd_sup = encontrar_coluna(df_s, ['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
                 col_id_est_sup = encontrar_coluna(df_s, ['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
-                col_atv_sup = encontrar_coluna(df_s, ['ativo', 'patrimonio', 'n ativo', 'numero ativo'], -1)
 
                 bip_sup_item = st.text_input("💻 Bipar Produto para Auditoria Amostral", key="bip_sup_action")
                 if bip_sup_item:
@@ -896,35 +857,21 @@ else:
                         row_sup = match_sup.iloc[0]
                         st.info(f"📋 **Item:** {sup_bl} - {row_sup[col_desc_sup]} | **Saldo Sistema:** {row_sup[col_qtd_sup]}")
                         
-                        tem_ativo_na_planilha_sup = False
-                        if col_atv_sup in match_sup.columns:
-                            v_at_s = str(row_sup[col_atv_sup]).strip()
-                            if v_at_s and v_at_s.lower() != "nan" and v_at_s != "": tem_ativo_na_planilha_sup = True
-                        
                         with st.form("form_auditoria_action", clear_on_submit=True):
                             qtd_aud_sup = st.number_input("Quantidade Física Encontrada", min_value=0, step=1)
-                            
-                            if tem_ativo_na_planilha_sup:
-                                f_ativo_sup = st.text_input("🔢 Número do Ativo (OBRIGATÓRIO PARA ESTE ITEM)")
-                            else:
-                                f_ativo_sup = st.text_input("🔢 Número do Ativo (Opcional)")
-                                
                             etiq_check = st.selectbox("A etiqueta de identificação está correta?", ["Sim", "Não"])
                             loc_check = st.selectbox("O material está na localização física correta?", ["Sim", "Não"])
                             
                             if st.form_submit_button("💾 Salvar na Acuracidade", type="primary"):
-                                if tem_ativo_na_planilha_sup and not f_ativo_sup.strip():
-                                    st.error("❌ Erro: O preenchimento do Ativo é obrigatório para este material!")
-                                else:
-                                    q_s_v = int(row_sup[col_qtd_sup]) if pd.notna(row_sup[col_qtd_sup]) else 0
-                                    cursor = conn.cursor()
-                                    cursor.execute("""
-                                        INSERT INTO auditorias_supervisor (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, qtd_sistema, qtd_auditada, diferenca, etiqueta_correta, localizacao_correta, supervisor, data_hora, ativo, unidade)
-                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (id_inv_sup_atual, str(row_sup[col_id_est_sup]), str(row_sup[col_local_sup]), sup_bl, str(row_sup[col_desc_sup]), q_s_v, qtd_aud_sup, qtd_aud_sup - q_s_v, etiq_check, loc_check, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f_ativo_sup.strip().upper(), st.session_state.unidade_selecionada))
-                                    conn.commit()
-                                    st.success("✅ Lançamento enviado para a Acuracidade!")
-                                    st.rerun()
+                                q_s_v = int(row_sup[col_qtd_sup]) if pd.notna(row_sup[col_qtd_sup]) else 0
+                                cursor = conn.cursor()
+                                cursor.execute("""
+                                    INSERT INTO auditorias_supervisor (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, qtd_sistema, qtd_auditada, diferenca, etiqueta_correta, localizacao_correta, supervisor, data_hora, ativo, unidade)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (id_inv_sup_atual, str(row_sup[col_id_est_sup]), str(row_sup[col_local_sup]), sup_bl, str(row_sup[col_desc_sup]), q_s_v, qtd_aud_sup, qtd_aud_sup - q_s_v, etiq_check, loc_check, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "", st.session_state.unidade_selecionada))
+                                conn.commit()
+                                st.success("✅ Lançamento enviado para a Acuracidade!")
+                                st.rerun()
                     else: st.error("❌ Produto não localizado na planilha de amostragem.")
 
             df_auditorias_atual = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inv_sup_atual, st.session_state.unidade_selecionada)) if id_inv_sup_atual else pd.DataFrame()
