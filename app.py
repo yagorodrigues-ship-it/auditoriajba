@@ -185,7 +185,7 @@ if not st.session_state.logged_in:
                     id_l = identificador.strip()
                     doc_l = limpar_documento(id_l)
                     cursor = conn.cursor()
-                    cursor.execute("SELECT nome, unidade, cargo FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_l, doc_l, senha, unity_login := unidade_login))
+                    cursor.execute("SELECT nome, unidade, cargo FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ? AND unidade = ?", (id_l, doc_l, senha, unidade_login))
                     user = cursor.fetchone()
                     if user:
                         st.session_state.logged_in = True
@@ -314,7 +314,7 @@ else:
                         try:
                             num = int(row[0].replace('#',''))
                             if num > maior_id:
-                                maior_id = num
+                                mayor_id = num
                         except ValueError:
                             pass
                     
@@ -412,7 +412,7 @@ else:
                                     st.rerun()
                     else: st.error("Material/Produto não localizado na base de dados carregada.")
 
-    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO (CORRIGIDA)
+    # 📊 ABA 2: CONTAGEM ATUAL E PROGRESSO
     with abas_gui[1]:
         if not id_inventario_atual:
             st.info("ℹ️ Nenhum inventário/lote selecionado na barra lateral.")
@@ -420,7 +420,7 @@ else:
             st.subheader(f"📊 Progresso em Tempo Real - Lote {id_inventario_atual}")
             df_c = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
             
-            # 1. Funções de formatação declaradas com segurança no topo da aba
+            # 1. Funções de formatação declaradas com segurança
             def formatar_acuracidade_html(porcentagem):
                 if porcentagem == 100.0:
                     return f"<span style='color:green; font-weight:bold;'>🟢 {porcentagem:.1f}% (Acuracidade Perfeita)</span>"
@@ -435,29 +435,31 @@ else:
             total_faltantes_tab = 0
             taxa_acuracidade = 100.0
             
-            # Se a base geral estiver carregada, calcula os indicadores completos
             if st.session_state.base_sistema is not None:
                 total_itens_base = len(st.session_state.base_sistema)
                 itens_contados_unicos = df_c['cod_produto'].unique() if not df_c.empty else []
                 total_contados = len(itens_contados_unicos)
                 total_faltantes_tab = max(0, total_itens_base - total_contados)
                 
-                total_divergentes = len(df_c[df_c['diferenca'] != 0]) if not df_c.empty else 0
-                total_auditados_lote = len(df_c) if not df_c.empty else 0
-                
-                if total_auditados_lote > 0:
-                    taxa_acuracidade = ((total_auditados_lote - total_divergentes) / total_auditados_lote) * 100
+                # CÁLCULO AJUSTADO: Conta itens onde o operador já lançou, mas houve divergência real de saldo.
+                if not df_c.empty:
+                    total_lancados = len(df_c)
+                    total_divergentes = len(df_c[df_c['diferenca'] != 0])
+                    taxa_acuracidade = ((total_lancados - total_divergentes) / total_lancados) * 100
             else:
-                # Se não houver base, apenas conta os registros da tabela de contagens atuais
-                total_contados = len(df_c['cod_produto'].unique()) if not df_c.empty else 0
+                if not df_c.empty:
+                    total_contados = len(df_c['cod_produto'].unique())
+                    total_lancados = len(df_c)
+                    total_divergentes = len(df_c[df_c['diferenca'] != 0])
+                    taxa_acuracidade = ((total_lancados - total_divergentes) / total_lancados) * 100
 
-            # 3. Renderizar métricas superiores (Sempre visível)
+            # 3. Renderizar métricas superiores (Título Atualizado)
             col_m1, col_m2, col_m3, col_m4 = st.columns(4)
             col_m1.metric("📋 Total Mapeados", total_itens_base if st.session_state.base_sistema is not None else "Carregue a Base")
             col_m2.metric("✅ Já Contabilizados", total_contados)
             col_m3.metric("⏳ Itens Pendentes", total_faltantes_tab if st.session_state.base_sistema is not None else "Carregue a Base")
             with col_m4:
-                st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:10px; margin-bottom:0px; border-left: 5px solid #2980b9;"><div class="bloco-titulo">📈 ACURACIDADE DO LOTE</div><div class="bloco-valor" style="font-size:20px; margin-top:5px;">{formatar_acuracidade_html(taxa_acuracidade)}</div></div>', unsafe_allow_html=True)
+                st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:10px; margin-bottom:0px; border-left: 5px solid #2980b9;"><div class="bloco-titulo">📈 ACURACIDADE ESTOQUE</div><div class="bloco-valor" style="font-size:20px; margin-top:5px;">{formatar_acuracidade_html(taxa_acuracidade)}</div></div>', unsafe_allow_html=True)
             
             # 4. Exibição de itens divergentes em tempo real
             st.markdown("---")
@@ -750,7 +752,7 @@ else:
 
     # RECURSOS EXCLUSIVOS DO SUPERVISOR
     if eh_supervisor:
-        # 🔬 PAINEL SUPERVISOR
+        # 🔬 PAINEL SUPERVISOR (ONDE SE ABRE A 2ª CONTAGEM DOS DIVERGENTES)
         with abas_gui[6]:
             st.title("🔬 Módulo Amostral do Supervisor e Fluxo de Recontagem")
             
@@ -769,6 +771,7 @@ else:
                     st.dataframe(df_erros_lote, use_container_width=True, hide_index=True)
                     
                     if not itens_para_recontar.empty:
+                        # BOTÃO PARA DISPARAR A 2ª CONTAGEM
                         if st.button("🔄 Abrir 2ª Contagem (Apenas Itens Divergentes)", type="primary", use_container_width=True):
                             cursor = conn.cursor()
                             cursor.execute("UPDATE contagens SET recontagem = 'Pendente' WHERE inventario_id = ? AND diferenca != 0 AND recontagem = 'Não' AND unidade = ?", (id_p_limpo, st.session_state.unidade_selecionada))
@@ -926,6 +929,6 @@ else:
                 if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
                     cursor.execute("UPDATE usuarios SET nome=?, senha=?, unidade=?, cargo=? WHERE id=?", (n_nome.strip(), n_senha.strip(), n_unid, n_cargo, id_a))
-                    conn.commit(); st.success("Usuário Atualizado!"); st.rerun()
+                    conn.commit(); st.success("Usuário Updated!"); st.rerun()
                     
     conn.close()
