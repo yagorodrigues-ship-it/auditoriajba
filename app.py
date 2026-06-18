@@ -3,7 +3,6 @@ import pandas as pd
 import datetime
 import sqlite3
 import io
-import base64
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Contagem de Estoque Físico - JBA", layout="wide")
@@ -143,6 +142,13 @@ if 'contador_reset' not in st.session_state: st.session_state.contador_reset = 0
 if 'pagina_historico' not in st.session_state: st.session_state.pagina_historico = 0
 if 'pagina_acuracidade_sup' not in st.session_state: st.session_state.pagina_acuracidade_sup = 0
 
+# --- FUNÇÃO AUXILIAR PARA EXPORTAÇÃO EXCEL ---
+def converter_para_excel(df):
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        df.to_excel(writer, index=False, sheet_name='Relatorio_Contagem')
+    return output.getvalue()
+
 # --- ESTILIZAÇÃO INTERFACE ---
 st.markdown("""
     <style>
@@ -279,7 +285,7 @@ else:
             id_inventario_atual = inv_sel.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # --- REPARADO: PROGRESSO UNIVERSAL NA BARRA LATERAL (EXIBE PARA ADM MASTER TAMBÉM) ---
+        # --- REPARADO: PROGRESSO UNIVERSAL NA BARRA LATERAL ---
         if id_inventario_atual and st.session_state.base_sistema is not None:
             df_c_side = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
             total_itens_base = len(st.session_state.base_sistema)
@@ -432,7 +438,7 @@ else:
         if st.session_state.base_sistema is not None: st.dataframe(st.session_state.base_sistema, use_container_width=True)
         else: st.info("Nenhuma base carregada.")
 
-    # 📁 ABA 4: HISTÓRICO GERAL
+    # 📁 ABA 4: HISTÓRICO GERAL (COM EXPORTAR E EXCLUIR PASTA DINÂMICO)
     with abas_gui[3]:
         st.title("📁 Arquivo Geral de Movimentações")
         c_dt1, c_dt2 = st.columns(2)
@@ -456,8 +462,42 @@ else:
                 for idx, inv in df_pag.iterrows():
                     id_p = inv['id'].replace('#','')
                     df_det = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_p, st.session_state.unidade_selecionada))
+                    
                     with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} ({len(df_det)} contados)"):
-                        st.dataframe(df_det.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+                        if not df_det.empty:
+                            st.dataframe(df_det.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
+                            
+                            # Ações na Pasta
+                            c_btn1, c_btn2 = st.columns([1, 4])
+                            with c_btn1:
+                                # DISPONÍVEL PARA ALMOXARIFE E SUPERVISOR
+                                excel_data = converter_para_excel(df_det.drop(columns=['unidade'], errors='ignore'))
+                                st.download_button(
+                                    label="📥 Exportar para Excel",
+                                    data=excel_data,
+                                    file_name=f"Inventario_{inv['id']}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key=f"dl_gen_{inv['id']}"
+                                )
+                            with c_btn2:
+                                # EXCLUSIVO PARA SUPERVISOR
+                                if eh_supervisor:
+                                    if st.button(f"🗑️ Excluir Pasta {inv['id']}", key=f"del_gen_{inv['id']}", type="secondary"):
+                                        cursor = conn.cursor()
+                                        cursor.execute("DELETE FROM inventarios WHERE id = ? AND unidade = ?", (inv['id'], st.session_state.unidade_selecionada))
+                                        cursor.execute("DELETE FROM contagens WHERE inventario_id = ? AND unidade = ?", (id_p, st.session_state.unidade_selecionada))
+                                        conn.commit()
+                                        st.success(f"Pasta {inv['id']} excluída com sucesso!")
+                                        st.rerun()
+                        else:
+                            st.info("Nenhum item contabilizado nesta pasta ainda.")
+                            if eh_supervisor:
+                                if st.button(f"🗑️ Excluir Pasta Vazia {inv['id']}", key=f"del_vazia_{inv['id']}"):
+                                    cursor = conn.cursor()
+                                    cursor.execute("DELETE FROM inventarios WHERE id = ? AND unidade = ?", (inv['id'], st.session_state.unidade_selecionada))
+                                    conn.commit()
+                                    st.success(f"Pasta vazia removida!")
+                                    st.rerun()
                 
                 st.write("")
                 cp1, cp2, cp3 = st.columns([2, 6, 2])
@@ -501,7 +541,7 @@ else:
         with k3: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:10px; border-left: 5px solid #e74c3c;"><div class="bloco-titulo">🔴 CRÍTICO (+2 SEMANAS)</div><div class="bloco-valor" style="color: #c0392b;">{criticos_count}</div></div>', unsafe_allow_html=True)
         if dados_prazos: st.dataframe(pd.DataFrame(dados_prazos), use_container_width=True, hide_index=True)
 
-    # 📈 ABA 6: ACURACIDADE ESTOQUE
+    # 📈 ABA 6: ACURACIDADE ESTOQUE (COM EXPORTAR E EXCLUIR PASTA DO SUPERVISOR)
     with abas_gui[5]:
         st.title("📈 Painel Gerencial de Acuracidade Local por Estoque")
         
@@ -578,11 +618,38 @@ else:
                         params=(pasta_sup['id'],)
                     )
                     
-                    with st.expander(f"📁 Pasta: {pasta_sup['id']} – {pasta_sup['nome']} ({pasta_sup['status']}) | {len(df_itens_da_pasta)} itens auditados"):
+                    with st.expander(f"📁 Pasta Amostral: {pasta_sup['id']} – {pasta_sup['nome']} ({pasta_sup['status']}) | {len(df_itens_da_pasta)} itens auditados"):
                         if not df_itens_da_pasta.empty:
                             st.dataframe(df_itens_da_pasta, use_container_width=True, hide_index=True)
+                            
+                            c_sup_btn1, c_sup_btn2 = st.columns([1, 4])
+                            with c_sup_btn1:
+                                excel_sup_data = converter_para_excel(df_itens_da_pasta)
+                                st.download_button(
+                                    label="📥 Exportar para Excel",
+                                    data=excel_sup_data,
+                                    file_name=f"Auditoria_Amostral_{pasta_sup['id']}.xlsx",
+                                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                    key=f"dl_sup_{pasta_sup['id']}"
+                                )
+                            with c_sup_btn2:
+                                if eh_supervisor:
+                                    if st.button(f"🗑️ Excluir Pasta Amostral {pasta_sup['id']}", key=f"del_sup_{pasta_sup['id']}", type="secondary"):
+                                        cursor = conn.cursor()
+                                        cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ? AND unidade = ?", (pasta_sup['id'], st.session_state.unidade_selecionada))
+                                        cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ?", (pasta_sup['id'], st.session_state.unidade_selecionada))
+                                        conn.commit()
+                                        st.success(f"Pasta amostral {pasta_sup['id']} removida!")
+                                        st.rerun()
                         else:
                             st.info("Nenhum item contabilizado nesta pasta amostral ainda.")
+                            if eh_supervisor:
+                                if st.button(f"🗑️ Excluir Pasta Amostral Vazia {pasta_sup['id']}", key=f"del_sup_vazia_{pasta_sup['id']}"):
+                                    cursor = conn.cursor()
+                                    cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ? AND unidade = ?", (pasta_sup['id'], st.session_state.unidade_selecionada))
+                                    conn.commit()
+                                    st.success("Pasta amostral vazia removida!")
+                                    st.rerun()
                 
                 st.write("")
                 cs1, cs2, cs3 = st.columns([2, 6, 2])
@@ -749,6 +816,6 @@ else:
                 if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
                     cursor.execute("UPDATE usuarios SET nome=?, senha=?, unidade=?, cargo=? WHERE id=?", (n_nome.strip(), n_senha.strip(), n_unid, n_cargo, id_a))
-                    conn.commit(); st.success("Usuário Updated!"); st.rerun()
+                    conn.commit(); st.success("Usuário Atualizado!"); st.rerun()
                     
     conn.close()
