@@ -238,7 +238,16 @@ else:
         c_est = encontrar_coluna(st.session_state.base_sistema, ['idestoquefísico', 'idestoque'], 0)
         c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
         c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
-        c_atv_b = encontrar_coluna(st.session_state.base_sistema, ['ativo', 'patrimonio', 'n ativo'], -1)
+        
+        # --- ATUALIZAÇÃO MAIS INTELIGENTE DO ATIVO: Evita mapear "Lote" ou "Lote Fornecedor" por engano ---
+        c_atv_b = ""
+        for c in st.session_state.base_sistema.columns:
+            c_upper = str(c).upper().replace(" ", "")
+            if "ATIVO" in c_upper and "LOTE" not in c_upper and "FORNECEDOR" not in c_upper:
+                c_atv_b = c
+                break
+        if not c_atv_b:
+            c_atv_b = encontrar_coluna(st.session_state.base_sistema, ['ativo', 'patrimonio', 'n ativo'], -1)
 
     # INTERFACE LATERAL (SIDEBAR)
     with st.sidebar:
@@ -398,7 +407,7 @@ else:
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
                             
-                            # Mantém visualmente limpo para o usuário, mas valida de forma estrita no backend
+                            # Mantém amigável e limpo na interface
                             n_ativ = st.text_input("🔢 Número do Ativo (Opcional - Necessário apenas se o item possuir Ativo na planilha)")
                             obs = st.text_input("Observação")
                             
@@ -406,16 +415,18 @@ else:
                                 cursor = conn.cursor()
                                 val_ativo_inserido = n_ativ.strip().upper()
                                 
-                                # --- REVISÃO E BLINDAGEM COMPLETA DA DUPLICIDADE E OBRIGATORIEDADE POR ITEM ---
+                                # --- NOVO BACKEND PROTEGIDO CONTRA LOTE / FORNECEDOR ---
                                 tem_ativo_na_base = False
-                                if c_atv_b in it.columns and not pd.isna(row[c_atv_b]):
-                                    val_at_linha = str(row[c_atv_b]).strip()
-                                    if val_at_linha and val_at_linha.lower() != "nan" and val_at_linha != "":
-                                        tem_ativo_na_base = True
+                                if c_atv_b and c_atv_b in it.columns and not pd.isna(row[c_atv_b]):
+                                    c_atv_upper = str(c_atv_b).upper().replace(" ", "")
+                                    # Garante que NUNCA vai considerar Lote ou Fornecedor como ativo obrigatorio
+                                    if "LOTE" not in c_atv_upper and "FORNECEDOR" not in c_atv_upper:
+                                        val_at_linha = str(row[c_atv_b]).strip()
+                                        if val_at_linha and val_at_linha.lower() != "nan" and val_at_linha != "":
+                                            tem_ativo_na_base = True
 
                                 if not is_fluxo_recontagem:
                                     if tem_ativo_na_base:
-                                        # Se o produto ESPECÍFICO tem ativo preenchido na linha do Excel, exige a digitação
                                         if not val_ativo_inserido:
                                             st.error("❌ Erro: O preenchimento do número do Ativo é obrigatório para este produto específico!")
                                             st.stop()
@@ -429,7 +440,6 @@ else:
                                             st.error(f"❌ Erro: O ativo '{val_ativo_inserido}' para este produto já foi contabilizado neste lote!")
                                             st.stop()
                                     else:
-                                        # Se o produto NÃO tem ativo (Ex: botina, uniforme), passa sem dar erro e valida apenas se o código já foi contado
                                         cursor.execute("""
                                             SELECT COUNT(*) FROM contagens 
                                             WHERE inventario_id = ? AND cod_produto = ? AND unidade = ?
@@ -438,7 +448,6 @@ else:
                                         if cursor.fetchone()[0] > 0:
                                             st.error("❌ Erro: Este item sem ativo já foi contabilizado neste lote!")
                                             st.stop()
-                                # ---------------------------------------------------------------------------------------
 
                                 if q_cont == 0:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
@@ -516,7 +525,7 @@ else:
                     st.markdown("### 🚨 Itens com Divergência de Saldo Detectada (Aguardando Correção)")
                     st.dataframe(
                         df_divergentes_realtime[['cod_produto', 'desc_produto', 'desc_estoque', 'qtd_sistema', 'qtd_contada', 'diferenca', 'operador', 'data_hora', 'ativo']], 
-                        use_container_width=True, 
+                        use_width_width=True, 
                         hide_index=True
                     )
                 else:
@@ -630,11 +639,11 @@ else:
                                     st.rerun()
                 
                 st.write("")
-                cp1, cp2, cp3 = st.columns([2, 6, 2])
-                with cp1:
+                cs1, cs2, cs3 = st.columns([2, 6, 2])
+                with cs1:
                     if st.button("◀ Anterior", disabled=(st.session_state.pagina_historico==0), key="btn_ant_hist"): st.session_state.pagina_historico-=1; st.rerun()
-                with cp2: st.markdown(f"<p style='text-align:center;'>Página {st.session_state.pagina_historico+1} de {total_paginas}</p>", unsafe_allow_html=True)
-                with cp3:
+                with cs2: st.markdown(f"<p style='text-align:center;'>Página {st.session_state.pagina_historico+1} de {total_paginas}</p>", unsafe_allow_html=True)
+                with cs3:
                     if st.button("Próximo ▶", disabled=(st.session_state.pagina_historico>=total_paginas-1), key="btn_prox_hist"): st.session_state.pagina_historico+=1; st.rerun()
         else:
             st.info("Nenhum histórico registrado até o momento.")
@@ -913,7 +922,7 @@ else:
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                     """, (id_inv_sup_atual, str(row_sup[col_id_est_sup]), str(row_sup[col_local_sup]), sup_bl, str(row_sup[col_desc_sup]), q_s_v, qtd_aud_sup, qtd_aud_sup - q_s_v, etiq_check, loc_check, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f_ativo_sup.strip().upper(), st.session_state.unidade_selecionada))
                                     conn.commit()
-                                    st.success("¼ Lançamento enviado para a Acuracidade!")
+                                    st.success("✅ Lançamento enviado para a Acuracidade!")
                                     st.rerun()
                     else: st.error("❌ Produto não localizado na planilha de amostragem.")
 
