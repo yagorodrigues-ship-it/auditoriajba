@@ -199,7 +199,6 @@ if not st.session_state.logged_in:
                         st.session_state.unidade_selecionada = user[1]
                         st.session_state.cargo_usuario = user[2]
                         st.success("✅ Autenticado com sucesso!")
-                        st.calendar_refresh = True
                         st.rerun()
                     else:
                         st.error("❌ Credenciais incorretas ou usuário não cadastrado nesta unidade!")
@@ -330,7 +329,6 @@ else:
                 if st.form_submit_button("Criar Lote"):
                     if n_inv:
                         cursor = conn.cursor()
-                        # --- CORREÇÃO DE CRIAÇÃO: Filtra apenas os IDs da unidade selecionada para evitar quebras de escopo ---
                         cursor.execute("SELECT id FROM inventarios WHERE unidade = ?", (st.session_state.unidade_selecionada,))
                         todos_ids = cursor.fetchall()
                         
@@ -397,10 +395,13 @@ else:
                         
                         st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
                         
+                        # --- CORREÇÃO E AJUSTE DA OBRIGATORIEDADE DO ATIVO SOLICITADA ---
                         tem_ativo_na_base = False
                         if c_atv_b in it.columns:
-                            val_at = str(row[c_atv_b]).strip()
-                            if val_at and val_at.lower() != "nan" and val_at != "": tem_ativo_na_base = True
+                            val_at_linha = str(row[c_atv_b]).strip()
+                            # Só é obrigatório se a coluna existir E a linha do produto contiver dados válidos preenchidos
+                            if val_at_linha and val_at_linha.lower() != "nan" and val_at_linha != "":
+                                tem_ativo_na_base = True
 
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
@@ -962,6 +963,6 @@ else:
                 if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
                     cursor.execute("UPDATE usuarios SET nome=?, senha=?, unidade=?, cargo=? WHERE id=?", (n_nome.strip(), n_senha.strip(), n_unid, n_cargo, id_a))
-                    conn.commit(); st.success("Usuário Atuallizado!"); st.rerun()
+                    conn.commit(); st.success("Usuário Atualizado!"); st.rerun()
                     
     conn.close()
