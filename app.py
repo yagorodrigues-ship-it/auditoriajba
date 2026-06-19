@@ -41,10 +41,10 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de inventários gerais
+    # Tabela de inventários gerais (Mantendo estrutura flexível para autoincremento implícito)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios (
-            id TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT,
             data TEXT,
             status TEXT,
@@ -55,7 +55,7 @@ def inicializar_banco():
     # Tabela de inventários do Supervisor (Amostral)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios_supervisor (
-            id TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT,
             data TEXT,
             status TEXT,
@@ -102,33 +102,12 @@ def inicializar_banco():
             localizacao_correta TEXT,
             supervisor TEXT,
             data_hora TEXT,
-            recontagem_3 TEXT DEFAULT 'Não',
             ativo TEXT,
             unidade TEXT DEFAULT 'JURUBATUBA'
         )
     """)
     
-    # Migrações e Ajustes de Colunas
-    tab_alteracoes = {
-        "usuarios": ["unidade TEXT DEFAULT 'JURUBATUBA'", "cargo TEXT DEFAULT 'Almoxarife'"],
-        "inventarios": ["unidade TEXT DEFAULT 'JURUBATUBA'"],
-        "inventarios_supervisor": ["unidade TEXT DEFAULT 'JURUBATUBA'"],
-        "contagens": ["lote TEXT DEFAULT ''", "unidade TEXT DEFAULT 'JURUBATUBA'", "recontagem TEXT DEFAULT 'Não'"],
-        "auditorias_supervisor": ["unidade TEXT DEFAULT 'JURUBATUBA'", "ativo TEXT", "recontagem_3 TEXT DEFAULT 'Não'"]
-    }
-    
-    for tabela, colunas in tab_alteracoes.items():
-        try:
-            cursor.execute(f"PRAGMA table_info({tabela})")
-            cols_existentes = [c[1] for c in cursor.fetchall()]
-            for col_def in colunas:
-                nome_col = col_def.split()[0]
-                if nome_col not in cols_existentes:
-                    cursor.execute(f"ALTER TABLE {tabela} ADD COLUMN {col_def}")
-                    conn.commit()
-        except:
-            pass
-
+    conn.commit()
     conn.close()
 
 inicializar_banco()
@@ -328,26 +307,13 @@ else:
                 if st.form_submit_button("Criar Lote"):
                     if n_inv:
                         cursor = conn.cursor()
-                        # --- CORREÇÃO DA MENSAGEM INTEGRITY ERROR GERAL ---
-                        cursor.execute("SELECT id FROM inventarios")
-                        rows = cursor.fetchall()
-                        maior_id = 0
-                        for r in rows:
-                            try:
-                                num = int(str(r[0]).replace('#', ''))
-                                if num > maior_id:
-                                    maior_id = num
-                            except:
-                                pass
-                        nxt = maior_id + 1
-                        
-                        # Salvando o ID explícito limpo e numérico sem gerar conflito com chaves passadas
+                        # --- REMOÇÃO DO ID MANUAL DA QUERY (ELIMINA O INTEGRITY ERROR PARA SEMPRE) ---
                         cursor.execute("""
-                            INSERT INTO inventarios (id, nome, data, status, unidade) 
-                            VALUES (?, ?, ?, 'Aberto', ?)
-                        """, (str(nxt), n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
+                            INSERT INTO inventarios (nome, data, status, unidade) 
+                            VALUES (?, ?, 'Aberto', ?)
+                        """, (n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
                         conn.commit()
-                        st.success(f"✅ Novo Lote #{nxt} gerado com sucesso!")
+                        st.success("✅ Novo Lote gerado com sucesso!")
                         st.rerun()
 
     # --- DEFINIÇÃO E RENDERIZAÇÃO DAS ABAS NA ORDEM EXATA ---
