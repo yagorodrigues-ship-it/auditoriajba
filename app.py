@@ -231,10 +231,6 @@ else:
 
     # --- MAPEAMENTO DE COLUNAS DA BASE ---
     c_cod, c_desc, c_un, c_est, c_qtd, c_loc = "", "", "", "", "", ""
-    possui_coluna_ativo_real = False
-    col_lote_detectada = ""
-    col_ativo_detectada = ""
-    
     if st.session_state.base_sistema is not None:
         c_cod = encontrar_coluna(st.session_state.base_sistema, ['códproduto', 'codproduto', 'codigo', 'cod'], 0)
         c_desc = encontrar_coluna(st.session_state.base_sistema, ['descproduto', 'descricao'], 1)
@@ -242,32 +238,6 @@ else:
         c_est = encontrar_coluna(st.session_state.base_sistema, ['idestoquefísico', 'idestoque'], 0)
         c_qtd = encontrar_coluna(st.session_state.base_sistema, ['qtdestoque', 'quantidade', 'saldo'], -1)
         c_loc = encontrar_coluna(st.session_state.base_sistema, ['descestoquefisico', 'localizacao'], 2)
-        
-        for col in st.session_state.base_sistema.columns:
-            c_clean = str(col).strip().upper().replace(" ", "").replace("Ã", "A")
-            if c_clean == "ATIVO":
-                possui_coluna_ativo_real = True
-                col_ativo_detectada = col
-            if c_clean in ["LOTE", "SITUACAOLOTE", "LOTEFORNECEDORAUX", "LOTEFORNECEDOR"]:
-                col_lote_detectada = col
-        
-        # --- UNIFICAÇÃO INTELIGENTE COM CONCATENAÇÃO DE VALORES ---
-        st.session_state.base_sistema[c_cod] = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip()
-        
-        def join_unique_strings(series):
-            unique_vals = series.dropna().astype(str).str.strip().unique()
-            filtered_vals = [v for v in unique_vals if v.lower() not in ["", "nan", "none", "-", "0"]]
-            return ", ".join(filtered_vals) if filtered_vals else "—"
-
-        agg_dict = {c_qtd: 'sum'}
-        for col in st.session_state.base_sistema.columns:
-            if col not in [c_cod, c_qtd]:
-                if col in [col_lote_detectada, col_ativo_detectada] and col != "":
-                    agg_dict[col] = join_unique_strings
-                else:
-                    agg_dict[col] = 'first'
-                
-        st.session_state.base_sistema = st.session_state.base_sistema.groupby(c_cod, as_index=False).agg(agg_dict)
 
     # INTERFACE LATERAL (SIDEBAR)
     with st.sidebar:
@@ -282,7 +252,6 @@ else:
         ar_excel = st.file_uploader("Upload Excel Geral", type=["xlsx"], label_visibility="collapsed")
         if ar_excel:
             st.session_state.base_sistema = pd.read_excel(ar_excel)
-            st.rerun()
             
         st.markdown("---")
         st.write("📁 **Selecione o Inventário**")
@@ -310,7 +279,7 @@ else:
             id_inventario_atual = inv_sel.split(" – ")[0]
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # --- SEÇÃO DINÂMICA DE PROGRESSO REAL ---
+        # --- SEÇÃO DINÂMICA DE PROGRESSO REAL NA BARRA LATERAL ---
         total_faltantes = 0
         if id_inventario_atual and st.session_state.base_sistema is not None:
             df_c_side = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
@@ -320,7 +289,7 @@ else:
             total_faltantes = max(0, total_itens_base - total_contados)
             
             st.markdown("**📊 Progresso do Inventário Atual**")
-            st.caption(f"📋 Mapeados Únicos: **{total_itens_base}**")
+            st.caption(f"📋 Mapeados: **{total_itens_base}**")
             st.caption(f"✅ Contados: **{total_contados}**")
             if total_faltantes > 0:
                 st.caption(f"⏳ Pendentes: <span style='color:#e74c3c;font-weight:bold;'>{total_faltantes}</span>", unsafe_allow_html=True)
@@ -359,7 +328,7 @@ else:
                 if st.form_submit_button("Criar Lote"):
                     if n_inv:
                         cursor = conn.cursor()
-                        # CORREÇÃO CRUCIAL: Busca sem o WHERE unit para garantir exclusividade global do ID sequencial
+                        # --- CORREÇÃO DA SEGUNDA IMAGEM (INTEGRITY ERROR): Busca o maior ID GLOBAL de todas as unidades para somar 1 ---
                         cursor.execute("SELECT id FROM inventarios")
                         todos_ids = cursor.fetchall()
                         
@@ -408,7 +377,7 @@ else:
                 bip_prod = st.text_input("💻 Bipar Código do Produto", key=f"bip_op_{st.session_state.contador_reset}")
                 if bip_prod:
                     prod_l = str(bip_prod).strip().upper()
-                    it = st.session_state.base_sistema[st.session_state.base_sistema[c_cod] == prod_l]
+                    it = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip() == prod_l]
                     if not it.empty:
                         row = it.iloc[0]
                         
@@ -426,34 +395,13 @@ else:
                         
                         st.markdown(f'<div class="bloco-info" style="margin-top: 15px;"><div class="bloco-titulo">DESCRICAO DETALHADA DO MATERIAL</div><div class="bloco-valor" style="font-size: 20px; color: #2c3e50;">{row[c_desc]}</div></div>', unsafe_allow_html=True)
 
-                        # --- RECONHECIMENTO E EXIBIÇÃO VISÍVEL APENAS NO MOMENTO DA CONTAGEM ---
-                        c_dados1, c_dados2 = st.columns(2)
-                        if col_lote_detectada and col_lote_detectada in row:
-                            val_lote_layout = str(row[col_lote_detectada]).strip()
-                            if val_lote_layout and val_lote_layout.lower() not in ["nan", "none", "—"]:
-                                c_dados1.markdown(f'<div class="bloco-info" style="background-color: #fef9e7; border-color: #f1c40f;"><div class="bloco-titulo">📦 LOTE(S) LOCALIZADO(S) NA PLANILHA</div><div class="bloco-valor" style="font-size: 16px; color: #b7950b;">{val_lote_layout}</div></div>', unsafe_allow_html=True)
-                        
-                        if col_ativo_detectada and col_ativo_detectada in row:
-                            val_ativo_layout = str(row[col_ativo_detectada]).strip()
-                            if val_ativo_layout and val_ativo_layout.lower() not in ["nan", "none", "—"]:
-                                c_dados2.markdown(f'<div class="bloco-info" style="background-color: #f9ebea; border-color: #e74c3c;"><div class="bloco-titulo">🔢 ATIVO(S) LOCALIZADO(S) NA PLANILHA</div><div class="bloco-valor" style="font-size: 16px; color: #922b21;">{val_ativo_layout}</div></div>', unsafe_allow_html=True)
-
                         with st.form("f_salva_contagem", clear_on_submit=True):
                             q_cont = st.number_input("📦 Quantidade Física Encontrada (Obrigatório alterar valor)", min_value=0, step=1, value=0)
-                            
-                            val_ativo = ""
-                            if possui_coluna_ativo_real:
-                                val_ativo = st.text_input("🔢 Número do Ativo (OBRIGATÓRIO)")
-                                
                             obs = st.text_input("Observação")
                             
                             if st.form_submit_button("Confirmar Lançamento", type="primary"):
                                 cursor = conn.cursor()
                                 
-                                if possui_coluna_ativo_real and not val_ativo.strip():
-                                    st.error("❌ Erro: O campo 'Número do Ativo' é obrigatório para as planilhas desta categoria!")
-                                    st.stop()
-                                    
                                 if not is_fluxo_recontagem:
                                     cursor.execute("""
                                         SELECT COUNT(*) FROM contagens 
@@ -468,24 +416,22 @@ else:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
                                 else:
                                     q_sis = int(row[c_qtd]) if pd.notna(row[c_qtd]) else 0
-                                    lote_banco = str(row[col_lote_detectada]).strip() if col_lote_detectada else ""
                                     
                                     if is_fluxo_recontagem:
                                         id_reg_recont = int(df_recont_check.iloc[0]['id'])
                                         cursor.execute("""
                                             UPDATE contagens 
-                                            SET qtd_contada = ?, diferenca = ?, recontagem = 'Realizada', operador = ?, data_hora = ?, observacao = ?, ativo = ?, lote = ?
+                                            SET qtd_contada = ?, diferenca = ?, recontagem = 'Realizada', operador = ?, data_hora = ?, observacao = ?
                                             WHERE id = ?
-                                        """, (q_cont, q_cont - q_sis, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"[2a Contagem] {obs}", val_ativo, lote_banco, id_reg_recont))
+                                        """, (q_cont, q_cont - q_sis, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"[2a Contagem] {obs}", id_reg_recont))
                                     else:
                                         cursor.execute("""
-                                            INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade, lote)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?, ?)
-                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, val_ativo, obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada, lote_banco))
+                                            INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade)
+                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?)
+                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, "", obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
                                     
                                     conn.commit()
                                     st.success("Contagem processada e armazenada com sucesso!")
-                                    
                                     st.session_state.contador_reset += 1
                                     st.rerun()
                     else: st.error("Material/Produto não localizado na base de dados carregada.")
@@ -529,7 +475,7 @@ else:
                     taxa_acuracidade = ((total_lancados - total_divergentes) / total_lancados) * 100
 
             col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-            col_m1.metric("📋 Total Mapeados Únicos", total_itens_base if st.session_state.base_sistema is not None else "Carregue a Base")
+            col_m1.metric("📋 Total Mapeados", total_itens_base if st.session_state.base_sistema is not None else "Carregue a Base")
             col_m2.metric("✅ Já Contabilizados", total_contados)
             col_m3.metric("⏳ Itens Pendentes", total_faltantes_tab if st.session_state.base_sistema is not None else "Carregue a Base")
             with col_m4:
@@ -552,12 +498,12 @@ else:
 
             if st.session_state.base_sistema is not None and c_cod and total_faltantes_tab > 0:
                 st.markdown("---")
-                st.error(f"⚠️ **Atenção:** Restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
-                codigos_base = st.session_state.base_sistema[c_cod].tolist()
+                st.error(f"⚠️ **Atenção:** Still restam {total_faltantes_tab} itens sem nenhuma contagem realizada.")
+                codigos_base = st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().tolist()
                 codigos_contados = [str(x).upper().strip() for x in df_c['cod_produto'].unique()] if not df_c.empty else []
                 codigos_faltantes = [c for c in codigos_base if c not in codigos_contados]
                 
-                df_faltantes_exibir = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].isin(codigos_faltantes)]
+                df_faltantes_exibir = st.session_state.base_sistema[st.session_state.base_sistema[c_cod].astype(str).str.upper().str.strip().isin(codigos_faltantes)]
                 st.write("### 📋 Lista de Itens Faltantes para Concluir:")
                 st.dataframe(df_faltantes_exibir[[c_cod, c_desc, c_loc]], use_container_width=True, hide_index=True)
             
@@ -570,23 +516,23 @@ else:
     # 📄 ABA 3: BASE DE ESTOQUE
     with abas_gui[2]:
         if st.session_state.base_sistema is not None and c_cod:
-            st.subheader("📄 Espelho Base de Saldo Unificado - Status de Contagem Atualizado")
+            st.subheader("📄 Espelho Base de Saldo - Status de Contagem Updated")
             
             if id_inventario_atual:
                 df_lancados_base = pd.read_sql_query("SELECT cod_produto, operador, qtd_contada, recontagem FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
-                map_operadores = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['operador']))
-                map_quantidades = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['qtd_contada']))
-                map_recont = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['recontagem']))
+                mapa_operadores = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['operador']))
+                mapa_quantidades = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['qtd_contada']))
+                mapa_recont = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['recontagem']))
             else:
-                map_operadores = {}
-                map_quantidades = {}
-                map_recont = {}
+                mapa_operadores = {}
+                mapa_quantidades = {}
+                mapa_recont = {}
             
             def mapear_status_gerencial(linha_cod):
                 cod_chave = str(linha_cod).upper().strip()
-                if cod_chave in map_operadores:
-                    rec_status = f" (2ª Contagem)" if map_recont.get(cod_chave) == 'Realizada' else ""
-                    return f"🟩 Contado ({map_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}{rec_status}"
+                if cod_chave in mapa_operadores:
+                    rec_status = f" (2ª Contagem)" if mapa_recont.get(cod_chave) == 'Realizada' else ""
+                    return f"🟩 Contado ({mapa_quantidades[cod_chave]}) por {mapa_operadores[cod_chave]}{rec_status}"
                 return "🟥 Não Contado"
             
             df_base_realtime = st.session_state.base_sistema.copy()
@@ -680,16 +626,16 @@ else:
             if udstr:
                 try:
                     dtc = datetime.datetime.strptime(udstr, "%Y-%m-%d %H:%M:%S")
-                    disabled = (hoje_dt - dtc).days
+                    dias = (hoje_dt - dtc).days
                     exib = dtc.strftime("%d/%m/%Y %H:%M")
-                except: disabled = 999; exib = "Erro"
-            else: disabled = 999; exib = "Nunca Contado"
+                except: dias = 999; exib = "Erro"
+            else: dias = 999; exib = "Nunca Contado"
             
-            status_f = "🟢 Bom" if disabled <= 7 else "🟡 Precisa contar" if disabled <= 14 else "🔴 Crítico"
-            if disabled <= 7: bom_count += 1
-            elif disabled <= 14: auditar_count += 1
+            status_f = "🟢 Bom" if dias <= 7 else "🟡 Precisa contar" if dias <= 14 else "🔴 Crítico"
+            if dias <= 7: bom_count += 1
+            elif dias <= 14: auditar_count += 1
             else: criticos_count += 1
-            dados_prazos.append({"Id. Estoque": ide, "Descrição": re['descricao'], "Última Contagem": exib, "Dias sem Contar": disabled if disabled != 999 else "—", "Status": status_f})
+            dados_prazos.append({"Id. Estoque": ide, "Descrição": re['descricao'], "Última Contagem": exib, "Dias sem Contar": dias if dias != 999 else "—", "Status": status_f})
         
         k1, k2, k3 = st.columns(3)
         with k1: st.markdown(f'<div class="bloco-info" style="border-left: 5px solid #2ecc71;"><div class="bloco-titulo">🟢 EM DIA (BOM)</div><div class="bloco-valor" style="color: #27ae60;">{bom_count}</div></div>', unsafe_allow_html=True)
@@ -841,7 +787,7 @@ else:
                     else:
                         st.info("ℹ️ Todos os itens divergentes já foram enviados para a recontagem.")
                 else:
-                    st.success("🎉 Nenhuma divergência activa encontrada neste lote até o momento.")
+                    st.success("🎉 Nenhuma divergência ativa encontrada neste lote até o momento.")
                     
             st.markdown("---")
             if df_inventarios_sup.empty:
@@ -864,7 +810,6 @@ else:
                     nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                     if st.form_submit_button("Criar Lote", type="primary") and nome_sup_inv:
                         cursor = conn.cursor()
-                        # CORREÇÃO CRUCIAL: Busca sem o WHERE unit para garantir exclusividade global do ID sequencial
                         cursor.execute("SELECT id FROM inventarios_supervisor")
                         todos_ids_sup = cursor.fetchall()
                         
@@ -974,7 +919,14 @@ else:
                 n_cargo = st.selectbox("💼 Cargo (Nível de Acesso)", ["Almoxarife", "Supervisor"], index=["Almoxarife", "Supervisor"].index(r_u['cargo']))
                 if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
-                    cursor.execute("UPDATE usuarios SET nome=?, senha=?, unidade=?, cargo=? WHERE id=?", (n_nome.strip(), n_senha.strip(), n_unid, n_cargo, id_a))
-                    conn.commit(); st.success("Usuário Atualizado!"); st.rerun()
+                    # --- CORREÇÃO DA PRIMEIRA IMAGEM (SALVAR LOCALIDADES): Commit e Alerta síncronos sem typos ---
+                    cursor.execute("""
+                        UPDATE usuarios 
+                        SET nome = ?, senha = ?, unidade = ?, cargo = ? 
+                        WHERE id = ?
+                    """, (n_nome.strip(), n_senha.strip(), n_unid, n_cargo, id_a))
+                    conn.commit()
+                    st.success("✅ Usuário Atualizado com sucesso!")
+                    st.rerun()
                     
     conn.close()
