@@ -223,6 +223,8 @@ if 'nome_arquivo_supervisor' not in st.session_state:
     st.session_state.nome_arquivo_supervisor = ""
 if 'operador' not in st.session_state:
     st.session_state.operador = ""
+if 'cpf_operador' not in st.session_state:
+    st.session_state.cpf_operador = ""
 if 'tela_acesso' not in st.session_state:
     st.session_state.tela_acesso = "login"
 
@@ -286,11 +288,12 @@ if not st.session_state.logged_in:
                 id_limpo = identificador.strip()
                 doc_limpo = limpar_documento(id_limpo)
                 cursor = conn.cursor()
-                cursor.execute("SELECT nome FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ?", (id_limpo, doc_limpo, senha))
+                cursor.execute("SELECT nome, cpf FROM usuarios WHERE (email = ? OR cpf = ?) AND senha = ?", (id_limpo, doc_limpo, senha))
                 user = cursor.fetchone()
                 if user:
                     st.session_state.logged_in = True
                     st.session_state.operador = user[0]
+                    st.session_state.cpf_operador = user[1]
                     st.rerun()
                 else:
                     st.error("❌ Credenciais incorretas.")
@@ -374,8 +377,14 @@ else:
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor ORDER BY data DESC, id DESC", conn)
     
     st.session_state.operador = st.session_state.get('operador', 'Operador Genérico')
+    st.session_state.cpf_operador = st.session_state.get('cpf_operador', '')
     nome_usuario_logado_limpo = st.session_state.operador.lower()
-    eh_supervisor = any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"])
+    
+    # PERMISSÃO ESPECIAL ADM YAGO POR NOME OU POR CPF ESPECÍFICO
+    eh_supervisor = (
+        any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"]) or 
+        st.session_state.cpf_operador == "22882342888"
+    )
     
     id_inventario_atual_inicial = df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else ""
     
@@ -403,6 +412,7 @@ else:
         if st.button("🚪 Sair da Conta", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.operador = ""
+            st.session_state.cpf_operador = ""
             st.session_state.tela_acesso = "login"
             st.rerun()
             
@@ -463,7 +473,7 @@ else:
             else:
                 st.error(f"❌ Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
                 if eh_supervisor:
-                    st.warning("👤 Yago Rodrigues detectado. Deseja forçar o encerramento?")
+                    st.warning("👤 Perfil Supervisor/Yago Rodrigues ativo. Deseja forçar o encerramento?")
                     if st.button("⚠️ Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
                         cursor = conn.cursor()
                         cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (id_inventario_atual,))
@@ -815,7 +825,7 @@ else:
                     else:
                         st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-# --- ABA 4: ACURACIDADE ESTOQUE (ATUALIZADA COM FILTRO DE DATA E PAGINAÇÃO SOBERANA DE 15 PASTAS) ---
+# --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -871,7 +881,6 @@ else:
 
         st.markdown("---")
         
-        # --- IMPLEMENTADO: FILTRO DE DATA E PAGINAÇÃO PARA O HISTÓRICO DO SUPERVISOR ---
         st.write("### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
         
         if df_inventarios_sup.empty:
@@ -884,7 +893,6 @@ else:
             with c_dt_sup2:
                 dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
                 
-            # Filtrar as pastas de amostragem por data
             df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
             df_sup_filtrados = df_inventarios_sup[
                 (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
@@ -894,7 +902,6 @@ else:
             if df_sup_filtrados.empty:
                 st.warning("⚠️ Nenhum histórico do supervisor foi localizado neste intervalo de datas.")
             else:
-                # Lógica matemática de paginação do Supervisor (15 por página)
                 tam_pagina_sup = 15
                 total_itens_sup = len(df_sup_filtrados)
                 total_paginas_sup = (total_itens_sup - 1) // tam_pagina_sup + 1
@@ -909,7 +916,6 @@ else:
                 
                 st.write(f"Exibindo do **{idx_ini_sup + 1}º** ao **{min(idx_fim_sup, total_itens_sup)}º** inventário amostral (Total de {total_itens_sup} pastas do supervisor).")
                 
-                # Renderiza as 15 pastas da página corrente
                 for idx, inv_s in df_pagina_sup_atual.iterrows():
                     df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
                     
@@ -930,7 +936,6 @@ else:
                                 st.success("Pasta deletada!")
                                 st.rerun()
                                 
-                # Controles de Navegação da Paginação do Supervisor
                 st.markdown("---")
                 col_p_sup1, col_p_sup_txt, col_p_sup2 = st.columns([2, 6, 2])
                 with col_p_sup1:
@@ -944,43 +949,52 @@ else:
                         st.session_state.pagina_historico_sup += 1
                         st.rerun()
 
-    # --- ABA 5: HISTÓRICO GERAL ---
+    # --- ABA 5: HISTÓRICO GERAL (ATUALIZADA COM FILTRO DE DATA OPCIONAL) ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
         
-        st.write("### 📅 Filtrar Pastas por Período de Abertura")
+        st.write("### 📅 Filtrar Pastas por Período de Abertura (Opcional)")
         c_dt1, c_dt2 = st.columns(2)
         with c_dt1:
-            data_inicio_filtro = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=90), key="hist_dt_ini")
+            data_inicio_filtro = st.date_input("Data Inicial", value=None, key="hist_dt_ini", help="Deixe em branco para ver todos")
         with c_dt2:
-            data_fim_filtro = st.date_input("Data Final", datetime.date.today() + datetime.timedelta(days=1), key="hist_dt_fim")
+            data_fim_filtro = st.date_input("Data Final", value=None, key="hist_dt_fim", help="Deixe em branco para ver todos")
             
         st.markdown("---")
         
         if df_inventarios.empty:
             st.info("Nenhum inventário operacional registrado no banco de dados.")
         else:
-            df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
-            df_inventarios_filtrados = df_inventarios[
-                (df_inventarios['datetime_parsed'] >= data_inicio_filtro) & 
-                (df_inventarios['datetime_parsed'] <= data_fim_filtro)
-            ]
+            # Se as datas estiverem preenchidas, aplica o filtro. Se não, traz tudo.
+            if data_inicio_filtro is not None and data_fim_filtro is not None:
+                df_inventarios['datetime_parsed'] = pd.to_datetime(df_inventarios['data'], errors='coerce').dt.date
+                df_inventarios_filtrados = df_inventarios[
+                    (df_inventarios['datetime_parsed'] >= data_inicio_filtro) & 
+                    (df_inventarios['datetime_parsed'] <= data_fim_filtro)
+                ]
+            else:
+                df_inventarios_filtrados = df_inventarios.copy()
             
             if df_inventarios_filtrados.empty:
                 st.warning("⚠️ Nenhum inventário foi localizado dentro do intervalo de datas selecionado.")
             else:
-                tamanho_pagina = 15
                 total_itens = len(df_inventarios_filtrados)
-                total_paginas = (total_itens - 1) // tamanho_pagina + 1
                 
-                if st.session_state.pagina_historico >= total_paginas:
-                    st.session_state.pagina_historico = 0
+                # Só ativa paginação se existirem mais de 10 pastas no contexto total carregado
+                if total_itens > 10:
+                    tamanho_pagina = 15
+                    total_paginas = (total_itens - 1) // tamanho_pagina + 1
                     
-                inicio_idx = st.session_state.pagina_historico * tamanho_pagina
-                fim_idx = inicio_idx + tamanho_pagina
-                
-                df_pagina_atual = df_inventarios_filtrados.iloc[inicio_idx:fim_idx]
-                st.write(f"Exibindo do **{inicio_idx + 1}º** ao **{min(fim_idx, total_itens)}º** inventário (Total de {total_itens} pastas).")
+                    if st.session_state.pagina_historico >= total_paginas:
+                        st.session_state.pagina_historico = 0
+                        
+                    inicio_idx = st.session_state.pagina_historico * tamanho_pagina
+                    fim_idx = inicio_idx + tamanho_pagina
+                    df_pagina_atual = df_inventarios_filtrados.iloc[inicio_idx:fim_idx]
+                    st.write(f"Exibindo do **{inicio_idx + 1}º** ao **{min(fim_idx, total_itens)}º** inventário (Total de {total_itens} pastas).")
+                else:
+                    df_pagina_atual = df_inventarios_filtrados
+                    st.write(f"Exibindo todas as **{total_itens}** pastas encontradas (Mais recentes no topo).")
                 
                 for idx, inv in df_pagina_atual.iterrows():
                     id_inv_proc = inv['id'].replace('#','')
@@ -1030,18 +1044,20 @@ else:
                                 st.success("Pasta operacional excluída!")
                                 st.rerun()
                                 
-                st.markdown("---")
-                col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
-                with col_pag1:
-                    if st.button("◀ Anterior", use_container_width=True, disabled=(st.session_state.pagina_historico == 0)):
-                        st.session_state.pagina_historico -= 1
-                        st.rerun()
-                with col_pag_texto:
-                    st.markdown(f"<p style='text-align: center; margin-top: 7px;'>Página <strong>{st.session_state.pagina_historico + 1}</strong> de <strong>{total_paginas}</strong></p>", unsafe_allow_html=True)
-                with col_pag2:
-                    if st.button("Próximo ▶", use_container_width=True, disabled=(st.session_state.pagina_historico >= total_paginas - 1)):
-                        st.session_state.pagina_historico += 1
-                        st.rerun()
+                # Navegação só aparece se houver paginação ativa (mais de 10 itens)
+                if total_itens > 10:
+                    st.markdown("---")
+                    col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
+                    with col_pag1:
+                        if st.button("◀ Anterior", use_container_width=True, disabled=(st.session_state.pagina_historico == 0)):
+                            st.session_state.pagina_historico -= 1
+                            st.rerun()
+                    with col_pag_texto:
+                        st.markdown(f"<p style='text-align: center; margin-top: 7px;'>Página <strong>{st.session_state.pagina_historico + 1}</strong> de <strong>{total_paginas}</strong></p>", unsafe_allow_html=True)
+                    with col_pag2:
+                        if st.button("Próximo ▶", use_container_width=True, disabled=(st.session_state.pagina_historico >= total_paginas - 1)):
+                            st.session_state.pagina_historico += 1
+                            st.rerun()
 
     # --- ABA 6: BASE DE ESTOQUE ---
     with aba_base:
