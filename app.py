@@ -89,20 +89,21 @@ if localidade == "TODAS":
         st.session_state.adm_localidade_escolhida = "JUNDIAI"
     localidade = st.session_state.adm_localidade_escolhida
 
+# Força a criação e garante todas as chaves mapeadas (Evita totalmente o KeyError)
 if localidade not in st.session_state.inventarios_dados:
-    st.session_state.inventarios_dados[localidade] = {
-        "banco_original": None,
-        "inventarios_criados": {},
-        "inventario_ativo": None,
-        "auditorias_criadas": {},
-        "prazos_alvo": "Não Definido",
-        "historico_pastas": []
-    }
+    st.session_state.inventarios_dados[localidade] = {}
 
 loc_db = st.session_state.inventarios_dados[localidade]
 
+if "banco_original" not in loc_db: loc_db["banco_original"] = None
+if "inventarios_criados" not in loc_db: loc_db["inventarios_criados"] = {}
+if "inventario_ativo" not in loc_db: loc_db["inventario_ativo"] = None
+if "auditorias_criadas" not in loc_db: loc_db["auditorias_criadas"] = {}
+if "prazos_alvo" not in loc_db: loc_db["prazos_alvo"] = "Não Definido"
+if "historico_pastas" not in loc_db: loc_db["historico_pastas"] = []
+
 # ==============================================================================
-# 3. BARRA LATERAL (SIDEBAR)
+# 3. BARRA LATERAL (SIDEBAR) - CONTROLADOR COMPLETO
 # ==============================================================================
 with st.sidebar:
     st.title("🏭 Painel de Controle")
@@ -250,8 +251,6 @@ with abas_principais[0]:
                 with col2:
                     st.text_input("Unidade de Medida (UNID. MEDIDA)", value=row["UNID. MEDIDA"], disabled=True)
                 
-                # --- VERIFICAÇÃO DE OBRIGATORIEDADE DINÂMICA ---
-                # LOTE é obrigatório se a coluna existir E o valor não for nulo/vazio/"none"/"nan"
                 lote_na_planilha = "LOTE" in df_atual.columns
                 lote_valido = False
                 if lote_na_planilha:
@@ -259,7 +258,6 @@ with abas_principais[0]:
                     if val_lote_original and val_lote_original.lower() not in ["nan", "none", ""]:
                         lote_valido = True
 
-                # ATIVO é obrigatório se a coluna existir E o valor não for nulo/vazio/"none"/"nan"
                 ativo_na_planilha = "ATIVO" in df_atual.columns
                 ativo_valido = False
                 if ativo_na_planilha:
@@ -316,7 +314,6 @@ with abas_principais[0]:
                         time.sleep(0.4)
                         st.rerun()
         
-        # --- BLOCO DE FECHAMENTO DE INVENTÁRIO ---
         st.divider()
         st.subheader("🔒 Encerramento do Inventário")
         total_itens = len(df_atual)
@@ -391,7 +388,6 @@ with abas_principais[3]:
     if not pastas:
         st.info("Nenhuma pasta de inventário fechada para esta localidade.")
     else:
-        # Paginação simplificada (10 por página)
         itens_por_pagina = 10
         total_paginas = max(1, (len(pastas) + itens_por_pagina - 1) // itens_por_pagina)
         pagina = st.number_input("Página", min_value=1, max_value=total_paginas, value=1)
@@ -406,7 +402,6 @@ with abas_principais[3]:
                 if u_atual["perfil"] in ["Supervisor", "ADM"]:
                     col_b1, col_b2 = st.columns(2)
                     with col_b1:
-                        # Geração de Excel simplificada via Pandas
                         st.download_button("📥 Exportar para Excel", data=p["dados"].to_csv(index=False).encode('utf-8'), file_name=f"{p['nome']}.csv", mime='text/csv', key=f"dl_{idx}")
                     with col_b2:
                         if st.button("🚨 Excluir Pasta", key=f"del_{idx}"):
@@ -422,7 +417,6 @@ with abas_principais[4]:
     st.header("⏱️ Desempenho e Prazos")
     st.write("Acompanhamento das últimas datas de contagem física das localidades:")
     
-    # Simulação baseada na existência de históricos salvos
     dados_locs = ["JURUBATUBA", "JUNDIAI", "CUBATÃO"]
     for l in dados_locs:
         db_l = st.session_state.inventarios_dados.get(l, {})
@@ -465,7 +459,7 @@ with abas_principais[5]:
                 st.dataframe(audit["dados"], use_container_width=True)
 
 # ------------------------------------------------------------------------------
-# TELA 7: PAINEL DO SUPERVISOR (SE PERMITIDO)
+# TELA 7: PAINEL DO SUPERVISOR
 # ------------------------------------------------------------------------------
 if u_atual["perfil"] in ["Supervisor", "ADM"]:
     with abas_principais[6]:
@@ -482,7 +476,7 @@ if u_atual["perfil"] in ["Supervisor", "ADM"]:
             st.warning("Alvo removido.")
 
 # ------------------------------------------------------------------------------
-# TELA 8: AUDITORIA SUPERVISOR (SE PERMITIDO)
+# TELA 8: AUDITORIA SUPERVISOR
 # ------------------------------------------------------------------------------
 if u_atual["perfil"] in ["Supervisor", "ADM"]:
     with abas_principais[7]:
@@ -513,7 +507,6 @@ if u_atual["perfil"] in ["Supervisor", "ADM"]:
 # TELA 9: PAINEL ADM (CONTROLE MASTER DE CONTAS)
 # ------------------------------------------------------------------------------
 if u_atual["perfil"] == "ADM":
-    # Mapeia dinamicamente qual o índice correto da última aba
     idx_adm = len(menu_abas) - 1
     with abas_principais[idx_adm]:
         st.header("👑 Painel Administrativo Master")
