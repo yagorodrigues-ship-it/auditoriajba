@@ -280,7 +280,7 @@ if "recuperar" in query_params and "token" in query_params:
                     cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
                     conn.commit()
                     conn.close()
-                    st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
+                    st.success("🎉 Senha updated com sucesso! Pode fazer o login na tela principal.")
     st.stop()
 
 # --- TELA DE ACESSO ---
@@ -546,11 +546,11 @@ else:
                     else:
                         lista_lotes_validos = []
 
-                    # Montar interface de seleção de lote obrigatório
-                    st.markdown('### 📦 Configuração Obrigatória do Lote')
+                    # --- ANTECIPAÇÃO DA SELEÇÃO DE LOTE (MUDOU PARA O TOPO) ---
+                    st.markdown('### 📦 Seleção Obrigatória do Lote')
                     if len(lista_lotes_validos) > 1:
                         st.warning(f"⚠️ Atenção: Foram detectados {len(lista_lotes_validos)} lotes diferentes para o código {codigo_rastreio} na planilha!")
-                        lote_selecionado = st.selectbox("Selecione o Lote Físico que você está contando agora:", lista_lotes_validos, key="lote_selector_operario")
+                        lote_selecionado = st.selectbox("Escolha qual lote físico você está contando agora:", lista_lotes_validos, key="lote_selector_operario")
                     elif len(lista_lotes_validos) == 1:
                         lote_selecionado = lista_lotes_validos[0]
                         st.info(f"Lote Único detectado na base: **{lote_selecionado}**")
@@ -558,7 +558,7 @@ else:
                         lote_selecionado = "Não Informado"
                         st.info("Nenhum lote especificado na planilha para este código.")
 
-                    # Filtrar a linha da base correta baseada no Código + Lote Escolhido
+                    # Filtrar a linha da base correta baseada no Código + Lote Escolhido lá em cima
                     if lote_selecionado != "Não Informado" and 'lote' in itens_correspondentes.columns:
                         linha_especifica = itens_correspondentes[itens_correspondentes['lote'].astype(str).str.strip() == lote_selecionado]
                         if linha_especifica.empty:
@@ -577,6 +577,7 @@ else:
                         if pd.isna(qtd_sis): qtd_sis = 0
                     except: qtd_sis = 0
                     
+                    # Exibição dos Blocos Azuis de Informação
                     b1, b2, b3, b4 = st.columns(4)
                     b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
                     b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
@@ -585,13 +586,14 @@ else:
                     
                     st.markdown(f"**Descrição:** {desc_val}")
                     
-                    # Histórico de Ativos coletados no banco para o par Código + Lote
+                    # Histórico de Ativos coletados no banco para o par Código + Lote selecionado
                     df_ativos_ja_contados = pd.read_sql_query(
                         "SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ? AND ativo != ''", 
                         conn, params=(str(id_inventario_atual), codigo_rastreio, lote_selecionado)
                     )
                     lista_ativos_str = ", ".join(df_ativos_ja_contados['ativo'].unique()) if not df_ativos_ja_contados.empty else "Nenhum ativo lançado ainda para este lote"
                     
+                    # --- CORREÇÃO DO PAINEL DE ATENÇÃO: AGORA O LOTE SELECIONADO É EXIBIDO COM PRECISÃO ---
                     st.markdown(f"""
                         <div class="bloco-atencao">
                             <strong style="color: #d35400;">⚠️ ATENÇÃO - RASTREABILIDADE DO MATERIAL SELECIONADO:</strong><br>
@@ -887,7 +889,7 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
+                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in group.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
