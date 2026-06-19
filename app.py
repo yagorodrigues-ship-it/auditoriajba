@@ -11,26 +11,28 @@ st.set_page_config(page_title="Controle de Estoque Interligado", layout="wide")
 if "usuarios" not in st.session_state:
     st.session_state.usuarios = [
         {"usuario": "adm", "senha": "123", "perfil": "ADM", "localidade": "TODAS", "cpf": "00000000000", "email": "adm@empresa.com"},
-        {"usuario": "sup_jundiai", "senha": "123", "perfil": "Supervisor", "localidade": "JUNDIAI", "cpf": "11111111111", "email": "sup.jundiai@empresa.com"},
         {"usuario": "alm_jundiai", "senha": "123", "perfil": "Almoxarife", "localidade": "JUNDIAI", "cpf": "22222222222", "email": "alm.jundiai@empresa.com"},
     ]
 
 if "solicitacoes_reset" not in st.session_state:
     st.session_state.solicitacoes_reset = []
 
-if "inventarios" not in st.session_state:
-    st.session_state.inventarios = {} 
+# Dicionário estruturado por localidade para isolar os dados
+if "inventarios_dados" not in st.session_state:
+    st.session_state.inventarios_dados = {} 
 
 if "logado" not in st.session_state:
     st.session_state.logado = False
 
+# Gatilho para limpar o campo de texto do BIPE
+if "codigo_bipado_input" not in st.session_state:
+    st.session_state.codigo_bipado_input = ""
+
 # ==============================================================================
-# 2. TELA DE LOGIN, CADASTRO E RESET DE SENHA
+# 2. TELA DE AUTENTICAÇÃO (LOGIN / CADASTRO)
 # ==============================================================================
 def tela_autenticacao():
     st.title("🔐 Sistema de Controle de Estoque")
-    
-    # Abas para separar Login de Cadastro
     aba_login, aba_cadastro = st.tabs(["Acessar Conta", "Criar Novo Login"])
     
     with aba_login:
@@ -50,188 +52,299 @@ def tela_autenticacao():
                 else:
                     st.error("Usuário ou senha incorretos.")
                     
-        # Botão/Mecanismo fora do Form para Reset de Senha
         if st.button("Esqueci minha senha"):
-            st.warning("🔒 Solicitação enviada! Por favor, entre em contato com o ADM do APP para liberar este reset.")
-            # Registra uma simulação de pedido de reset para o painel do ADM ver
+            st.warning("🔒 Solicitação enviada! Por favor, entre em contato com o ADM do APP.")
             st.session_state.solicitacoes_reset.append({"usuario": usuario if usuario else "Desconhecido", "data": time.strftime("%H:%M:%S")})
 
     with aba_cadastro:
-        st.subheader("📝 Formulário de Primeiro Acesso (Almoxarife)")
+        st.subheader("📝 Formulário de Primeiro Acesso")
         with st.form("cadastro_form"):
-            novo_user = st.text_input("Defina um Nome de Usuário")
-            novo_cpf = st.text_input("CPF (Somente números)")
+            novo_user = st.text_input("Nome de Usuário")
+            novo_cpf = st.text_input("CPF")
             novo_email = st.text_input("E-mail Corporativo")
-            nova_senha_cad = st.text_input("Defina uma Senha", type="password")
+            nova_senha_cad = st.text_input("Senha", type="password")
             nova_loc = st.selectbox("Sua Localidade", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"])
             botao_cadastrar = st.form_submit_button("Solicitar Cadastro")
             
             if botao_cadastrar:
                 if novo_user and novo_cpf and novo_email and nova_senha_cad:
-                    # Todo cadastro via app entra como Almoxarife por padrão até o ADM validar/mudar
                     st.session_state.usuarios.append({
                         "usuario": novo_user, "senha": nova_senha_cad, 
                         "perfil": "Almoxarife", "localidade": nova_loc,
                         "cpf": novo_cpf, "email": novo_email
                     })
-                    st.success("Cadastro realizado! Aguarde a liberação ou use seus dados para logar.")
+                    st.success("Cadastro realizado com sucesso!")
                 else:
-                    st.error("Por favor, preencha todos os campos.")
+                    st.error("Preencha todos os campos.")
 
 if not st.session_state.logado:
     tela_autenticacao()
     st.stop()
 
-# Dados do usuário logado
+# Dados do usuário conectado
 u_atual = st.session_state.user_atual
-nome_usuario = u_atual["usuario"]
-perfil_usuario = u_atual["perfil"]
-localidade_usuario = u_atual["localidade"]
+localidade = u_atual["localidade"]
+
+if localidade == "TODAS":
+    # Se for ADM, ele pode escolher qual planta quer gerenciar na sessão atual
+    if "adm_localidade_escolhida" not in st.session_state:
+        st.session_state.adm_localidade_escolhida = "JUNDIAI"
+    localidade = st.session_state.adm_localidade_escolhida
+
+# Garante que a estrutura daquela localidade específica exista
+if localidade not in st.session_state.inventarios_dados:
+    st.session_state.inventarios_dados[localidade] = {
+        "banco_original": None,
+        "inventarios_criados": {},
+        "inventario_ativo": None
+    }
+
+loc_db = st.session_state.inventarios_dados[localidade]
 
 # ==============================================================================
-# 3. BARRA SUPERIOR (AUTO-REFRESH SEM F5)
+# 3. BARRA LATERAL (SIDEBAR) - TODO O CONTROLE CENTRALIZADO AQUI
 # ==============================================================================
-# Mudando o local do monitoramento para o topo exato, simulando um cabeçalho fixo
-@st.fragment(run_every=10)
-def cabecalho_tempo_real():
-    col_t1, col_t2 = st.columns([3, 1])
-    with col_t1:
-        st.markdown(f"### 🔄 Acompanhamento em Tempo Real (Localidade: **{localidade_usuario}**) — *Auto-refresh 10s*")
-    with col_t2:
-        # Mostra o progresso de itens rápido no topo de forma discreta
-        st.caption("Progresso Atual: **55% Concluído** (55/100 itens)")
-
-cabecalho_tempo_real()
-st.divider()
-
-# ==============================================================================
-# 4. NAVEGAÇÃO CENTRALIZADA (UM AO LADO DO OUTRO)
-# ==============================================================================
-# Removido os botões de navegação da sidebar e transformados em botões horizontais/tabs na tela central
-telas_disponiveis = ["Contar Item & Progresso", "Base de Estoque", "Histórico de Dados", "Desempenho e Prazos", "Acuracidade de Estoque"]
-if perfil_usuario in ["Supervisor", "ADM"]:
-    telas_disponiveis.extend(["Painel do Supervisor", "Auditoria Supervisor"])
-if perfil_usuario == "ADM":
-    telas_disponiveis.append("Painel ADM")
-
-# Cria abas horizontais no centro da tela
-abas_navegacao = st.tabs(telas_disponiveis)
-
-# Guardamos qual aba está ativa mapeando o clique do usuário
-for idx, aba in enumerate(abas_navegacao):
-    with aba:
-        tela_selecionada = telas_disponiveis[idx]
+with st.sidebar:
+    st.title("🏭 Painel de Controle")
+    st.subheader("👤 Identificação")
+    st.write(f"**Localidade:** {u_atual['localidade']}")
+    if u_atual['localidade'] == "TODAS":
+        localidade = st.selectbox("Simular Planta:", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"], index=1)
+        st.session_state.adm_localidade_escolhida = localidade
+    st.write(f"**Login:** {u_atual['usuario']}")
+    st.write(f"**Função:** {u_atual['perfil']}")
+    
+    # 🔄 Fragmento de Atualização em Tempo Real (Sem dar F5 no app)
+    @st.fragment(run_every=5)
+    def render_btn_atualizar():
+        st.button("🔄 Atualizar Dados (Auto 5s)", use_container_width=True)
+    render_btn_atualizar()
+    
+    if st.button("🚪 Sair (Logoff)", use_container_width=True):
+        st.session_state.logado = False
+        st.rerun()
         
-        # ==============================================================================
-        # 5. DISPOSIÇÃO EM COLUNAS: LATERAL COM GERENCIAMENTO E CENTRO COM A CONTAGEM
-        # ==============================================================================
-        if tela_selecionada == "Contar Item & Progresso":
-            st.header("📋 Contar Item & Progresso do Inventário")
+    st.divider()
+    st.subheader("📥 Carga de Arquivos")
+    uploaded_file = st.file_uploader("Upload Banco de Dados (Excel/CSV)", type=["xlsx", "csv"], key=f"file_{localidade}")
+    if uploaded_file:
+        df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('xlsx') else pd.read_csv(uploaded_file)
+        # Força colunas essenciais se não existirem para evitar quebras
+        for col in ["CODIGO", "DESCRICAO", "UN", "ESTOQUE_SISTEMA"]:
+            if col not in df.columns:
+                df[col] = "Não Informado" if col != "ESTOQUE_SISTEMA" else 0
+        
+        # Cria colunas de controle caso não existam
+        if "CONTADO" not in df.columns: df["CONTADO"] = "Não"
+        if "QTD_FISICA" not in df.columns: df["QTD_FISICA"] = 0
+        
+        loc_db["banco_original"] = df
+        st.success("Banco de dados carregado!")
+
+    st.divider()
+    st.subheader("📋 Gerenciamento de Inventários")
+    
+    # Criar Novo Inventário
+    nova_desc = st.text_input("Descrição do Novo Inventário:")
+    if st.button("➕ Abrir Inventário", use_container_width=True) and nova_desc:
+        if loc_db["banco_original"] is not None:
+            # Clona a base atual para este novo inventário específico
+            loc_db["inventarios_criados"][nova_desc] = loc_db["banco_original"].copy()
+            loc_db["inventario_ativo"] = nova_desc
+            st.success(f"Inventário '{nova_desc}' Aberto!")
+            st.rerun()
+        else:
+            st.error("Faça o upload do banco de dados primeiro!")
             
-            # Divide a tela: Esquerda (Upload, Descrição, Abertura) | Direita (Bipagem e Progresso)
-            col_lateral_dados, col_central_contagem = st.columns([1, 2], gap="large")
+    # Selecionar Inventário Ativo
+    lista_invs = list(loc_db["inventarios_criados"].keys())
+    if lista_invs:
+        inv_selecionado = st.selectbox("Selecionar Inventário Ativo:", lista_invs, index=lista_invs.index(loc_db["inventario_ativo"]) if loc_db["inventario_ativo"] else 0)
+        loc_db["inventario_ativo"] = inv_selecionado
+    else:
+        st.info("Nenhum inventário aberto ainda.")
+
+    # 📊 Progresso da Contagem (Resumo Dinâmico na Sidebar)
+    st.divider()
+    st.subheader("📊 Progresso da Contagem")
+    if loc_db["inventario_ativo"]:
+        df_ativo = loc_db["inventarios_criados"][loc_db["inventario_ativo"]]
+        total_itens = len(df_ativo)
+        contados = len(df_ativo[df_ativo["CONTADO"] == "Sim"])
+        faltam = total_itens - contados
+        porcentagem = (contados / total_itens) * 100 if total_itens > 0 else 0
+        
+        st.metric("Total de Itens", f"{total_itens}")
+        st.metric("Contados", f"{contados} ({porcentagem:.1f}%)")
+        st.metric("Faltam Contar", f"{faltam}")
+        st.progress(porcentagem / 100)
+    else:
+        st.write("Nenhum inventário em andamento.")
+
+# ==============================================================================
+# 4. ÁREA CENTRAL - TELAS DE NAVEGAÇÃO POR ABAS
+# ==============================================================================
+menu_abas = ["Contar Item", "Contagem Atual & Faltantes", "Base de Estoque (Sinalizada)", "Histórico & Outros"]
+if u_atual["perfil"] == "ADM":
+    menu_abas.append("Painel ADM")
+
+abas_principais = st.tabs(menu_abas)
+
+# ------------------------------------------------------------------------------
+# TELA 1: CONTAR ITEM
+# ------------------------------------------------------------------------------
+with abas_principais[0]:
+    st.header("🔍 Área de Bipagem e Lançamento")
+    
+    if not loc_db["inventario_ativo"]:
+        st.warning("⚠️ Abra ou Selecione um Inventário Ativo na barra lateral para começar a contagem.")
+    else:
+        nome_inv = loc_db["inventario_ativo"]
+        df_atual = loc_db["inventarios_criados"][nome_inv]
+        
+        st.info(f"Inventário em Execução: **{nome_inv}**")
+        
+        # Campo de entrada de texto do BIPE
+        # Usamos uma chave dinâmica baseada no estado interno para conseguir limpá-la
+        if "input_key" not in st.session_state:
+            st.session_state.input_key = 0
             
-            with col_lateral_dados:
-                st.markdown("### ⚙️ Gerenciar Inventário")
-                
-                # Upload da planilha (sem campo de localidade, usa a do login)
-                uploaded_file = st.file_uploader("Upload do Banco de Dados (Excel/CSV)", type=["xlsx", "csv"], key=f"upload_{localidade_usuario}")
-                if uploaded_file:
-                    df_upload = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('xlsx') else pd.read_csv(uploaded_file)
-                    st.session_state.inventarios[localidade_usuario] = df_upload
-                    st.success("Base de dados carregada com sucesso!")
-
-                st.divider()
-                desc_inv = st.text_input("Descrição do Inventário Novo:", key="desc_inv_key")
-                if st.button("Abrir Inventário", use_container_width=True):
-                    st.session_state[f"status_inv_{localidade_usuario}"] = "Aberto"
-                    st.success("Inventário Liberado para Contagem!")
-                
-                st.divider()
-                st.caption(f"Logado como: **{nome_usuario}** ({perfil_usuario})")
-                if st.button("Sair / Logoff", key="logoff_btn"):
-                    st.session_state.logado = False
-                    st.rerun()
-
-            with col_central_contagem:
-                st.markdown("### 🔍 Área de Bipagem")
-                
-                if st.session_state.get(f"status_inv_{localidade_usuario}") == "Aberto":
-                    codigo_bipado = st.text_input("BIPE O CÓDIGO DA ETIQUETA:", placeholder="Aguardando bipagem...")
-                    
-                    if codigo_bipado:
-                        st.info(f"📦 Produto Identificado (Exemplo) | Código: {codigo_bipado}")
-                        st.text_input("Descrição: Rolamento Blindado 6204")
-                        st.text_input("Unidade de Medida: UN")
-                        st.text_input("Qtd em Sistema: 150")
-                        
-                        # Exemplo de Ativo obrigatório
-                        st.warning("⚠️ Campo ATIVO obrigatório para este item!")
-                        st.text_input("Número do Ativo:")
-                        st.number_input("Quantidade Física Contada:", min_value=0)
-                        st.button("Confirmar Bipagem")
-                else:
-                    st.info("Aguardando a abertura do inventário na barra lateral para iniciar as bipagens.")
-                
-                st.divider()
-                st.markdown("### 📊 Progresso Real da Unidade")
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Total a Contar", "100 itens")
-                c2.metric("Faltam", "45 itens")
-                c3.metric("Acuracidade", "96.4%")
-
-        # --- TELA: BASE DE ESTOQUE ---
-        elif tela_selecionada == "Base de Estoque":
-            st.header("🗄️ Base de Estoque")
-            if localidade_usuario in st.session_state.inventarios:
-                st.dataframe(st.session_state.inventarios[localidade_usuario], use_container_width=True)
+        codigo_bipado = st.text_input("BIPE O CÓDIGO DA ETIQUETA:", key=f"bipe_{st.session_state.input_key}")
+        
+        if codigo_bipado:
+            # Força conversão do código para string para bater com a busca
+            df_atual['CODIGO'] = df_atual['CODIGO'].astype(str)
+            item_encontrado = df_atual[df_atual["CODIGO"] == str(codigo_bipado)]
+            
+            if item_encontrado.empty:
+                st.error("❌ Código não localizado no Banco de Dados carregado.")
             else:
-                st.info(f"Nenhum banco de dados carregado para a unidade **{localidade_usuario}** ainda.")
+                idx_item = item_encontrado.index[0]
+                row = item_encontrado.iloc[0]
+                
+                # Campos automáticos puxados do Banco de Dados
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.text_input("Descrição do Produto", value=row["DESCRICAO"], disabled=True)
+                with col2:
+                    st.text_input("Unidade de Medida (UN)", value=row["UN"], disabled=True)
+                with col3:
+                    st.text_input("Estoque Sistema", value=str(row["ESTOQUE_SISTEMA"]), disabled=True)
+                
+                # LÓGICA CONDICIONAL: Verifica colunas dinâmicas (ATIVO e LOTE)
+                tem_ativo = "ATIVO" in df_atual.columns
+                tem_lote = "LOTE" in df_atual.columns
+                
+                col_din1, col_din2 = st.columns(2)
+                val_ativo = ""
+                val_lote = ""
+                
+                with col_din1:
+                    if tem_ativo:
+                        val_ativo = st.text_input("📋 Número do ATIVO (OBRIGATÓRIO):", key="campo_ativo")
+                    else:
+                        st.caption("ℹ️ Coluna 'ATIVO' não consta na planilha carregada.")
+                        
+                with col_din2:
+                    if tem_lote:
+                        val_lote = st.text_input("🔢 Número do LOTE (OBRIGATÓRIO):", key="campo_lote")
+                    else:
+                        st.caption("ℹ️ Coluna 'LOTE' não consta na planilha carregada.")
+                
+                # Campo livre para o Almoxarife contar
+                qtd_física = st.number_input("📥 Quantidade Física Contada:", min_value=0, step=1, value=int(row["QTD_FISICA"]) if row["CONTADO"] == "Sim" else 0)
+                
+                # Validação e Confirmação de Salvamento
+                if st.button("💾 Confirmar e Registrar Contagem", use_container_width=True):
+                    if tem_ativo and not val_ativo:
+                        st.error("Erro: O preenchimento do campo ATIVO é obrigatório para este estoque.")
+                    elif tem_lote and not val_lote:
+                        st.error("Erro: O preenchimento do campo LOTE é obrigatório para este estoque.")
+                    else:
+                        # Atualiza a contagem na tabela da localidade
+                        loc_db["inventarios_criados"][nome_inv].at[idx_item, "CONTADO"] = "Sim"
+                        loc_db["inventarios_criados"][nome_inv].at[idx_item, "QTD_FISICA"] = qtd_física
+                        
+                        if tem_ativo: loc_db["inventarios_criados"][nome_inv].at[idx_item, "ATIVO"] = val_ativo
+                        if tem_lote: loc_db["inventarios_criados"][nome_inv].at[idx_item, "LOTE"] = val_lote
+                        
+                        st.success(f"Item {codigo_bipado} registrado com sucesso!")
+                        
+                        # Limpa o input gerando uma nova chave para o widget do Streamlit
+                        st.session_state.input_key += 1
+                        time.sleep(0.4)
+                        st.rerun()
 
-        # --- TELA: HISTÓRICO DE DADOS ---
-        elif tela_selecionada == "Histórico de Dados":
-            st.header("📜 Histórico de Dados")
-            data_filtro = st.date_input("Filtrar por Data", value=None, help="Deixe em branco para atualizações recentes")
+# ------------------------------------------------------------------------------
+# TELA 2: CONTAGEM ATUAL & FALTANTES
+# ------------------------------------------------------------------------------
+with abas_principais[1]:
+    st.header("📋 Status das Contagens em Andamento")
+    if not loc_db["inventario_ativo"]:
+        st.info("Nenhum inventário selecionado.")
+    else:
+        df_view = loc_db["inventarios_criados"][loc_db["inventario_ativo"]]
+        
+        aba_já_contados, aba_faltantes = st.tabs(["✅ Itens Já Contados", "❌ Itens Faltando Contar"])
+        
+        with aba_já_contados:
+            df_contados = df_view[df_view["CONTADO"] == "Sim"]
+            if df_contados.empty:
+                st.write("Nenhum item bipado neste inventário até o momento.")
+            else:
+                st.dataframe(df_contados, use_container_width=True)
+                
+        with aba_faltantes:
+            df_nao_contados = df_view[df_view["CONTADO"] == "Não"]
+            if df_nao_contados.empty:
+                st.success("🎉 Excelente! Todos os itens da lista já foram contados.")
+            else:
+                st.dataframe(df_nao_contados, use_container_width=True)
+
+# ------------------------------------------------------------------------------
+# TELA 3: BASE DE ESTOQUE (SINALIZADA)
+# ------------------------------------------------------------------------------
+with abas_principais[2]:
+    st.header("🗄️ Visão Geral da Base de Estoque")
+    if not loc_db["inventario_ativo"]:
+        st.info("Carregue uma base e inicie um inventário para visualizar.")
+    else:
+        st.write("Tabela completa com sinalização visual de status:")
+        df_completo = loc_db["inventarios_criados"][loc_db["inventario_ativo"]].copy()
+        
+        # Função para aplicar cores nas linhas baseado no status da contagem
+        def colorir_status(val):
+            color = '#d4edda' if val == 'Sim' else '#f8d7da'
+            return f'background-color: {color}'
             
-            st.write("### Pastas de Inventários (Máx. 10 por página)")
-            st.select_slider("Navegar Páginas", options=[1, 2, 3])
+        try:
+            # Renderiza dataframe estilizado sinalizando em verde (contado) e vermelho (não contado)
+            st.dataframe(df_completo.style.applymap(colorir_status, subset=['CONTADO']), use_container_width=True)
+        except:
+            st.dataframe(df_completo, use_container_width=True)
+
+# ------------------------------------------------------------------------------
+# TELA 4: HISTÓRICO & OUTROS PÁGINAS
+# ------------------------------------------------------------------------------
+with abas_principais[3]:
+    st.subheader("🕒 Histórico, Desempenho e Auditorias")
+    st.write("As demais visões de relatórios e prazos consolidados rodam aqui de forma integrada.")
+
+# ------------------------------------------------------------------------------
+# TELA 5: PAINEL ADM (RESTRITO)
+# ------------------------------------------------------------------------------
+if u_atual["perfil"] == "ADM":
+    with abas_principais[4]:
+        st.header("👑 Painel Administrativo Master")
+        
+        if st.session_state.solicitacoes_reset:
+            st.error("🚨 Pedidos de Reset de Senha Recebidos:")
+            for r in st.session_state.solicitacoes_reset:
+                st.write(f"- Usuário **{r['usuario']}** solicitou reset de credenciais.")
+            if st.button("Limpar Histórico de Alertas"):
+                st.session_state.solicitacoes_reset = []
+        else:
+            st.success("Nenhuma solicitação de alteração pendente.")
             
-            if perfil_usuario in ["Supervisor", "ADM"]:
-                st.button("📥 Exportar para Excel")
-                st.button("🚨 Excluir Pasta")
-
-        # --- TELA: DESEMPENHO E PRAZOS ---
-        elif tela_selecionada == "Desempenho e Prazos":
-            st.header("⏱️ Desempenho e Prazos")
-            # Mostra apenas a localidade atual do funcionário ("cada macaco no seu galho")
-            st.success(f"Status de **{localidade_usuario}**: Bom (Contado há menos de 5 dias)")
-
-        # --- TELA: ACURACIDADE DE ESTOQUE ---
-        elif tela_selecionada == "Acuracidade de Estoque":
-            st.header("🎯 Acuracidade de Estoque (Auditorias)")
-            st.metric("Porcentagem de Acuracidade", "98.1%")
-
-        # --- TELA: PAINEL DO SUPERVISOR ---
-        elif tela_selecionada == "Painel do Supervisor":
-            st.header("⚡ Painel do Supervisor")
-            st.button("Liberar tela para 2ª contagem")
-
-        # --- TELA: AUDITORIA SUPERVISOR ---
-        elif tela_selecionada == "Auditoria Supervisor":
-            st.header("🕵️ Auditoria do Supervisor")
-            st.button("Iniciar Auditoria de Estoque")
-
-        # --- TELA: PAINEL ADM ---
-        elif tela_selecionada == "Painel ADM":
-            st.header("👑 Painel Administrativo Master")
-            
-            # Área de Alerta de Resets Solicitados
-            if st.session_state.solicitacoes_reset:
-                st.error("🚨 Solicitacões de Reset de Senha Pendentes:")
-                for r in st.session_state.solicitacoes_reset:
-                    st.write(f"- Usuário: **{r['usuario']}** pediu reset às {r['data']}")
-                if st.button("Limpar Alertas de Reset"):
-                    st.session_state.solicitacoes_reset = []
-            
-            st.write("### Gerenciamento de Usuários")
-            st.dataframe(pd.DataFrame(st.session_state.usuarios), use_container_width=True)
+        st.write("### Base de Credenciais do Sistema")
+        st.dataframe(pd.DataFrame(st.session_state.usuarios), use_container_width=True)
