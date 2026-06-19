@@ -538,19 +538,39 @@ else:
                 # Coleta todas as linhas correspondentes da planilha para mapear os lotes
                 itens_correspondentes = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
                 if not itens_correspondentes.empty:
-                    item = itens_correspondentes.iloc[0]
+                    
+                    # Obter lista de todos os lotes exclusivos associados a este código
+                    if 'lote' in itens_correspondentes.columns:
+                        lista_lotes_validos = itens_correspondentes['lote'].dropna().astype(str).str.strip().unique()
+                        lista_lotes_validos = [l for l in lista_lotes_validos if l.lower() != 'nan' and l != '']
+                    else:
+                        lista_lotes_validos = []
+
+                    # Montar interface de seleção de lote obrigatório
+                    st.markdown('### 📦 Configuração Obrigatória do Lote')
+                    if len(lista_lotes_validos) > 1:
+                        st.warning(f"⚠️ Atenção: Foram detectados {len(lista_lotes_validos)} lotes diferentes para o código {codigo_rastreio} na planilha!")
+                        lote_selecionado = st.selectbox("Selecione o Lote Físico que você está contando agora:", lista_lotes_validos, key="lote_selector_operario")
+                    elif len(lista_lotes_validos) == 1:
+                        lote_selecionado = lista_lotes_validos[0]
+                        st.info(f"Lote Único detectado na base: **{lote_selecionado}**")
+                    else:
+                        lote_selecionado = "Não Informado"
+                        st.info("Nenhum lote especificado na planilha para este código.")
+
+                    # Filtrar a linha da base correta baseada no Código + Lote Escolhido
+                    if lote_selecionado != "Não Informado" and 'lote' in itens_correspondentes.columns:
+                        linha_especifica = itens_correspondentes[itens_correspondentes['lote'].astype(str).str.strip() == lote_selecionado]
+                        if linha_especifica.empty:
+                            linha_especifica = itens_correspondentes
+                    else:
+                        linha_especifica = itens_correspondentes
+
+                    item = linha_especifica.iloc[0]
                     unid_val = item[col_unidade] if col_unidade in itens_correspondentes.columns else "UN"
                     desc_val = item[col_desc]
                     local_val = item[col_local] if col_local in itens_correspondentes.columns else "Não Informado"
                     id_estoque_val = str(item[col_id_estoque]).strip() if col_id_estoque in itens_correspondentes.columns else ""
-                    
-                    # --- CORREÇÃO: Consolidação Dinâmica da Coluna Lote quando houver o mesmo código ---
-                    if 'lote' in itens_correspondentes.columns:
-                        lista_lotes = itens_correspondentes['lote'].dropna().astype(str).str.strip().unique()
-                        lista_lotes = [l for l in lista_lotes if l.lower() != 'nan' and l != '']
-                        lote_base_val = ", ".join(lista_lotes) if lista_lotes else "Não Informado"
-                    else:
-                        lote_base_val = "Não Informado"
                     
                     try:
                         qtd_sis = int(pd.to_numeric(item[col_qtd], errors='coerce'))
@@ -561,45 +581,44 @@ else:
                     b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
                     b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
                     b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
-                    b4.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS BARRA</div><div class="bloco-valor" style="color:#2ecc71;">● Conectado</div></div>', unsafe_allow_html=True)
+                    b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">SALDO SISTEMA (NESTE LOTE)</div><div class="bloco-valor" style="color:#d35400;">{qtd_sis}</div></div>', unsafe_allow_html=True)
                     
                     st.markdown(f"**Descrição:** {desc_val}")
                     
-                    # Histórico de Ativos coletados no banco
+                    # Histórico de Ativos coletados no banco para o par Código + Lote
                     df_ativos_ja_contados = pd.read_sql_query(
-                        "SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND ativo != ''", 
-                        conn, params=(str(id_inventario_atual), codigo_rastreio)
+                        "SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ? AND ativo != ''", 
+                        conn, params=(str(id_inventario_atual), codigo_rastreio, lote_selecionado)
                     )
-                    lista_ativos_str = ", ".join(df_ativos_ja_contados['ativo'].unique()) if not df_ativos_ja_contados.empty else "Nenhum ativo lançado ainda"
+                    lista_ativos_str = ", ".join(df_ativos_ja_contados['ativo'].unique()) if not df_ativos_ja_contados.empty else "Nenhum ativo lançado ainda para este lote"
                     
                     st.markdown(f"""
                         <div class="bloco-atencao">
-                            <strong style="color: #d35400;">⚠️ ATENÇÃO - RASTREABILIDADE DO MATERIAL:</strong><br>
-                            📦 <strong>Lote Registrado na Base:</strong> <span style="color: #1b4f72; font-weight: bold;">{lote_base_val}</span><br>
-                            🔢 <strong>Ativos já coletados neste inventário:</strong> <code style="background-color: #fce4d6; padding: 2px 5px; border-radius: 4px; color: #c0392b;">{lista_ativos_str}</code>
+                            <strong style="color: #d35400;">⚠️ ATENÇÃO - RASTREABILIDADE DO MATERIAL SELECIONADO:</strong><br>
+                            📦 <strong>LOTE SELECIONADO PARA CONTAGEM:</strong> <span style="color: #1b4f72; font-weight: bold; font-size:16px;">{lote_selecionado}</span><br>
+                            🔢 <strong>Ativos já coletados neste lote e inventário:</strong> <code style="background-color: #fce4d6; padding: 2px 5px; border-radius: 4px; color: #c0392b;">{lista_ativos_str}</code>
                         </div>
                     """, unsafe_allow_html=True)
                     
                     with st.form("confirmar_form", clear_on_submit=True):
-                        qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
+                        qtd_fisica = st.number_input("📦 Quantidade contada fisicamente para este LOTE (Obrigatório)", min_value=0, step=1, value=0)
                         ativo_input = st.text_input("🔢 Número do Ativo (Opcional)", placeholder="Ex: TECA0091Z")
                         observacao = st.text_input("📝 Observação (opcional)")
                         
-                        if st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True):
+                        if st.form_submit_button("✓ Confirmar Lançamento deste Lote", type="primary", use_container_width=True):
                             ativo_l = ativo_input.strip().upper()
                             if qtd_fisica <= 0:
                                 st.error("❌ Erro: Informe uma quantidade maior que 0!")
                             else:
                                 agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                lote_salvar = str(item['lote']) if 'lote' in itens_correspondentes.columns else ""
                                 dif_c = qtd_fisica - qtd_sis
                                 cursor = conn.cursor()
                                 cursor.execute("""
                                     INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (str(id_inventario_atual), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_salvar))
+                                """, (str(id_inventario_atual), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado))
                                 conn.commit()
-                                st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso!"
+                                st.session_state.ultimo_item_sucesso = f"✅ Lançamento do Lote {lote_selecionado} efetuado com sucesso!"
                                 st.session_state.contador_reset += 1
                                 st.rerun()
                 else:
@@ -913,7 +932,7 @@ else:
         if df_inventarios_sup.empty:
             st.info("Nenhum histórico amostral arquivado.")
         else:
-            st.write("#### 📅 Filtrar Pastas do Supervisor por Período de Abertura")
+            st.write("#### 📅 Filtrar Pastas do Supervisor por Períero de Abertura")
             c_dt_sup1, c_dt_sup2 = st.columns(2)
             with c_dt_sup1:
                 dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
