@@ -41,10 +41,10 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de inventários gerais
+    # Tabela de inventários gerais (Alterado ID para AUTOINCREMENT para eliminar conflitos de Chave Primária)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios (
-            id TEXT PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
             nome TEXT,
             data TEXT,
             status TEXT,
@@ -261,9 +261,9 @@ else:
         else:
             lista_inv = []
             for idx, r in df_inventarios.iterrows():
-                id_limpo_r = r['id'].replace('#','')
+                id_txt = f"#{r['id']}"
                 cursor_check = conn.cursor()
-                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (id_limpo_r, st.session_state.unidade_selecionada))
+                cursor_check.execute("SELECT COUNT(*) FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", (str(r['id']), st.session_state.unidade_selecionada))
                 possui_pendente = cursor_check.fetchone()[0] > 0
                 
                 if r['status'] == 'Fechado':
@@ -273,16 +273,16 @@ else:
                 else:
                     status_exibicao = "Aberto"
                     
-                lista_inv.append(f"{r['id']} – {r['nome']} ({status_exibicao})")
+                lista_inv.append(f"{id_txt} – {r['nome']} ({status_exibicao})")
                 
             inv_sel = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
-            id_inventario_atual = inv_sel.split(" – ")[0]
-            inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
+            id_inventario_atual = inv_sel.split(" – ")[0].replace('#', '')
+            inventario_selected_obj = df_inventarios[df_inventarios['id'].astype(str) == id_inventario_atual].iloc[0]
 
         # --- SEÇÃO DINÂMICA DE PROGRESSO REAL NA BARRA LATERAL ---
         total_faltantes = 0
         if id_inventario_atual and st.session_state.base_sistema is not None:
-            df_c_side = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
+            df_c_side = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual, st.session_state.unidade_selecionada))
             total_itens_base = len(st.session_state.base_sistema)
             itens_contados_unicos = df_c_side['cod_produto'].unique() if not df_c_side.empty else []
             total_contados = len(itens_contados_unicos)
@@ -328,22 +328,10 @@ else:
                 if st.form_submit_button("Criar Lote"):
                     if n_inv:
                         cursor = conn.cursor()
-                        # --- CORREÇÃO DA SEGUNDA IMAGEM (INTEGRITY ERROR): Busca o maior ID GLOBAL de todas as unidades para somar 1 ---
-                        cursor.execute("SELECT id FROM inventarios")
-                        todos_ids = cursor.fetchall()
-                        
-                        maior_id = 0
-                        for row in todos_ids:
-                            try:
-                                num = int(row[0].replace('#',''))
-                                if num > maior_id:
-                                    maior_id = num
-                            except ValueError:
-                                pass
-                        
-                        nxt = maior_id + 1
-                        cursor.execute("INSERT INTO inventarios (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (f"#{nxt}", n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
+                        # --- SOLUÇÃO DO INTEGRITY ERROR: ID auto-incremental controlado pelo SQLite, sem repetição ---
+                        cursor.execute("INSERT INTO inventarios (nome, data, status, unidade) VALUES (?, ?, 'Aberto', ?)", (n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
                         conn.commit()
+                        st.success("✅ Novo Lote gerado com sucesso!")
                         st.rerun()
 
     # --- DEFINIÇÃO E RENDERIZAÇÃO DAS ABAS NA ORDEM EXATA ---
@@ -363,17 +351,16 @@ else:
         elif st.session_state.base_sistema is None or not c_cod:
             st.warning("⚠️ Carregue a Base Geral no menu lateral para iniciar as bipagens.")
         else:
-            id_p_limpo = id_inventario_atual.replace('#','')
             df_recont_totais = pd.read_sql_query(
                 "SELECT COUNT(*) as total_p FROM contagens WHERE inventario_id = ? AND recontagem = 'Pendente' AND unidade = ?", 
-                conn, params=(id_p_limpo, st.session_state.unidade_selecionada)
+                conn, params=(id_inventario_atual, st.session_state.unidade_selecionada)
             )
             tem_recontagem_ativa = int(df_recont_totais.iloc[0]['total_p']) > 0
             
             if inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado" and not tem_recontagem_ativa:
-                st.error("🔒 Este lote de inventário foi finalizado e fechado.")
+                st.error(f"🔒 Este lote de inventário (#{id_inventario_atual}) foi finalizado e fechado.")
             else:
-                st.subheader(f"📝 Lançamento de Contagem Ativa – Lote {id_inventario_atual}")
+                st.subheader(f"📝 Lançamento de Contagem Ativa – Lote #{id_inventario_atual}")
                 bip_prod = st.text_input("💻 Bipar Código do Produto", key=f"bip_op_{st.session_state.contador_reset}")
                 if bip_prod:
                     prod_l = str(bip_prod).strip().upper()
@@ -381,7 +368,7 @@ else:
                     if not it.empty:
                         row = it.iloc[0]
                         
-                        df_recont_check = pd.read_sql_query("SELECT id, recontagem FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND unidade = ? ORDER BY id DESC LIMIT 1", conn, params=(id_p_limpo, prod_l, st.session_state.unidade_selecionada))
+                        df_recont_check = pd.read_sql_query("SELECT id, recontagem FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND unidade = ? ORDER BY id DESC LIMIT 1", conn, params=(id_inventario_atual, prod_l, st.session_state.unidade_selecionada))
                         is_fluxo_recontagem = False
                         if not df_recont_check.empty and df_recont_check.iloc[0]['recontagem'] == 'Pendente':
                             is_fluxo_recontagem = True
@@ -406,7 +393,7 @@ else:
                                     cursor.execute("""
                                         SELECT COUNT(*) FROM contagens 
                                         WHERE inventario_id = ? AND cod_produto = ? AND unidade = ?
-                                    """, (id_p_limpo, prod_l, st.session_state.unidade_selecionada))
+                                    """, (id_inventario_atual, prod_l, st.session_state.unidade_selecionada))
                                     
                                     if cursor.fetchone()[0] > 0:
                                         st.error("❌ Erro: Este item já foi contabilizado neste lote!")
@@ -428,7 +415,7 @@ else:
                                         cursor.execute("""
                                             INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, recontagem, unidade)
                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Não', ?)
-                                        """, (id_p_limpo, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, "", obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
+                                        """, (id_inventario_atual, str(row[c_est]), str(row[c_loc]), prod_l, str(row[c_desc]), str(row[c_un]), q_sis, q_cont, q_cont - q_sis, "", obs, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), st.session_state.unidade_selecionada))
                                     
                                     conn.commit()
                                     st.success("Contagem processada e armazenada com sucesso!")
@@ -441,8 +428,8 @@ else:
         if not id_inventario_atual:
             st.info("ℹ️ Nenhum inventário/lote selecionado na barra lateral.")
         else:
-            st.subheader(f"📊 Progresso em Tempo Real - Lote {id_inventario_atual}")
-            df_c = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
+            st.subheader(f"📊 Progresso em Tempo Real - Lote #{id_inventario_atual}")
+            df_c = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual, st.session_state.unidade_selecionada))
             
             def formatar_acuracidade_html(porcentagem):
                 if porcentagem == 100.0:
@@ -519,7 +506,7 @@ else:
             st.subheader("📄 Espelho Base de Saldo - Status de Contagem Updated")
             
             if id_inventario_atual:
-                df_lancados_base = pd.read_sql_query("SELECT cod_produto, operador, qtd_contada, recontagem FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.unidade_selecionada))
+                df_lancados_base = pd.read_sql_query("SELECT cod_produto, operador, qtd_contada, recontagem FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_inventario_atual, st.session_state.unidade_selecionada))
                 mapa_operadores = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['operador']))
                 mapa_quantidades = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['qtd_contada']))
                 mapa_recont = dict(zip(df_lancados_base['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_base['recontagem']))
@@ -565,10 +552,9 @@ else:
                     
                 df_pag = df_filtrados.iloc[st.session_state.pagina_historico*tamanho_pagina : (st.session_state.pagina_historico+1)*tamanho_pagina]
                 for idx, inv in df_pag.iterrows():
-                    id_p = inv['id'].replace('#','')
-                    df_det = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(id_p, st.session_state.unidade_selecionada))
+                    df_det = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND unidade = ?", conn, params=(str(inv['id']), st.session_state.unidade_selecionada))
                     
-                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} ({len(df_det)} contados)"):
+                    with st.expander(f"📁 #{inv['id']} – {inv['nome']} | Data: {inv['data']} ({len(df_det)} contados)"):
                         if not df_det.empty:
                             st.dataframe(df_det.drop(columns=['unidade'], errors='ignore'), use_container_width=True, hide_index=True)
                             
@@ -578,23 +564,23 @@ else:
                                 st.download_button(
                                     label="📥 Exportar para Excel",
                                     data=excel_data,
-                                    file_name=f"Inventario_{inv['id']}.xlsx",
+                                    file_name=f"Inventario_Lote_{inv['id']}.xlsx",
                                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                                     key=f"dl_gen_{inv['id']}"
                                 )
                             with c_btn2:
                                 if eh_supervisor:
-                                    if st.button(f"🗑️ Excluir Pasta {inv['id']}", key=f"del_gen_{inv['id']}", type="secondary"):
+                                    if st.button(f"🗑️ Excluir Pasta #{inv['id']}", key=f"del_gen_{inv['id']}", type="secondary"):
                                         cursor = conn.cursor()
                                         cursor.execute("DELETE FROM inventarios WHERE id = ? AND unidade = ?", (inv['id'], st.session_state.unidade_selecionada))
-                                        cursor.execute("DELETE FROM contagens WHERE inventario_id = ? AND unidade = ?", (id_p, st.session_state.unidade_selecionada))
+                                        cursor.execute("DELETE FROM contagens WHERE inventario_id = ? AND unidade = ?", (str(inv['id']), st.session_state.unidade_selecionada))
                                         conn.commit()
-                                        st.success(f"Pasta {inv['id']} excluída com sucesso!")
+                                        st.success(f"Pasta #{inv['id']} excluída com sucesso!")
                                         st.rerun()
                         else:
                             st.info("Nenhum item contabilizado nesta pasta ainda.")
                             if eh_supervisor:
-                                if st.button(f"🗑️ Excluir Pasta Vazia {inv['id']}", key=f"del_vazia_{inv['id']}"):
+                                if st.button(f"🗑️ Excluir Pasta Vazia #{inv['id']}", key=f"del_vazia_{inv['id']}"):
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM inventarios WHERE id = ? AND unidade = ?", (inv['id'], st.session_state.unidade_selecionada))
                                     conn.commit()
@@ -706,10 +692,10 @@ else:
                     df_itens_da_pasta = pd.read_sql_query(
                         "SELECT id_estoque as 'Cód. Estoque', desc_estoque as 'Localização', cod_produto as 'Código', desc_produto as 'Descrição', qtd_sistema as 'Qtd. Sist', qtd_auditada as 'Qtd. Auditada', diferenca as 'Diferença', etiqueta_correta as 'Etiqueta Ok', localizacao_correta as 'Local Ok', supervisor as 'Auditado Por', data_hora as 'Data/Hora' FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ? ORDER BY id DESC", 
                         conn, 
-                        params=(pasta_sup['id'], st.session_state.unidade_selecionada)
+                        params=(str(pasta_sup['id']), st.session_state.unidade_selecionada)
                     )
                     
-                    with st.expander(f"📁 Pasta Amostral: {pasta_sup['id']} – {pasta_sup['nome']} ({pasta_sup['status']}) | {len(df_itens_da_pasta)} itens auditados"):
+                    with st.expander(f"📁 Pasta Amostral: SUP-#{pasta_sup['id']} – {pasta_sup['nome']} ({pasta_sup['status']}) | {len(df_itens_da_pasta)} itens auditados"):
                         if not df_itens_da_pasta.empty:
                             st.dataframe(df_itens_da_pasta, use_container_width=True, hide_index=True)
                             
@@ -725,22 +711,13 @@ else:
                                 )
                             with c_sup_btn2:
                                 if eh_supervisor:
-                                    if st.button(f"🗑️ Excluir Pasta Amostral {pasta_sup['id']}", key=f"del_sup_{pasta_sup['id']}", type="secondary"):
+                                    if st.button(f"🗑️ Excluir Pasta Amostral SUP-#{pasta_sup['id']}", key=f"del_sup_{pasta_sup['id']}", type="secondary"):
                                         cursor = conn.cursor()
                                         cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ? AND unidade = ?", (pasta_sup['id'], st.session_state.unidade_selecionada))
-                                        cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ?", (pasta_sup['id'], st.session_state.unidade_selecionada))
+                                        cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ? AND unidade = ?", (str(pasta_sup['id']), st.session_state.unidade_selecionada))
                                         conn.commit()
-                                        st.success(f"Pasta amostral {pasta_sup['id']} removida!")
+                                        st.success(f"Pasta amostral SUP-#{pasta_sup['id']} removida!")
                                         st.rerun()
-                        else:
-                            st.info("Nenhum item contabilizado nesta pasta amostral ainda.")
-                            if eh_supervisor:
-                                if st.button(f"🗑️ Excluir Pasta Amostral Vazia {pasta_sup['id']}", key=f"del_sup_vazia_{pasta_sup['id']}"):
-                                    cursor = conn.cursor()
-                                    cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ? AND unidade = ?", (pasta_sup['id'], st.session_state.unidade_selecionada))
-                                    conn.commit()
-                                    st.success("Pasta amostral vazia removida!")
-                                    st.rerun()
                 
                 st.write("")
                 cs1, cs2, cs3 = st.columns([2, 6, 2])
@@ -764,12 +741,11 @@ else:
             st.title("🔬 Módulo Amostral do Supervisor e Fluxo de Recontagem")
             
             if id_inventario_atual:
-                st.write(f"### 🔄 Gestão de Recontagem Inteligente do Lote Ativo ({id_inventario_atual})")
-                id_p_limpo = id_inventario_atual.replace('#','')
+                st.write(f"### 🔄 Gestão de Recontagem Inteligente do Lote Ativo (#{id_inventario_atual})")
                 
                 df_erros_lote = pd.read_sql_query(
                     "SELECT id, cod_produto, desc_produto, qtd_sistema, qtd_contada, diferenca, recontagem FROM contagens WHERE inventario_id = ? AND diferenca != 0 AND unidade = ?", 
-                    conn, params=(id_p_limpo, st.session_state.unidade_selecionada)
+                    conn, params=(id_inventario_atual, st.session_state.unidade_selecionada)
                 )
                 
                 if not df_erros_lote.empty:
@@ -780,24 +756,24 @@ else:
                     if not itens_para_recontar.empty:
                         if st.button("🔄 Abrir 2ª Contagem (Apenas Itens Divergentes)", type="primary", use_container_width=True):
                             cursor = conn.cursor()
-                            cursor.execute("UPDATE contagens SET recontagem = 'Pendente' WHERE inventario_id = ? AND diferenca != 0 AND recontagem = 'Não' AND unidade = ?", (id_p_limpo, st.session_state.unidade_selecionada))
+                            cursor.execute("UPDATE contagens SET recontagem = 'Pendente' WHERE inventario_id = ? AND diferenca != 0 AND recontagem = 'Não' AND unidade = ?", (id_inventario_atual, st.session_state.unidade_selecionada))
                             conn.commit()
                             st.success("✅ Segunda contagem ativada com sucesso! Os operadores serão notificados na Aba 1 ao biparem estes materiais.")
                             st.rerun()
                     else:
                         st.info("ℹ️ Todos os itens divergentes já foram enviados para a recontagem.")
                 else:
-                    st.success("🎉 Nenhuma divergência ativa encontrada neste lote até o momento.")
+                    st.success("🎉 Nenhuma divergência activa encontrada neste lote até o momento.")
                     
             st.markdown("---")
             if df_inventarios_sup.empty:
                 st.warning("Nenhum inventário amostral aberto.")
                 id_inv_sup_atual = None
             else:
-                lista_inv_sup = [f"{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios_sup.iterrows()]
+                lista_inv_sup = [f"SUP-#{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios_sup.iterrows()]
                 inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup, key="selectbox_sup_amostral_v5")
-                id_inv_sup_atual = inv_sup_selected.split(" – ")[0]
-                inv_sup_selected_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
+                id_inv_sup_atual = inv_sup_selected.split(" – ")[0].replace('SUP-#', '')
+                inv_sup_selected_obj = df_inventarios_sup[df_inventarios_sup['id'].astype(str) == id_inv_sup_atual].iloc[0]
                 
                 if inv_sup_selected_obj['status'] == 'Aberto':
                     if st.button("🔒 Fechar Lote Amostral do Supervisor", type="primary", use_container_width=True):
@@ -810,20 +786,7 @@ else:
                     nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
                     if st.form_submit_button("Criar Lote", type="primary") and nome_sup_inv:
                         cursor = conn.cursor()
-                        cursor.execute("SELECT id FROM inventarios_supervisor")
-                        todos_ids_sup = cursor.fetchall()
-                        
-                        maior_id_sup = 0
-                        for row in todos_ids_sup:
-                            try:
-                                num = int(row[0].replace('SUP-#',''))
-                                if num > maior_id_sup:
-                                    maior_id_sup = num
-                            except ValueError:
-                                pass
-                                
-                        novo_id_sup = f"SUP-#{maior_id_sup + 1}"
-                        cursor.execute("INSERT INTO inventarios_supervisor (id, nome, data, status, unidade) VALUES (?, ?, ?, 'Aberto', ?)", (novo_id_sup, nome_sup_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
+                        cursor.execute("INSERT INTO inventarios_supervisor (nome, data, status, unidade) VALUES (?, ?, 'Aberto', ?)", (nome_sup_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
                         conn.commit(); st.rerun()
 
             st.markdown("---")
@@ -919,7 +882,6 @@ else:
                 n_cargo = st.selectbox("💼 Cargo (Nível de Acesso)", ["Almoxarife", "Supervisor"], index=["Almoxarife", "Supervisor"].index(r_u['cargo']))
                 if st.form_submit_button("💾 Salvar Alterações", type="primary"):
                     cursor = conn.cursor()
-                    # --- CORREÇÃO DA PRIMEIRA IMAGEM (SALVAR LOCALIDADES): Commit e Alerta síncronos sem typos ---
                     cursor.execute("""
                         UPDATE usuarios 
                         SET nome = ?, senha = ?, unidade = ?, cargo = ? 
