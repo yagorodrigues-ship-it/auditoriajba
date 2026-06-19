@@ -142,6 +142,10 @@ with st.sidebar:
                 mapeamento_colunas[c] = "UNID. MEDIDA"
             if c in ["QTD ESTOQUE", "QTD ESTOQUE ", "QTD_ESTOQUE", "ESTOQUE SISTEMA", "ESTOQUE_SISTEMA"]:
                 mapeamento_colunas[c] = "QTD ESTOQUE"
+            if c in ["LOTE", "LOTES"]:
+                mapeamento_colunas[c] = "LOTE"
+            if c in ["ATIVO", "ATIVOS"]:
+                mapeamento_colunas[c] = "ATIVO"
         
         if mapeamento_colunas:
             df = df.rename(columns=mapeamento_colunas)
@@ -208,7 +212,7 @@ if u_atual["perfil"] == "ADM":
 abas_principais = st.tabs(menu_abas)
 
 # ------------------------------------------------------------------------------
-# TELA 1: CONTAR ITEM (PROCESSAMENTO EXTRAÍDO DO BIPE)
+# TELA 1: CONTAR ITEM (EXIBIÇÃO DOS LOTES/ATIVOS DISPONÍVEIS NA BASE)
 # ------------------------------------------------------------------------------
 with abas_principais[0]:
     st.header("🔍 Área de Bipagem e Lançamento")
@@ -224,30 +228,25 @@ with abas_principais[0]:
         codigo_bipado = st.text_input("BIPE O CÓDIGO DA ETIQUETA:", key=f"bipe_field_{st.session_state.input_key}")
         
         if codigo_bipado:
-            # --- REGRA DE QUEBRA DE STRING (FATIAMENTO INTELIGENTE) ---
-            # Se vier "2194 - TEFE0158Z", divide no hifen e extrai a parte da direita (Código do Material)
             input_string = str(codigo_bipado).strip()
             if " - " in input_string:
                 codigo_limpo = input_string.split(" - ")[-1].strip().upper()
             else:
                 codigo_limpo = input_string.upper()
                 
-            # Remove decimais indesejados (.0) de conversão caso existam
             codigo_limpo = codigo_limpo.split('.')[0]
             
-            # Padroniza a coluna 'CÓD. PRODUTO' interna para casamento perfeito
             df_atual['CODIGO_COMP_INTERNO'] = df_atual['CÓD. PRODUTO'].astype(str).str.strip().str.split('.').str[0].str.upper()
             
-            # Realiza a busca
-            item_encontrado = df_atual[df_atual["CODIGO_COMP_INTERNO"] == codigo_limpo]
+            # Buscamos TODOS os registros correspondentes ao código na base para cruzar Lotes/Ativos repetidos
+            itens_iguais = df_atual[df_atual["CODIGO_COMP_INTERNO"] == codigo_limpo]
             
-            if item_encontrado.empty:
+            if itens_iguais.empty:
                 st.error(f"❌ Código '{codigo_limpo}' extraído não localizado na coluna 'CÓD. PRODUTO' do Banco de Dados.")
             else:
-                idx_item = item_encontrado.index[0]
-                row = item_encontrado.iloc[0]
+                idx_item = itens_iguais.index[0]
+                row = itens_iguais.iloc[0]
                 
-                # Renderiza dados recuperados automaticamente usando as novas colunas especificadas
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.text_input("Descrição do Produto", value=row["DESC. PRODUTO"], disabled=True)
@@ -256,7 +255,6 @@ with abas_principais[0]:
                 with col3:
                     st.text_input("Quantidade Sistema (QTD ESTOQUE)", value=str(row["QTD ESTOQUE"]), disabled=True)
                 
-                # Validação de Ativo e Lote dinâmicas baseadas na planilha
                 tem_ativo = "ATIVO" in df_atual.columns
                 tem_lote = "LOTE" in df_atual.columns
                 
@@ -275,6 +273,27 @@ with abas_principais[0]:
                         val_lote = st.text_input("🔢 Número do LOTE (OBRIGATÓRIO):", key="campo_lote")
                     else:
                         st.caption("ℹ️ Campo 'LOTE' não exigido (Coluna ausente na planilha).")
+                
+                # --- NOVO BLOCO EXIBIDOR DE INFORMACÕES MENORES (LOTES E ATIVOS DA BASE) ---
+                col_info1, col_info2 = st.columns(2)
+                with col_info1:
+                    if tem_ativo:
+                        # Remove duplicados e valores nulos/vazios antes de listar
+                        ativos_encontrados = itens_iguais["ATIVO"].dropna().astype(str).str.strip().unique()
+                        ativos_encontrados = [a for a in ativos_encontrados if a and a.lower() != 'nan']
+                        if ativos_encontrados:
+                            st.caption(f"📋 **Ativos do produto encontrados no Banco:** `{', '.join(ativos_encontrados)}`")
+                        else:
+                            st.caption("📋 *Nenhum Ativo pré-cadastrado na base para este produto.*")
+                
+                with col_info2:
+                    if tem_lote:
+                        lotes_encontrados = itens_iguais["LOTE"].dropna().astype(str).str.strip().unique()
+                        lotes_encontrados = [l for l in lotes_encontrados if l and l.lower() != 'nan']
+                        if lotes_encontrados:
+                            st.caption(f"🔢 **Lotes do produto encontrados no Banco:** `{', '.join(lotes_encontrados)}`")
+                        else:
+                            st.caption("🔢 *Nenhum Lote pré-cadastrado na base para este produto.*")
                 
                 qtd_fisica = st.number_input("📥 Quantidade Física Contada:", min_value=0, step=1, value=int(row["QTD_FISICA"]) if row["CONTADO"] == "Sim" else 0)
                 
