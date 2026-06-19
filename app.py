@@ -113,7 +113,6 @@ with st.sidebar:
     st.write(f"**Login:** {u_atual['usuario']}")
     st.write(f"**Função:** {u_atual['perfil']}")
     
-    # Fragmento de Atualização em Tempo Real (Auto-refresh funcional sem F5)
     @st.fragment(run_every=5)
     def render_btn_atualizar():
         st.button("🔄 Atualizar Dados (Auto 5s)", use_container_width=True)
@@ -129,11 +128,29 @@ with st.sidebar:
     if uploaded_file:
         df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('xlsx') else pd.read_csv(uploaded_file)
         
-        # Ajusta nomes de colunas lidas para maiúsculo para evitar divergências de digitação no Excel
-        df.columns = [c.strip().upper() for c in df.columns]
+        # Limpeza padronizada nos nomes das colunas da planilha para evitar erros de acentuação/espaço
+        df.columns = [str(c).strip().upper() for c in df.columns]
         
-        # Força colunas essenciais estruturais se não existirem
-        for col in ["CODIGO", "DESCRICAO", "UN", "ESTOQUE_SISTEMA"]:
+        # --- REGRA DE IDENTIFICAÇÃO DA COLUNA DE CÓDIGO DO PRODUTO ---
+        # Se achar "CÓD. PRODUTO", "COD. PRODUTO" ou "COD PRODUTO", mapeia para o nome correto
+        mapeamento_colunas = {}
+        for c in df.columns:
+            if c in ["CÓD. PRODUTO", "COD. PRODUTO", "COD PRODUTO", "COD_PRODUTO"]:
+                mapeamento_colunas[c] = "CÓD. PRODUTO"
+            if c in ["DESCRIÇÃO", "DESCRICAO"]:
+                mapeamento_colunas[c] = "DESCRICAO"
+            if c in ["ESTOQUE SISTEMA", "ESTOQUE_SISTEMA"]:
+                mapeamento_colunas[c] = "ESTOQUE_SISTEMA"
+        
+        if mapeamento_colunas:
+            df = df.rename(columns=mapeamento_colunas)
+            
+        # Garante a criação estrutural das colunas caso venham faltando
+        if "CÓD. PRODUTO" not in df.columns:
+            # Caso não ache com os nomes acima, tenta pegar a primeira coluna da tabela como o código
+            df = df.rename(columns={df.columns[0]: "CÓD. PRODUTO"})
+            
+        for col in ["DESCRICAO", "UN", "ESTOQUE_SISTEMA"]:
             if col not in df.columns:
                 df[col] = "Não Informado" if col != "ESTOQUE_SISTEMA" else 0
         
@@ -141,12 +158,11 @@ with st.sidebar:
         if "QTD_FISICA" not in df.columns: df["QTD_FISICA"] = 0
         
         loc_db["banco_original"] = df
-        st.success("Banco de dados carregado!")
+        st.success("Banco de dados carregado com sucesso!")
 
     st.divider()
     st.subheader("📋 Gerenciamento de Inventários")
     
-    # Criar Novo Inventário
     nova_desc = st.text_input("Descrição do Novo Inventário:")
     if st.button("➕ Abrir Inventário", use_container_width=True) and nova_desc:
         if loc_db["banco_original"] is not None:
@@ -157,7 +173,6 @@ with st.sidebar:
         else:
             st.error("Faça o upload do banco de dados primeiro!")
             
-    # Selecionar Inventário Ativo
     lista_invs = list(loc_db["inventarios_criados"].keys())
     if lista_invs:
         inv_selecionado = st.selectbox("Selecionar Inventário Ativo:", lista_invs, index=lista_invs.index(loc_db["inventario_ativo"]) if loc_db["inventario_ativo"] else 0)
@@ -165,7 +180,6 @@ with st.sidebar:
     else:
         st.info("Nenhum inventário aberto ainda.")
 
-    # Progresso Dinâmico Gráfico na Sidebar
     st.divider()
     st.subheader("📊 Progresso da Contagem")
     if loc_db["inventario_ativo"]:
@@ -192,7 +206,7 @@ if u_atual["perfil"] == "ADM":
 abas_principais = st.tabs(menu_abas)
 
 # ------------------------------------------------------------------------------
-# TELA 1: CONTAR ITEM (ÁREA DE BIPAGEM TOTALMENTE AUTOMATIZADA)
+# TELA 1: CONTAR ITEM (BUSCA ESPECÍFICA POR CÓD. PRODUTO)
 # ------------------------------------------------------------------------------
 with abas_principais[0]:
     st.header("🔍 Área de Bipagem e Lançamento")
@@ -205,23 +219,24 @@ with abas_principais[0]:
         
         st.info(f"Inventário em Execução: **{nome_inv}**")
         
-        # Input de Bipagem Inteligente usando chave mutável para autolimpeza
         codigo_bipado = st.text_input("BIPE O CÓDIGO DA ETIQUETA:", key=f"bipe_field_{st.session_state.input_key}")
         
         if codigo_bipado:
-            # Tratamento rigoroso de String para evitar falhas de leitura
-            codigo_limpo = str(codigo_bipado).strip().upper()
-            df_atual['CODIGO_COMP'] = df_atual['CODIGO'].astype(str).str.strip().str.upper()
+            # Limpa o código digitado/bipado (remove .0 se o excel ler como float)
+            codigo_limpo = str(codigo_bipado).strip().split('.')[0].upper()
             
-            item_encontrado = df_atual[df_atual["CODIGO_COMP"] == codigo_limpo]
+            # Padroniza a coluna 'CÓD. PRODUTO' para string limpa e sem decimais flutuantes
+            df_atual['CODIGO_COMP_INTERNO'] = df_atual['CÓD. PRODUTO'].astype(str).str.strip().str.split('.').str[0].str.upper()
+            
+            # Realiza a busca cirúrgica baseada na regra da coluna informada
+            item_encontrado = df_atual[df_atual["CODIGO_COMP_INTERNO"] == codigo_limpo]
             
             if item_encontrado.empty:
-                st.error(f"❌ Código '{codigo_limpo}' não localizado no Banco de Dados carregado.")
+                st.error(f"❌ Código '{codigo_limpo}' não localizado na coluna 'CÓD. PRODUTO' do Banco de Dados.")
             else:
                 idx_item = item_encontrado.index[0]
                 row = item_encontrado.iloc[0]
                 
-                # Renderiza dados recuperados automaticamente
                 col1, col2, col3 = st.columns(3)
                 with col1:
                     st.text_input("Descrição do Produto", value=row["DESCRICAO"], disabled=True)
@@ -230,7 +245,6 @@ with abas_principais[0]:
                 with col3:
                     st.text_input("Estoque Sistema", value=str(row["ESTOQUE_SISTEMA"]), disabled=True)
                 
-                # Validação de Ativo e Lote baseada nas colunas reais da planilha
                 tem_ativo = "ATIVO" in df_atual.columns
                 tem_lote = "LOTE" in df_atual.columns
                 
@@ -250,7 +264,6 @@ with abas_principais[0]:
                     else:
                         st.caption("ℹ️ Campo 'LOTE' não exigido (Coluna ausente na planilha).")
                 
-                # Coleta da quantidade física informada pelo Almoxarife
                 qtd_fisica = st.number_input("📥 Quantidade Física Contada:", min_value=0, step=1, value=int(row["QTD_FISICA"]) if row["CONTADO"] == "Sim" else 0)
                 
                 if st.button("💾 Confirmar e Registrar Contagem", use_container_width=True):
@@ -259,7 +272,6 @@ with abas_principais[0]:
                     elif tem_lote and not val_lote:
                         st.error("Erro: O preenchimento do campo LOTE é obrigatório para salvar este item.")
                     else:
-                        # Salva em memória na tabela protegida da localidade
                         loc_db["inventarios_criados"][nome_inv].at[idx_item, "CONTADO"] = "Sim"
                         loc_db["inventarios_criados"][nome_inv].at[idx_item, "QTD_FISICA"] = qtd_fisica
                         
@@ -268,7 +280,6 @@ with abas_principais[0]:
                         
                         st.success(f"Item {codigo_limpo} registrado com sucesso!")
                         
-                        # Altera o contador para resetar e limpar o campo de texto para a próxima bipagem
                         st.session_state.input_key += 1
                         time.sleep(0.4)
                         st.rerun()
@@ -281,7 +292,10 @@ with abas_principais[1]:
     if not loc_db["inventario_ativo"]:
         st.info("Nenhum inventário selecionado.")
     else:
-        df_view = loc_db["inventarios_criados"][loc_db["inventario_ativo"]]
+        df_view = loc_db["inventarios_criados"][loc_db["inventario_ativo"]].copy()
+        if 'CODIGO_COMP_INTERNO' in df_view.columns:
+            df_view = df_view.drop(columns=['CODIGO_COMP_INTERNO'])
+            
         aba_ja_contados, aba_faltantes = st.tabs(["✅ Itens Já Contados", "❌ Itens Faltando Contar"])
         
         with aba_ja_contados:
@@ -309,9 +323,8 @@ with abas_principais[2]:
         st.write("Abaixo consta a base de estoque original e suas atualizações de contagem em tempo real:")
         df_completo = loc_db["inventarios_criados"][loc_db["inventario_ativo"]].copy()
         
-        # Remove a coluna temporária de comparação interna para não poluir a tela do usuário
-        if 'CODIGO_COMP' in df_completo.columns:
-            df_completo = df_completo.drop(columns=['CODIGO_COMP'])
+        if 'CODIGO_COMP_INTERNO' in df_completo.columns:
+            df_completo = df_completo.drop(columns=['CODIGO_COMP_INTERNO'])
             
         def colorir_status(val):
             color = '#d4edda' if val == 'Sim' else '#f8d7da'
