@@ -128,31 +128,33 @@ with st.sidebar:
     if uploaded_file:
         df = pd.read_excel(uploaded_file) if uploaded_file.name.endswith('xlsx') else pd.read_csv(uploaded_file)
         
-        # Limpeza padronizada nos nomes das colunas da planilha para evitar erros de acentuação/espaço
+        # Limpeza padronizada nos nomes das colunas da planilha
         df.columns = [str(c).strip().upper() for c in df.columns]
         
-        # --- REGRA DE IDENTIFICAÇÃO DA COLUNA DE CÓDIGO DO PRODUTO ---
-        # Se achar "CÓD. PRODUTO", "COD. PRODUTO" ou "COD PRODUTO", mapeia para o nome correto
+        # --- REGRA DE IDENTIFICAÇÃO E REPADRONIZAÇÃO EXATA DE COLUNAS ---
         mapeamento_colunas = {}
         for c in df.columns:
             if c in ["CÓD. PRODUTO", "COD. PRODUTO", "COD PRODUTO", "COD_PRODUTO"]:
                 mapeamento_colunas[c] = "CÓD. PRODUTO"
-            if c in ["DESCRIÇÃO", "DESCRICAO"]:
-                mapeamento_colunas[c] = "DESCRICAO"
-            if c in ["ESTOQUE SISTEMA", "ESTOQUE_SISTEMA"]:
-                mapeamento_colunas[c] = "ESTOQUE_SISTEMA"
+            if c in ["DESC. PRODUTO", "DESC PRODUTO", "DESCRIÇÃO", "DESCRICAO"]:
+                mapeamento_colunas[c] = "DESC. PRODUTO"
+            if c in ["UNID. MEDIDA", "UNID MEDIDA", "UNIDADE MEDIDA", "UN"]:
+                mapeamento_colunas[c] = "UNID. MEDIDA"
+            if c in ["QTD ESTOQUE", "QTD ESTOQUE ", "QTD_ESTOQUE", "ESTOQUE SISTEMA", "ESTOQUE_SISTEMA"]:
+                mapeamento_colunas[c] = "QTD ESTOQUE"
         
         if mapeamento_colunas:
             df = df.rename(columns=mapeamento_colunas)
             
-        # Garante a criação estrutural das colunas caso venham faltando
+        # Fallbacks de segurança se as colunas obrigatórias não existirem na planilha
         if "CÓD. PRODUTO" not in df.columns:
-            # Caso não ache com os nomes acima, tenta pegar a primeira coluna da tabela como o código
             df = df.rename(columns={df.columns[0]: "CÓD. PRODUTO"})
-            
-        for col in ["DESCRICAO", "UN", "ESTOQUE_SISTEMA"]:
-            if col not in df.columns:
-                df[col] = "Não Informado" if col != "ESTOQUE_SISTEMA" else 0
+        if "DESC. PRODUTO" not in df.columns:
+            df["DESC. PRODUTO"] = "Não Informado"
+        if "UNID. MEDIDA" not in df.columns:
+            df["UNID. MEDIDA"] = "UN"
+        if "QTD ESTOQUE" not in df.columns:
+            df["QTD ESTOQUE"] = 0
         
         if "CONTADO" not in df.columns: df["CONTADO"] = "Não"
         if "QTD_FISICA" not in df.columns: df["QTD_FISICA"] = 0
@@ -206,7 +208,7 @@ if u_atual["perfil"] == "ADM":
 abas_principais = st.tabs(menu_abas)
 
 # ------------------------------------------------------------------------------
-# TELA 1: CONTAR ITEM (BUSCA ESPECÍFICA POR CÓD. PRODUTO)
+# TELA 1: CONTAR ITEM (PROCESSAMENTO EXTRAÍDO DO BIPE)
 # ------------------------------------------------------------------------------
 with abas_principais[0]:
     st.header("🔍 Área de Bipagem e Lançamento")
@@ -222,29 +224,39 @@ with abas_principais[0]:
         codigo_bipado = st.text_input("BIPE O CÓDIGO DA ETIQUETA:", key=f"bipe_field_{st.session_state.input_key}")
         
         if codigo_bipado:
-            # Limpa o código digitado/bipado (remove .0 se o excel ler como float)
-            codigo_limpo = str(codigo_bipado).strip().split('.')[0].upper()
+            # --- REGRA DE QUEBRA DE STRING (FATIAMENTO INTELIGENTE) ---
+            # Se vier "2194 - TEFE0158Z", divide no hifen e extrai a parte da direita (Código do Material)
+            input_string = str(codigo_bipado).strip()
+            if " - " in input_string:
+                codigo_limpo = input_string.split(" - ")[-1].strip().upper()
+            else:
+                codigo_limpo = input_string.upper()
+                
+            # Remove decimais indesejados (.0) de conversão caso existam
+            codigo_limpo = codigo_limpo.split('.')[0]
             
-            # Padroniza a coluna 'CÓD. PRODUTO' para string limpa e sem decimais flutuantes
+            # Padroniza a coluna 'CÓD. PRODUTO' interna para casamento perfeito
             df_atual['CODIGO_COMP_INTERNO'] = df_atual['CÓD. PRODUTO'].astype(str).str.strip().str.split('.').str[0].str.upper()
             
-            # Realiza a busca cirúrgica baseada na regra da coluna informada
+            # Realiza a busca
             item_encontrado = df_atual[df_atual["CODIGO_COMP_INTERNO"] == codigo_limpo]
             
             if item_encontrado.empty:
-                st.error(f"❌ Código '{codigo_limpo}' não localizado na coluna 'CÓD. PRODUTO' do Banco de Dados.")
+                st.error(f"❌ Código '{codigo_limpo}' extraído não localizado na coluna 'CÓD. PRODUTO' do Banco de Dados.")
             else:
                 idx_item = item_encontrado.index[0]
                 row = item_encontrado.iloc[0]
                 
+                # Renderiza dados recuperados automaticamente usando as novas colunas especificadas
                 col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.text_input("Descrição do Produto", value=row["DESCRICAO"], disabled=True)
+                    st.text_input("Descrição do Produto", value=row["DESC. PRODUTO"], disabled=True)
                 with col2:
-                    st.text_input("Unidade de Medida (UN)", value=row["UN"], disabled=True)
+                    st.text_input("Unidade de Medida (UNID. MEDIDA)", value=row["UNID. MEDIDA"], disabled=True)
                 with col3:
-                    st.text_input("Estoque Sistema", value=str(row["ESTOQUE_SISTEMA"]), disabled=True)
+                    st.text_input("Quantidade Sistema (QTD ESTOQUE)", value=str(row["QTD ESTOQUE"]), disabled=True)
                 
+                # Validação de Ativo e Lote dinâmicas baseadas na planilha
                 tem_ativo = "ATIVO" in df_atual.columns
                 tem_lote = "LOTE" in df_atual.columns
                 
