@@ -28,7 +28,7 @@ def inicializar_banco():
         )
     """)
     
-    # CORREÇÃO DEFINITIVA: Alterado para INTEGER PRIMARY KEY AUTOINCREMENT
+    # Tabela de inventários
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -155,6 +155,14 @@ st.markdown("""
         text-align: left;
         margin-bottom: 10px;
     }
+    .bloco-atencao {
+        background-color: #fdf2e9;
+        padding: 15px;
+        border-radius: 8px;
+        border: 1px solid #f5cba7;
+        margin-top: 10px;
+        margin-bottom: 15px;
+    }
     .bloco-info-link {
         background-color: #fef9e7;
         padding: 15px;
@@ -272,7 +280,7 @@ if "recuperar" in query_params and "token" in query_params:
                     cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
                     conn.commit()
                     conn.close()
-                    st.success("🎉 Senha updated com sucesso! Pode fazer o login na tela principal.")
+                    st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
     st.stop()
 
 # --- TELA DE ACESSO ---
@@ -385,8 +393,11 @@ else:
         st.session_state.cpf_operador == "22882342888"
     )
     
-    id_inventario_atual_inicial = df_inventarios.iloc[0]['id'] if not df_inventarios.empty else ""
-    
+    id_inventario_atual = None
+    inventario_selected_obj = None
+    if not df_inventarios.empty:
+        id_inventario_atual_inicial = df_inventarios.iloc[0]['id']
+
     # --- MAPEAMENTO E DEPARA DE COLUNAS ANTECIPADO ---
     col_cod, col_desc, col_local, col_unidade, col_qtd, col_id_estoque = "", "", "", "", "", ""
     if st.session_state.base_sistema is not None:
@@ -441,7 +452,6 @@ else:
                 if st.form_submit_button("Criar", type="primary") and novo_nome:
                     hoje = datetime.date.today().strftime("%Y-%m-%d")
                     cursor = conn.cursor()
-                    # CORREÇÃO: Não passamos o ID manual, deixando o SQLite fazer o AUTOINCREMENT automático
                     cursor.execute("INSERT INTO inventarios (nome, data, status) VALUES (?, ?, 'Aberto')", (novo_nome, hoje))
                     conn.commit()
                     st.rerun()
@@ -531,6 +541,7 @@ else:
                     desc_val = item.iloc[0][col_desc]
                     local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
                     id_estoque_val = str(item.iloc[0][col_id_estoque]).strip() if col_id_estoque in item.columns else ""
+                    lote_base_val = str(item.iloc[0]['lote']).strip() if 'lote' in item.columns else "Não Informado"
                     
                     try:
                         qtd_sis = int(pd.to_numeric(item.iloc[0][col_qtd], errors='coerce'))
@@ -545,9 +556,24 @@ else:
                     
                     st.markdown(f"**Descrição:** {desc_val}")
                     
+                    # --- IMPLEMENTADO: NOVO CAMPO DE ATENÇÃO PARA ATIVOS E LOTES ---
+                    df_ativos_ja_contados = pd.read_sql_query(
+                        "SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND ativo != ''", 
+                        conn, params=(str(id_inventario_atual), codigo_rastreio)
+                    )
+                    lista_ativos_str = ", ".join(df_ativos_ja_contados['ativo'].unique()) if not df_ativos_ja_contados.empty else "Nenhum ativo lançado ainda"
+                    
+                    st.markdown(f"""
+                        <div class="bloco-atencao">
+                            <strong style="color: #d35400;">⚠️ ATENÇÃO - RASTREABILIDADE DO MATERIAL:</strong><br>
+                            📦 <strong>Lote Registrado na Base:</strong> {lote_base_val if lote_base_val and lote_base_val != 'nan' else 'Sem Lote Definido'}<br>
+                            🔢 <strong>Ativos já coletados neste inventário:</strong> <code style="background-color: #fce4d6; padding: 2px 5px; border-radius: 4px; color: #c0392b;">{lista_ativos_str}</code>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    
                     with st.form("confirmar_form", clear_on_submit=True):
                         qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
-                        ativo_input = st.text_input("🔢 Número do Ativo (Opcional)")
+                        ativo_input = st.text_input("🔢 Número do Ativo (Opcional)", placeholder="Ex: TECA0091Z")
                         observacao = st.text_input("📝 Observação (opcional)")
                         
                         if st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True):
@@ -604,9 +630,7 @@ else:
                 st.write("")
 
                 colunas_existentes_contagens = list(df_contagens_mutaveis.columns)
-                ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
-                if 'lote' in colunas_existentes_contagens:
-                    ordem_colunas_print.append('lote')
+                ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora', 'lote']
                 
                 st.dataframe(df_contagens_mutaveis[ordem_colunas_print], use_container_width=True, hide_index=True)
         else:
@@ -1000,9 +1024,7 @@ else:
                                 st.download_button(label="📥 Baixar Lançamentos Feitos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_#{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}")
                                 
                                 colunas_existentes_hist = list(df_hist_inv.columns)
-                                ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora']
-                                if 'lote' in colunas_existentes_hist:
-                                    ordem_colunas_print.append('lote')
+                                ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora', 'lote']
                                     
                                 st.write("**📋 Itens Efetivamente Contados:**")
                                 st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
