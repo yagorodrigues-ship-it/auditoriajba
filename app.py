@@ -8,7 +8,7 @@ from datetime import datetime
 # ==============================================================================
 st.set_page_config(page_title="Controle de Estoque Interligado", layout="wide")
 
-# Inicialização do banco de dados no Session State
+# Inicialização do banco de dados no Session State de forma fixa
 if "usuarios" not in st.session_state:
     st.session_state.usuarios = [
         {"usuario": "adm", "senha": "123", "perfil": "ADM", "localidade": "TODAS", "cpf": "00000000000", "email": "adm@empresa.com"},
@@ -29,7 +29,7 @@ if "input_key" not in st.session_state:
     st.session_state.input_key = 0
 
 # ==============================================================================
-# 2. TELA DE AUTENTICAÇÃO (LOGIN / CADASTRO)
+# 2. TELA DE AUTENTICAÇÃO (LOGIN COM LOCALIDADE / CADASTRO REVISADO)
 # ==============================================================================
 def tela_autenticacao():
     st.title("🔐 Sistema de Controle de Estoque")
@@ -37,12 +37,19 @@ def tela_autenticacao():
     
     with aba_login:
         with st.form("login_form"):
-            usuario = st.text_input("Usuário / Login")
-            senha = st.text_input("Senha", type="password")
+            usuario = st.text_input("Usuário / Login").strip()
+            senha = st.text_input("Senha", type="password").strip()
+            # Adicionado a localidade obrigatória no ato do login
+            localidade_login = st.selectbox("Selecione sua Localidade para Acesso", ["JURUBATUBA", "JUNDIAI", "CUBATÃO", "TODAS"])
             botao_entrar = st.form_submit_button("Entrar")
             
             if botao_entrar:
-                user_auth = next((u for u in st.session_state.usuarios if u["usuario"] == usuario and u["senha"] == senha), None)
+                # Validação cruzando Usuário, Senha e Localidade cadastrada
+                user_auth = next((u for u in st.session_state.usuarios if 
+                                  u["usuario"] == usuario and 
+                                  u["senha"] == senha and 
+                                  u["localidade"] == localidade_login), None)
+                
                 if user_auth:
                     st.session_state.logado = True
                     st.session_state.user_atual = user_auth
@@ -50,7 +57,7 @@ def tela_autenticacao():
                     time.sleep(0.5)
                     st.rerun()
                 else:
-                    st.error("Usuário ou senha incorretos.")
+                    st.error("Usuário, senha ou localidade incorretos para esta conta.")
                     
         if st.button("Esqueci minha senha"):
             st.warning("🔒 Solicitação enviada! Por favor, entre em contato com o ADM do APP.")
@@ -59,23 +66,32 @@ def tela_autenticacao():
     with aba_cadastro:
         st.subheader("📝 Formulário de Primeiro Acesso")
         with st.form("cadastro_form"):
-            novo_user = st.text_input("Nome de Usuário")
-            novo_cpf = st.text_input("CPF")
-            novo_email = st.text_input("E-mail Corporativo")
-            nova_senha_cad = st.text_input("Senha", type="password")
-            nova_loc = st.selectbox("Sua Localidade", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"])
+            novo_user = st.text_input("Defina seu Nome de Usuário (Sem espaços)").strip()
+            novo_cpf = st.text_input("Digite seu CPF").strip()
+            novo_email = st.text_input("E-mail Corporativo").strip()
+            nova_senha_cad = st.text_input("Defina uma Senha", type="password").strip()
+            nova_loc = st.selectbox("Selecione a sua Localidade de Trabalho", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"])
             botao_cadastrar = st.form_submit_button("Solicitar Cadastro")
             
             if botao_cadastrar:
                 if novo_user and novo_cpf and novo_email and nova_senha_cad:
-                    st.session_state.usuarios.append({
-                        "usuario": novo_user, "senha": nova_senha_cad, 
-                        "perfil": "Almoxarife", "localidade": nova_loc,
-                        "cpf": novo_cpf, "email": novo_email
-                    })
-                    st.success("Cadastro realizado com sucesso!")
+                    # Verifica se o usuário já existe para não duplicar
+                    existe = any(u["usuario"] == novo_user for u in st.session_state.usuarios)
+                    if existe:
+                        st.error("Este nome de usuário já está sendo utilizado. Escolha outro.")
+                    else:
+                        # Insere diretamente na memória master global de usuários do app
+                        st.session_state.usuarios.append({
+                            "usuario": novo_user, 
+                            "senha": nova_senha_cad, 
+                            "perfil": "Almoxarife", 
+                            "localidade": nova_loc,
+                            "cpf": novo_cpf, 
+                            "email": novo_email
+                        })
+                        st.success(f"Cadastro do usuário '{novo_user}' criado com sucesso para a localidade {nova_loc}! Mude para a aba 'Acessar Conta' para logar.")
                 else:
-                    st.error("Preencha todos os campos.")
+                    st.error("Preencha todos os campos obrigatórios do formulário.")
 
 if not st.session_state.logado:
     tela_autenticacao()
@@ -469,7 +485,7 @@ if u_atual["perfil"] in ["Supervisor", "ADM"]:
         novo_alvo = st.text_input("Acrescentar/Definir Alvo de Estoque Físico para esta planta:")
         if st.button("Salvar Alvo Físico"):
             loc_db["prazos_alvo"] = novo_alvo
-            st.success("Alvo atualizado! Aparecerá na tela de 'Desempenho e Prazos'.")
+            st.success("Alvo updated! Aparecerá na tela de 'Desempenho e Prazos'.")
             
         if st.button("Excluir Alvo Atual"):
             loc_db["prazos_alvo"] = "Não Definido"
