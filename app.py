@@ -41,10 +41,10 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de inventários gerais (Alterado ID para AUTOINCREMENT para eliminar conflitos de Chave Primária)
+    # Tabela de inventários gerais
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id TEXT PRIMARY KEY,
             nome TEXT,
             data TEXT,
             status TEXT,
@@ -321,17 +321,33 @@ else:
                         st.error("Fechamento Bloqueado: O Inventario não foi 100% contabilizado. Apenas o Supervisor da unidade pode forçar este encerramento.")
 
         st.markdown("---")
-        st.write("⚙️ **Criar Inventário**")
-        with st.expander("➕ Abrir Nova Contagem"):
+        st.sidebar.write("⚙️ **Criar Inventário**")
+        with st.sidebar.expander("➕ Abrir Nova Contagem"):
             with st.form("form_novo_inv", clear_on_submit=True):
                 n_inv = st.text_input("Nome do Inventário Geral")
                 if st.form_submit_button("Criar Lote"):
                     if n_inv:
                         cursor = conn.cursor()
-                        # --- SOLUÇÃO DO INTEGRITY ERROR: ID auto-incremental controlado pelo SQLite, sem repetição ---
-                        cursor.execute("INSERT INTO inventarios (nome, data, status, unidade) VALUES (?, ?, 'Aberto', ?)", (n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
+                        # --- CORREÇÃO DA MENSAGEM INTEGRITY ERROR GERAL ---
+                        cursor.execute("SELECT id FROM inventarios")
+                        rows = cursor.fetchall()
+                        maior_id = 0
+                        for r in rows:
+                            try:
+                                num = int(str(r[0]).replace('#', ''))
+                                if num > maior_id:
+                                    maior_id = num
+                            except:
+                                pass
+                        nxt = maior_id + 1
+                        
+                        # Salvando o ID explícito limpo e numérico sem gerar conflito com chaves passadas
+                        cursor.execute("""
+                            INSERT INTO inventarios (id, nome, data, status, unidade) 
+                            VALUES (?, ?, ?, 'Aberto', ?)
+                        """, (str(nxt), n_inv, datetime.date.today().strftime("%Y-%m-%d"), st.session_state.unidade_selecionada))
                         conn.commit()
-                        st.success("✅ Novo Lote gerado com sucesso!")
+                        st.success(f"✅ Novo Lote #{nxt} gerado com sucesso!")
                         st.rerun()
 
     # --- DEFINIÇÃO E RENDERIZAÇÃO DAS ABAS NA ORDEM EXATA ---
@@ -763,7 +779,7 @@ else:
                     else:
                         st.info("ℹ️ Todos os itens divergentes já foram enviados para a recontagem.")
                 else:
-                    st.success("🎉 Nenhuma divergência activa encontrada neste lote até o momento.")
+                    st.success("🎉 Nenhuma divergência ativa encontrada neste lote até o momento.")
                     
             st.markdown("---")
             if df_inventarios_sup.empty:
