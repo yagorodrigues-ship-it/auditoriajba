@@ -41,7 +41,7 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de inventários gerais (Mantendo estrutura flexível para autoincremento implícito)
+    # Tabela de inventários gerais
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -307,7 +307,7 @@ else:
                 if st.form_submit_button("Criar Lote"):
                     if n_inv:
                         cursor = conn.cursor()
-                        # --- REMOÇÃO DO ID MANUAL DA QUERY (ELIMINA O INTEGRITY ERROR PARA SEMPRE) ---
+                        # --- REMOÇÃO DO ID DO INSERT INTO (RECOLOCA O AUTOINCREMENT DO BANCO NATIIVAMENTE) ---
                         cursor.execute("""
                             INSERT INTO inventarios (nome, data, status, unidade) 
                             VALUES (?, ?, 'Aberto', ?)
@@ -371,6 +371,7 @@ else:
                             if st.form_submit_button("Confirmar Lançamento", type="primary"):
                                 cursor = conn.cursor()
                                 
+                                # --- REESCRITA DO SALVAMENTO: IGNORA CÉLULAS VAZIAS E MARCADORES NaN DO PANDAS ---
                                 if not is_fluxo_recontagem:
                                     cursor.execute("""
                                         SELECT COUNT(*) FROM contagens 
@@ -384,7 +385,8 @@ else:
                                 if q_cont == 0:
                                     st.error("❌ Erro: Você deve informar uma quantidade física válida encontrada antes de salvar!")
                                 else:
-                                    q_sis = int(row[c_qtd]) if pd.notna(row[c_qtd]) else 0
+                                    # Validação fina de nulos usando a trava pd.isna requerida
+                                    q_sis = 0 if pd.isna(row[c_qtd]) else int(row[c_qtd])
                                     
                                     if is_fluxo_recontagem:
                                         id_reg_recont = int(df_recont_check.iloc[0]['id'])
@@ -808,7 +810,7 @@ else:
                             loc_check = st.selectbox("O material está na localização física correta?", ["Sim", "Não"])
                             
                             if st.form_submit_button("💾 Salvar na Acuracidade", type="primary"):
-                                q_s_v = int(row_sup[col_qtd_sup]) if pd.notna(row_sup[col_qtd_sup]) else 0
+                                q_s_v = 0 if pd.isna(row_sup[col_qtd_sup]) else int(row_sup[col_qtd_sup])
                                 cursor = conn.cursor()
                                 cursor.execute("""
                                     INSERT INTO auditorias_supervisor (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, qtd_sistema, qtd_auditada, diferenca, etiqueta_correta, localizacao_correta, supervisor, data_hora, ativo, unidade)
