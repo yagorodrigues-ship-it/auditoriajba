@@ -8,10 +8,10 @@ from datetime import datetime
 # ==============================================================================
 st.set_page_config(page_title="Controle de Estoque Interligado", layout="wide")
 
-# Inicialização do banco de dados no Session State de forma fixa
+# Inicialização do banco de dados no Session State (Apenas as 3 unidades reais)
 if "usuarios" not in st.session_state:
     st.session_state.usuarios = [
-        {"usuario": "adm", "senha": "123", "perfil": "ADM", "localidade": "TODAS", "cpf": "00000000000", "email": "adm@empresa.com"},
+        {"usuario": "adm", "senha": "123", "perfil": "ADM", "localidade": "JUNDIAI", "cpf": "00000000000", "email": "adm@empresa.com"},
         {"usuario": "sup_jundiai", "senha": "123", "perfil": "Supervisor", "localidade": "JUNDIAI", "cpf": "11111111111", "email": "sup.jundiai@empresa.com"},
         {"usuario": "alm_jundiai", "senha": "123", "perfil": "Almoxarife", "localidade": "JUNDIAI", "cpf": "22222222222", "email": "alm.jundiai@empresa.com"},
     ]
@@ -39,12 +39,11 @@ def tela_autenticacao():
         with st.form("login_form"):
             usuario = st.text_input("Usuário / Login").strip()
             senha = st.text_input("Senha", type="password").strip()
-            # Adicionado a localidade obrigatória no ato do login
-            localidade_login = st.selectbox("Selecione sua Localidade para Acesso", ["JURUBATUBA", "JUNDIAI", "CUBATÃO", "TODAS"])
+            # Restrito estritamente às 3 localidades reais do projeto
+            localidade_login = st.selectbox("Selecione sua Localidade para Acesso", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"])
             botao_entrar = st.form_submit_button("Entrar")
             
             if botao_entrar:
-                # Validação cruzando Usuário, Senha e Localidade cadastrada
                 user_auth = next((u for u in st.session_state.usuarios if 
                                   u["usuario"] == usuario and 
                                   u["senha"] == senha and 
@@ -75,12 +74,10 @@ def tela_autenticacao():
             
             if botao_cadastrar:
                 if novo_user and novo_cpf and novo_email and nova_senha_cad:
-                    # Verifica se o usuário já existe para não duplicar
                     existe = any(u["usuario"] == novo_user for u in st.session_state.usuarios)
                     if existe:
                         st.error("Este nome de usuário já está sendo utilizado. Escolha outro.")
                     else:
-                        # Insere diretamente na memória master global de usuários do app
                         st.session_state.usuarios.append({
                             "usuario": novo_user, 
                             "senha": nova_senha_cad, 
@@ -100,12 +97,7 @@ if not st.session_state.logado:
 u_atual = st.session_state.user_atual
 localidade = u_atual["localidade"]
 
-if localidade == "TODAS":
-    if "adm_localidade_escolhida" not in st.session_state:
-        st.session_state.adm_localidade_escolhida = "JUNDIAI"
-    localidade = st.session_state.adm_localidade_escolhida
-
-# Força a criação e garante todas as chaves mapeadas (Evita totalmente o KeyError)
+# Força a criação e garante todas as chaves mapeadas no dicionário protegido
 if localidade not in st.session_state.inventarios_dados:
     st.session_state.inventarios_dados[localidade] = {}
 
@@ -125,9 +117,6 @@ with st.sidebar:
     st.title("🏭 Painel de Controle")
     st.subheader("👤 Identificação")
     st.write(f"**Localidade:** {u_atual['localidade']}")
-    if u_atual['localidade'] == "TODAS":
-        localidade = st.selectbox("Simular Planta:", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"], index=1)
-        st.session_state.adm_localidade_escolhida = localidade
     st.write(f"**Login:** {u_atual['usuario']}")
     st.write(f"**Função:** {u_atual['perfil']}")
     
@@ -228,7 +217,7 @@ if u_atual["perfil"] == "ADM":
 abas_principais = st.tabs(menu_abas)
 
 # ------------------------------------------------------------------------------
-# TELA 1: CONTAR ITEM
+# TELA 1: CONTAR ITEM (CONTAGEM NO ESCURO E VALIDAÇÃO EXCLUSIVA DE LOTE/ATIVO)
 # ------------------------------------------------------------------------------
 with abas_principais[0]:
     st.header("🔍 Área de Bipagem e Lançamento")
@@ -433,6 +422,7 @@ with abas_principais[4]:
     st.header("⏱️ Desempenho e Prazos")
     st.write("Acompanhamento das últimas datas de contagem física das localidades:")
     
+    # Lista estrita sem opções adicionais externas
     dados_locs = ["JURUBATUBA", "JUNDIAI", "CUBATÃO"]
     for l in dados_locs:
         db_l = st.session_state.inventarios_dados.get(l, {})
@@ -485,7 +475,7 @@ if u_atual["perfil"] in ["Supervisor", "ADM"]:
         novo_alvo = st.text_input("Acrescentar/Definir Alvo de Estoque Físico para esta planta:")
         if st.button("Salvar Alvo Físico"):
             loc_db["prazos_alvo"] = novo_alvo
-            st.success("Alvo updated! Aparecerá na tela de 'Desempenho e Prazos'.")
+            st.success("Alvo atualizado! Aparecerá na tela de 'Desempenho e Prazos'.")
             
         if st.button("Excluir Alvo Atual"):
             loc_db["prazos_alvo"] = "Não Definido"
@@ -547,7 +537,8 @@ if u_atual["perfil"] == "ADM":
             
             nova_senha_adm = st.text_input("Nova Senha:", value=dados_user["senha"])
             novo_perfil_adm = st.selectbox("Nova Função:", ["Almoxarife", "Supervisor", "ADM"], index=["Almoxarife", "Supervisor", "ADM"].index(dados_user["perfil"]))
-            nova_loc_adm = st.selectbox("Nova Localidade de Acesso:", ["JURUBATUBA", "JUNDIAI", "CUBATÃO", "TODAS"], index=["JURUBATUBA", "JUNDIAI", "CUBATÃO", "TODAS"].index(dados_user["localidade"]))
+            # Removida a opção "TODAS" também da alteração cadastral do ADM
+            nova_loc_adm = st.selectbox("Nova Localidade de Acesso:", ["JURUBATUBA", "JUNDIAI", "CUBATÃO"], index=["JURUBATUBA", "JUNDIAI", "CUBATÃO"].index(dados_user["localidade"]))
             
             if st.button("💾 Gravar Alterações de Cadastro"):
                 st.session_state.usuarios[idx_user]["senha"] = nova_senha_adm
