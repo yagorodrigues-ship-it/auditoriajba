@@ -535,16 +535,25 @@ else:
                 busca_limpa = str(codigo_input).upper().strip()
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
                 
-                item = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
-                if not item.empty:
-                    unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
-                    desc_val = item.iloc[0][col_desc]
-                    local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
-                    id_estoque_val = str(item.iloc[0][col_id_estoque]).strip() if col_id_estoque in item.columns else ""
-                    lote_base_val = str(item.iloc[0]['lote']).strip() if 'lote' in item.columns else "Não Informado"
+                # Coleta todas as linhas correspondentes da planilha para mapear os lotes
+                itens_correspondentes = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
+                if not itens_correspondentes.empty:
+                    item = itens_correspondentes.iloc[0]
+                    unid_val = item[col_unidade] if col_unidade in itens_correspondentes.columns else "UN"
+                    desc_val = item[col_desc]
+                    local_val = item[col_local] if col_local in itens_correspondentes.columns else "Não Informado"
+                    id_estoque_val = str(item[col_id_estoque]).strip() if col_id_estoque in itens_correspondentes.columns else ""
+                    
+                    # --- CORREÇÃO: Consolidação Dinâmica da Coluna Lote quando houver o mesmo código ---
+                    if 'lote' in itens_correspondentes.columns:
+                        lista_lotes = itens_correspondentes['lote'].dropna().astype(str).str.strip().unique()
+                        lista_lotes = [l for l in lista_lotes if l.lower() != 'nan' and l != '']
+                        lote_base_val = ", ".join(lista_lotes) if lista_lotes else "Não Informado"
+                    else:
+                        lote_base_val = "Não Informado"
                     
                     try:
-                        qtd_sis = int(pd.to_numeric(item.iloc[0][col_qtd], errors='coerce'))
+                        qtd_sis = int(pd.to_numeric(item[col_qtd], errors='coerce'))
                         if pd.isna(qtd_sis): qtd_sis = 0
                     except: qtd_sis = 0
                     
@@ -556,7 +565,7 @@ else:
                     
                     st.markdown(f"**Descrição:** {desc_val}")
                     
-                    # --- IMPLEMENTADO: NOVO CAMPO DE ATENÇÃO PARA ATIVOS E LOTES ---
+                    # Histórico de Ativos coletados no banco
                     df_ativos_ja_contados = pd.read_sql_query(
                         "SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND ativo != ''", 
                         conn, params=(str(id_inventario_atual), codigo_rastreio)
@@ -566,7 +575,7 @@ else:
                     st.markdown(f"""
                         <div class="bloco-atencao">
                             <strong style="color: #d35400;">⚠️ ATENÇÃO - RASTREABILIDADE DO MATERIAL:</strong><br>
-                            📦 <strong>Lote Registrado na Base:</strong> {lote_base_val if lote_base_val and lote_base_val != 'nan' else 'Sem Lote Definido'}<br>
+                            📦 <strong>Lote Registrado na Base:</strong> <span style="color: #1b4f72; font-weight: bold;">{lote_base_val}</span><br>
                             🔢 <strong>Ativos já coletados neste inventário:</strong> <code style="background-color: #fce4d6; padding: 2px 5px; border-radius: 4px; color: #c0392b;">{lista_ativos_str}</code>
                         </div>
                     """, unsafe_allow_html=True)
@@ -582,13 +591,13 @@ else:
                                 st.error("❌ Erro: Informe uma quantidade maior que 0!")
                             else:
                                 agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
+                                lote_salvar = str(item['lote']) if 'lote' in itens_correspondentes.columns else ""
                                 dif_c = qtd_fisica - qtd_sis
                                 cursor = conn.cursor()
                                 cursor.execute("""
                                     INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (str(id_inventario_atual), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_val))
+                                """, (str(id_inventario_atual), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_salvar))
                                 conn.commit()
                                 st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso!"
                                 st.session_state.contador_reset += 1
@@ -859,7 +868,7 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in group.columns else ""
+                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
