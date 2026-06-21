@@ -580,6 +580,7 @@ else:
                     id_estoque_val = str(item_especifico[col_id_estoque]).strip() if col_id_estoque in st.session_state.base_sistema.columns else ""
                     
                     try:
+                        # Se selecionou um lote/ativo específico, pega o saldo daquela combinação
                         qtd_sis = int(pd.to_numeric(item_especifico[col_qtd], errors='coerce'))
                         if pd.isna(qtd_sis): qtd_sis = 0
                     except: qtd_sis = 0
@@ -596,6 +597,7 @@ else:
                     with st.form("confirmar_form", clear_on_submit=True):
                         qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
                         
+                        # Exibe campo de entrada textual somente se não foi selecionado em um menu dinâmico
                         if len(ativos_disponiveis) > 1:
                             ativo_final_input = ativo_selecionado
                         else:
@@ -700,7 +702,7 @@ else:
                                 df_limpo_sup_calc = df_inventarios_sup['id'].str.replace('SUP-#', '', regex=False).astype(int)
                                 maior_id_sup = df_limpo_sup_calc.max()
                             else:
-                                mayor_id_sup = 0
+                                maior_id_sup = 0
                             
                             novo_id_sup = f"SUP-#{maior_id_sup + 1}"
                             hoje_sup = datetime.date.today().strftime("%Y-%m-%d")
@@ -712,7 +714,7 @@ else:
             if inv_sup_selecionado_obj is not None and inv_sup_selecionado_obj['status'] == "Aberto":
                 if st.button("🔒 Fechar Inventário Supervisor", use_container_width=True, type="primary", key="btn_close_sup_interno"):
                     cursor = conn.cursor()
-                    cursor.execute("UPDATE inventarios_supervisor WHERE id = ?", (id_inv_sup_atual,))
+                    cursor.execute("UPDATE inventarios_supervisor SET status = 'Fechado' WHERE id = ?", (id_inv_sup_atual,))
                     conn.commit()
                     st.rerun()
 
@@ -887,7 +889,7 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = group = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
+                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
