@@ -521,15 +521,36 @@ else:
                 busca_limpa = str(codigo_input).upper().strip()
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
                 
-                item = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
-                if not item.empty:
-                    unid_val = item.iloc[0][col_unidade] if col_unidade in item.columns else "UN"
-                    desc_val = item.iloc[0][col_desc]
-                    local_val = item.iloc[0][col_local] if col_local in item.columns else "Não Informado"
-                    id_estoque_val = str(item.iloc[0][col_id_estoque]).strip() if col_id_estoque in item.columns else ""
+                # Filtra todos os itens condizentes com o código mapeado da planilha de saldo
+                itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
+                
+                if not itens_filtrados.empty:
+                    # Verifica se existe coluna de lote na base e extrai os lotes únicos deste produto
+                    tem_coluna_lote = 'lote' in st.session_state.base_sistema.columns or 'LOTE' in st.session_state.base_sistema.columns
+                    col_lote_real = 'lote' if 'lote' in st.session_state.base_sistema.columns else 'LOTE'
+                    
+                    lotes_disponiveis = []
+                    if tem_coluna_lote:
+                        lotes_disponiveis = itens_filtrados[col_lote_real].dropna().astype(str).str.strip().unique().tolist()
+                        lotes_disponiveis = [l for l in lotes_disponiveis if l != "" and l.lower() != "nan"]
+
+                    # Interface para escolha dinâmica do lote caso múltiplos existam
+                    if lotes_disponiveis:
+                        st.markdown("### 📦 Lotes Encontrados para este Código:")
+                        lote_selecionado = st.selectbox("Selecione o LOTE que deseja contar fisicamente:", lotes_disponiveis, key="lote_selector_bip")
+                        # Filtra a linha correspondente ao lote selecionado
+                        item_especifico = itens_filtrados[itens_filtrados[col_lote_real].astype(str).str.strip() == lote_selecionado].iloc[0]
+                    else:
+                        lote_selecionado = ""
+                        item_especifico = itens_filtrados.iloc[0]
+
+                    unid_val = item_especifico[col_unidade] if col_unidade in item_especifico.columns else "UN"
+                    desc_val = item_especifico[col_desc]
+                    local_val = item_especifico[col_local] if col_local in item_especifico.columns else "Não Informado"
+                    id_estoque_val = str(item_especifico[col_id_estoque]).strip() if col_id_estoque in item_especifico.columns else ""
                     
                     try:
-                        qtd_sis = int(pd.to_numeric(item.iloc[0][col_qtd], errors='coerce'))
+                        qtd_sis = int(pd.to_numeric(item_especifico[col_qtd], errors='coerce'))
                         if pd.isna(qtd_sis): qtd_sis = 0
                     except: qtd_sis = 0
                     
@@ -537,7 +558,7 @@ else:
                     b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
                     b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
                     b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
-                    b4.markdown('<div class="bloco-info"><div class="bloco-titulo">STATUS BARRA</div><div class="bloco-valor" style="color:#2ecc71;">● Conectado</div></div>', unsafe_allow_html=True)
+                    b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">LOTE EM CONTAGEM</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
                     
                     st.markdown(f"**Descrição:** {desc_val}")
                     
@@ -552,15 +573,14 @@ else:
                                 st.error("❌ Erro: Informe uma quantidade maior que 0!")
                             else:
                                 agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                lote_val = str(item.iloc[0]['lote']) if 'lote' in item.columns else ""
                                 dif_c = qtd_fisica - qtd_sis
                                 cursor = conn.cursor()
                                 cursor.execute("""
                                     INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (id_inventario_atual.replace("#",""), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_val))
+                                """, (id_inventario_atual.replace("#",""), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado))
                                 conn.commit()
-                                st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso!"
+                                st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso para o Lote {lote_selecionado if lote_selecionado else 'Padrão'}!"
                                 st.session_state.contador_reset += 1
                                 st.rerun()
                 else:
@@ -815,7 +835,7 @@ else:
                     else:
                         st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-# --- ABA 4: ACURACIDADE ESTOQUE (ATUALIZADA COM FILTRO DE DATA E PAGINAÇÃO SOBERANA DE 15 PASTAS) ---
+    # --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -871,7 +891,6 @@ else:
 
         st.markdown("---")
         
-        # --- IMPLEMENTADO: FILTRO DE DATA E PAGINAÇÃO PARA O HISTÓRICO DO SUPERVISOR ---
         st.write("### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
         
         if df_inventarios_sup.empty:
@@ -884,7 +903,6 @@ else:
             with c_dt_sup2:
                 dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
                 
-            # Filtrar as pastas de amostragem por data
             df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
             df_sup_filtrados = df_inventarios_sup[
                 (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
@@ -894,7 +912,6 @@ else:
             if df_sup_filtrados.empty:
                 st.warning("⚠️ Nenhum histórico do supervisor foi localizado neste intervalo de datas.")
             else:
-                # Lógica matemática de paginação do Supervisor (15 por página)
                 tam_pagina_sup = 15
                 total_itens_sup = len(df_sup_filtrados)
                 total_paginas_sup = (total_itens_sup - 1) // tam_pagina_sup + 1
@@ -909,7 +926,6 @@ else:
                 
                 st.write(f"Exibindo do **{idx_ini_sup + 1}º** ao **{min(idx_fim_sup, total_itens_sup)}º** inventário amostral (Total de {total_itens_sup} pastas do supervisor).")
                 
-                # Renderiza as 15 pastas da página corrente
                 for idx, inv_s in df_pagina_sup_atual.iterrows():
                     df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
                     
@@ -930,7 +946,6 @@ else:
                                 st.success("Pasta deletada!")
                                 st.rerun()
                                 
-                # Controles de Navegação da Paginação do Supervisor
                 st.markdown("---")
                 col_p_sup1, col_p_sup_txt, col_p_sup2 = st.columns([2, 6, 2])
                 with col_p_sup1:
