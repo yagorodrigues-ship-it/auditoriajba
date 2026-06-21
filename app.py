@@ -511,6 +511,7 @@ else:
     with aba_contar:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
+        # MODIFICAÇÃO DE TRAVA: Agora permite digitação se o status for 'Aberto' ou '2a Contagem'
         elif id_inventario_atual and inventario_selected_obj['status'] == "Fechado":
             st.error("🔒 Inventário selecionado está Fechado.")
         else:
@@ -619,8 +620,12 @@ else:
                                 cursor.execute("SELECT fase_contagem FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", (id_inventario_atual.replace("#","") if id_inventario_atual else "", codigo_rastreio, lote_selecionado))
                                 row_fase = cursor.fetchone()
                                 fase_atual_registro = "1a Contagem"
-                                if row_fase and row_fase[0] == "2a Contagem":
+                                
+                                # Se o inventário está em fase de "2a Contagem", marca o registro de contagem adequadamente
+                                if inventario_selected_obj['status'] == "2a Contagem":
                                     fase_atual_registro = "2a Contagem"
+                                    
+                                if row_fase and row_fase[0] == "2a Contagem":
                                     cursor.execute("DELETE FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", (id_inventario_atual.replace("#","") if id_inventario_atual else "", codigo_rastreio, lote_selecionado))
 
                                 cursor.execute("""
@@ -674,14 +679,14 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: PAINEL SUPERVISOR (AÇÃO EM TEMPO REAL) ---
+    # --- ABA 3: PAINEL SUPERVISOR ---
     with aba_supervisor:
         st.title("🔬 Painel de Gestão e Auditoria do Supervisor")
         
         if not eh_supervisor:
             st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor.")
         else:
-            # --- SEÇÃO 1: LIBERAR SEGUNDA CONTAGEM PARA O ALMOXARIFADO ---
+            # --- SEÇÃO 1: LIBERAR SEGUNDA CONTAGEM (CORREÇÃO DE STATUS DA PASTA ADICIONADA) ---
             st.subheader("🔄 Módulo ADM de Liberação de 2ª Contagem")
             df_todas_contagens_divergentes = pd.read_sql_query("SELECT * FROM contagens WHERE diferenca != 0 AND fase_contagem = '1a Contagem'", conn)
             
@@ -696,7 +701,7 @@ else:
                     opcoes_pastas_divergentes.append(f"#{id_pasta} – {nome_pasta}")
                 
                 st.warning(f"⚠️ Identificamos **{len(ids_inventarios_com_erro)}** pasta(s) contendo erros de saldo cometidos pela equipe.")
-                pasta_selecionada_erro = st.selectbox("📂 Escolha a pasta do inventário com divergência para liberar a recontagem:", opcoes_pastas_divergentes, key="sb_pasta_reabrir_2a")
+                pasta_selecionada_erro = st.selectbox("📂 Escolha a pasta do inventário divergente para liberar a recontagem:", opcoes_pastas_divergentes, key="sb_pasta_reabrir_2a")
                 id_pasta_limpo = pasta_selecionada_erro.split(" – ")[0].replace("#", "")
                 
                 df_erros_desta_pasta = df_todas_contagens_divergentes[df_todas_contagens_divergentes['inventario_id'] == id_pasta_limpo]
@@ -712,19 +717,21 @@ else:
                     cod_material_alvo = material_selecionado_combo.split(" - ")[0]
                     match_linha_contexto = df_erros_desta_pasta[df_erros_desta_pasta['cod_produto'] == cod_material_alvo].iloc[0]
                     
-                    st.write(f"**Ação:** Ao clicar no botão vermelho abaixo, este item voltará a ficar disponível na tela dos funcionários para que eles realizem a **2ª Contagem** física corretiva.")
+                    st.write(f"**Ação:** Ao clicar no botão vermelho abaixo, este inventário mudará o status para **'2a Contagem'**, liberando a digitação de volta na tela dos almoxarifes.")
                     
                     if st.form_submit_button("🚨 Abrir e Liberar 2ª Contagem para Almoxarife", type="primary", use_container_width=True):
                         cursor = conn.cursor()
-                        # Atualiza a fase de contagem para liberar o item de volta na Aba 1
+                        # CORREÇÃO DO FLUXO: Altera o status do Inventário Geral de 'Fechado' para '2a Contagem'
+                        cursor.execute("UPDATE inventarios SET status = '2a Contagem' WHERE id = ?", (f"#{id_pasta_limpo}",))
+                        # Atualiza a fase da linha específica da contagem para permitir a nova digitação
                         cursor.execute("UPDATE contagens SET fase_contagem = '2a Contagem', diferenca = 0, qtd_contada = 0 WHERE id = ?", (int(match_linha_contexto['id']),))
                         conn.commit()
-                        st.success(f"🎉 2ª Contagem autorizada! O material {cod_material_alvo} já está liberado para recontagem na tela do almoxarife.")
+                        st.success(f"🎉 Pasta #{id_pasta_limpo} alterada para '2a Contagem'! O material {cod_material_alvo} já está liberado na tela do almoxarife.")
                         st.rerun()
 
             st.markdown("---")
 
-            # --- SEÇÃO 2: CONTROLE DE QUALIDADE AMOSTRAL (AUDITORIA INDEPENDENTE DO SUPERVISOR) ---
+            # --- SEÇÃO 2: CONTROLE DE QUALIDADE AMOSTRAL ---
             st.subheader("📁 Controle de Auditoria Própria e Amostral do Supervisor")
             
             if df_inventarios_sup.empty:
@@ -817,7 +824,6 @@ else:
                         try: qtd_sis_sup = int(pd.to_numeric(item_sup.iloc[0][col_qtd_sup], errors='coerce'))
                         except: qtd_sis_sup = 0
                         
-                        # Captura coluna real do ativo de forma flexível
                         col_ativo_sup_real = None
                         for c_at in item_sup.columns:
                             if str(c_at).strip().upper() in ["ATIVO", "Nº ATIVO", "NUMERO ATIVO", "COD ATIVO"]:
@@ -858,13 +864,12 @@ else:
                     else:
                         st.error("❌ Código do material não localizado na sua planilha anexa.")
 
-            # Relatório em tempo real da pasta corrente do supervisor
             if id_inv_sup_atual:
                 df_auditorias_atual = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inv_sup_atual,))
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-    # --- ABA 4: ACURACIDADE ESTOQUE (ALIMENTADO AUTOMATICAMENTE PELAS AMOSTRAGENS) ---
+    # --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -880,7 +885,7 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
+                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in group.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
