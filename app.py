@@ -544,10 +544,11 @@ else:
                         lote_selecionado = ""
                         item_especifico = itens_filtrados.iloc[0]
 
-                    unid_val = item_especifico[col_unidade] if col_unidade in item_especifico.columns else "UN"
+                    # CORREÇÃO DO ERRO: Validação feita diretamente nas colunas do DataFrame (itens_filtrados)
+                    unid_val = item_especifico[col_unidade] if col_unidade in itens_filtrados.columns else "UN"
                     desc_val = item_especifico[col_desc]
-                    local_val = item_especifico[col_local] if col_local in item_especifico.columns else "Não Informado"
-                    id_estoque_val = str(item_especifico[col_id_estoque]).strip() if col_id_estoque in item_especifico.columns else ""
+                    local_val = item_especifico[col_local] if col_local in itens_filtrados.columns else "Não Informado"
+                    id_estoque_val = str(item_especifico[col_id_estoque]).strip() if col_id_estoque in itens_filtrados.columns else ""
                     
                     try:
                         qtd_sis = int(pd.to_numeric(item_especifico[col_qtd], errors='coerce'))
@@ -835,7 +836,7 @@ else:
                     else:
                         st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-    # --- ABA 4: ACURACIDADE ESTOQUE ---
+# --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
