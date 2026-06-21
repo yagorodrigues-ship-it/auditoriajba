@@ -791,7 +791,6 @@ else:
             st.write("#### 📤 Anexar Estoque / Planilha de Amostragem do Supervisor")
             arquivo_supervisor = st.file_uploader("Suba a planilha Excel com as amostras mapeadas (.xlsx)", type=["xlsx"], key="sup_excel_loader_v4")
             
-            # --- CORREÇÃO DA TRAVA DA PLANILHA (OPCIONALIDADE DO ATIVO CORRIGIDA) ---
             if arquivo_supervisor is not None:
                 try:
                     df_temp_check = pd.read_excel(arquivo_supervisor)
@@ -807,7 +806,6 @@ else:
                     st.session_state.nome_arquivo_supervisor = ""
                     st.rerun()
 
-            # O formulário agora aparece livremente se a base for carregada, sem travar por erro de Ativo
             if id_inv_sup_atual and inv_sup_selecionado_obj['status'] == "Aberto" and st.session_state.base_supervisor is not None:
                 st.write("#### 💻 Bipar e Contar Item (Lançamento do Supervisor)")
                 
@@ -881,7 +879,7 @@ else:
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-# --- ABA 4: ACURACIDADE ESTOQUE (AGORA COM O HISTÓRICO VISÍVEL PARA ALMOXARIFES) ---
+# --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -937,7 +935,7 @@ else:
 
         st.markdown("---")
         
-        # --- MOVIDO E LIBERADO PARA ALMOXARIFES: HISTÓRICO DE PASTAS DO SUPERVISOR ---
+        # --- HISTÓRICO DE PASTAS DO SUPERVISOR (COM OPÇÃO DE EXCLUSÃO PARA SUPERVISORES ADICIONADA) ---
         st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
         c_dt_sup1, c_dt_sup2 = st.columns(2)
         with c_dt_sup1:
@@ -965,10 +963,26 @@ else:
             
             for idx, inv_s in df_pagina_sup_atual.iterrows():
                 df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
+                
                 with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
+                    c_dl, c_del = st.columns([2, 2])
+                    with c_dl:
+                        if not df_hist_sup.empty:
+                            excel_sup_hist = converter_para_excel(df_hist_sup)
+                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
+                    
+                    # --- BOTÃO DE EXCLUSÃO DE PASTAS AMOSTRAIS PARA O SUPERVISOR ---
+                    with c_del:
+                        if eh_supervisor:
+                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
+                                cursor = conn.cursor()
+                                cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
+                                cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
+                                conn.commit()
+                                st.success(f"✅ Pasta {inv_s['id']} excluída com sucesso!")
+                                st.rerun()
+                                
                     if not df_hist_sup.empty:
-                        excel_sup_hist = converter_para_excel(df_hist_sup)
-                        st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
                         st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
 
     # --- ABA 5: HISTÓRICO GERAL ---
