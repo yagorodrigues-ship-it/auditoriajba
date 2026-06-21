@@ -511,7 +511,6 @@ else:
     with aba_contar:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
-        # MODIFICAÇÃO DE TRAVA: Agora permite digitação se o status for 'Aberto' ou '2a Contagem'
         elif id_inventario_atual and inventario_selected_obj['status'] == "Fechado":
             st.error("🔒 Inventário selecionado está Fechado.")
         else:
@@ -616,12 +615,10 @@ else:
                                 dif_c = qtd_fisica - qtd_sis
                                 cursor = conn.cursor()
                                 
-                                # Verifica se o item já foi contado nesta fase. Se sim, remove o antigo para registrar a nova contagem (2a Contagem)
                                 cursor.execute("SELECT fase_contagem FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", (id_inventario_atual.replace("#","") if id_inventario_atual else "", codigo_rastreio, lote_selecionado))
                                 row_fase = cursor.fetchone()
                                 fase_atual_registro = "1a Contagem"
                                 
-                                # Se o inventário está em fase de "2a Contagem", marca o registro de contagem adequadamente
                                 if inventario_selected_obj['status'] == "2a Contagem":
                                     fase_atual_registro = "2a Contagem"
                                     
@@ -658,14 +655,14 @@ else:
             else:
                 total_auditado = len(df_contagens_mutaveis)
                 itens_divergentes = len(df_contagens_mutaveis[df_contagens_mutaveis['diferenca'] != 0])
-                soma_contada = int(df_contagens_mutaveis['qtd_contada'].sum())
+                st.session_state.soma_contada = int(df_contagens_mutaveis['qtd_contada'].sum())
                 soma_sistema = int(df_contagens_mutaveis['qtd_sistema'].sum())
                 diferenca_acumulada = int(df_contagens_mutaveis['diferenca'].sum())
                 
                 c1, c2, c3, c4 = st.columns(4)
                 with c1: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">📦 ITENS CONTADOS</div><div class="bloco-valor">{total_auditado}</div></div>', unsafe_allow_html=True)
                 with c2: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">⚠️ COM DIVERGÊNCIA</div><div class="bloco-valor">{itens_divergentes}</div></div>', unsafe_allow_html=True)
-                with c3: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">QUANTIDADE CONTADA</div><div class="bloco-valor">{soma_contada}</div></div>', unsafe_allow_html=True)
+                with c3: st.markdown(f'<div class="bloco-info"><div class="bloco-titulo">QUANTIDADE CONTADA</div><div class="bloco-valor">{st.session_state.soma_contada}</div></div>', unsafe_allow_html=True)
                 with c4: st.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">QUANTIDADE SISTEMA</div><div class="bloco-valor">{soma_sistema} <span style="font-size:14px; color:#e74c3c;">(Dif: {diferenca_acumulada})</span></div></div>', unsafe_allow_html=True)
                 
                 excel_atual = converter_para_excel(df_contagens_mutaveis)
@@ -686,7 +683,6 @@ else:
         if not eh_supervisor:
             st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor.")
         else:
-            # --- SEÇÃO 1: LIBERAR SEGUNDA CONTAGEM (CORREÇÃO DE STATUS DA PASTA ADICIONADA) ---
             st.subheader("🔄 Módulo ADM de Liberação de 2ª Contagem")
             df_todas_contagens_divergentes = pd.read_sql_query("SELECT * FROM contagens WHERE diferenca != 0 AND fase_contagem = '1a Contagem'", conn)
             
@@ -721,9 +717,7 @@ else:
                     
                     if st.form_submit_button("🚨 Abrir e Liberar 2ª Contagem para Almoxarife", type="primary", use_container_width=True):
                         cursor = conn.cursor()
-                        # CORREÇÃO DO FLUXO: Altera o status do Inventário Geral de 'Fechado' para '2a Contagem'
                         cursor.execute("UPDATE inventarios SET status = '2a Contagem' WHERE id = ?", (f"#{id_pasta_limpo}",))
-                        # Atualiza a fase da linha específica da contagem para permitir a nova digitação
                         cursor.execute("UPDATE contagens SET fase_contagem = '2a Contagem', diferenca = 0, qtd_contada = 0 WHERE id = ?", (int(match_linha_contexto['id']),))
                         conn.commit()
                         st.success(f"🎉 Pasta #{id_pasta_limpo} alterada para '2a Contagem'! O material {cod_material_alvo} já está liberado na tela do almoxarife.")
@@ -869,7 +863,7 @@ else:
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-    # --- ABA 4: ACURACIDADE ESTOQUE ---
+# --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -885,7 +879,8 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in group.columns else ""
+                # CORREÇÃO DO ERRO DA IMAGEM: group.columns foi alterado para grupo.columns
+                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
