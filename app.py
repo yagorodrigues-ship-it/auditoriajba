@@ -69,7 +69,7 @@ def inicializar_banco():
         )
     """)
 
-    # Tabela de Auditorias do Supervisor (E 3ª Contagem)
+    # Tabela de Auditorias do Supervisor (E 2ª Contagem)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS auditorias_supervisor (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -666,214 +666,91 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 3: PAINEL SUPERVISOR ---
+    # --- ABA 3: PAINEL SUPERVISOR (ATUALIZADO REALTIME) ---
     with aba_supervisor:
-        st.title("🔬 Controle de Qualidade Amostral do Supervisor")
+        st.title("🔬 Controle de Qualidade e 2ª Contagem")
         
         if not eh_supervisor:
             st.error("🚫 Acesso restrito. Esta tela só pode ser operada pelo Administrador/Supervisor.")
         else:
-            st.subheader("📁 Controle de Inventários do Supervisor")
+            st.write("### 🔄 Módulo ADM de 2ª Contagem em Tempo Real")
             
-            if df_inventarios_sup.empty:
-                st.info("Nenhum inventário de amostragem aberto. Crie um ao lado.")
-                id_inv_sup_atual = None
-                inv_sup_selecionado_obj = None
-                index_default_combo = 0
+            # Busca todas as contagens com divergência agrupadas por inventário
+            df_todas_contagens_divergentes = pd.read_sql_query("SELECT * FROM contagens WHERE diferenca != 0", conn)
+            
+            if df_todas_contagens_divergentes.empty:
+                st.success("🎉 Nenhuma divergência operacional pendente no momento em nenhum inventário.")
             else:
-                lista_inv_sup = [f"{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios_sup.iterrows()]
-                index_default_combo = 0
-                for idx_c, txt_c in enumerate(lista_inv_sup):
-                    if "(Aberto)" in txt_c:
-                        index_default_combo = idx_c
-                        break
-                        
-                inv_sup_selected = st.selectbox("Selecione a sua Auditoria Amostral", lista_inv_sup, index=index_default_combo, key="sel_box_sup_local_v3")
-                id_inv_sup_atual = inv_sup_selected.split(" – ")[0]
-                inv_sup_selecionado_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
-            
-            col_vazio, col_btn_pop = st.columns([7, 3])
-            with col_btn_pop:
-                with st.popover("➕ Novo Inventário Supervisor", use_container_width=True):
-                    with st.form("form_novo_sup_interno_v3", clear_on_submit=True):
-                        nome_sup_inv = st.text_input("Nome da Auditoria Amostral")
-                        if st.form_submit_button("Confirmar Criação", type="primary") and nome_sup_inv:
-                            if not df_inventarios_sup.empty:
-                                df_limpo_sup_calc = df_inventarios_sup['id'].str.replace('SUP-#', '', regex=False).astype(int)
-                                maior_id_sup = df_limpo_sup_calc.max()
-                            else:
-                                maior_id_sup = 0
-                            
-                            novo_id_sup = f"SUP-#{maior_id_sup + 1}"
-                            hoje_sup = datetime.date.today().strftime("%Y-%m-%d")
-                            cursor = conn.cursor()
-                            cursor.execute("INSERT INTO inventarios_supervisor (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id_sup, nome_sup_inv, hoje_sup))
-                            conn.commit()
-                            st.rerun()
-                            
-            if inv_sup_selecionado_obj is not None and inv_sup_selecionado_obj['status'] == "Aberto":
-                if st.button("🔒 Fechar Inventário Supervisor", use_container_width=True, type="primary", key="btn_close_sup_interno"):
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE inventarios_supervisor SET status = 'Fechado' WHERE id = ?", (id_inv_sup_atual,))
-                    conn.commit()
-                    st.rerun()
-
-            st.markdown("---")
-
-            st.subheader("📤 Upload da Planilha de Amostragem do Supervisor")
-            arquivo_supervisor = st.file_uploader("Suba a planilha Excel para a amostragem do supervisor (.xlsx)", type=["xlsx"], key="sup_unified_excel_loader_v3")
-            
-            if arquivo_supervisor is not None:
-                try:
-                    df_temp_check = pd.read_excel(arquivo_supervisor)
-                    colunas_norm = [str(c).strip().lower().replace("º", "").replace("ó", "o") for c in df_temp_check.columns]
-                    tem_ativo = any(x in colunas_norm for x in ['ativo', 'n ativo', 'numero ativo', 'cod ativo'])
-                    
-                    if not tem_ativo:
-                        st.error("❌ Erro: Coluna 'Ativo' não encontrada na planilha!")
-                        st.session_state.base_supervisor = None
-                    elif df_temp_check.iloc[:, [i for i, c in enumerate(colunas_norm) if c in ['ativo', 'n ativo', 'numero ativo', 'cod ativo']][0]].isnull().any():
-                        st.error("⚠️ Erro: Coluna 'Ativo' possui valores em branco na planilha.")
-                        st.session_state.base_supervisor = None
-                    else:
-                        if st.session_state.base_supervisor is None:
-                            st.session_state.base_supervisor = df_temp_check
-                            st.session_state.nome_arquivo_supervisor = arquivo_supervisor.name
-                            st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao analisar arquivo: {e}")
-
-            if st.session_state.base_supervisor is not None:
-                st.info(f"📂 **Base Ativa do Supervisor:** {st.session_state.nome_arquivo_supervisor}")
-                if st.button("🗑️ Remover Planilha"):
-                    st.session_state.base_supervisor = None
-                    st.session_state.nome_arquivo_supervisor = ""
-                    st.rerun()
-
-            st.markdown("---")
-
-            if id_inv_sup_atual:
-                df_auditorias_atual = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inv_sup_atual,))
+                # Extrai uma lista única de IDs de inventário que possuem erros para popular o combo
+                ids_inventarios_com_erro = df_todas_contagens_divergentes['inventario_id'].unique().tolist()
                 
-                if inv_sup_selecionado_obj['status'] == "Aberto":
-                    if st.session_state.base_supervisor is not None:
-                        colunas_sup = list(st.session_state.base_supervisor.columns)
-                        def encontrar_col_sup(opcoes, default_idx):
-                            for opcao in opcoes:
-                                for col in colunas_sup:
-                                    if opcao.lower().replace(" ", "").replace(".", "") in col.lower().replace(" ", "").replace(".", ""):
-                                        return col
-                            return colunas_sup[default_idx] if default_idx < len(colunas_sup) else colunas_sup[0]
-
-                        col_cod_sup = encontrar_col_sup(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
-                        col_desc_sup = encontrar_col_sup(['descproduto', 'descricao', 'desc'], 1)
-                        col_local_sup = encontrar_col_sup(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
-                        col_qtd_sup = encontrar_col_sup(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-                        col_id_est_sup = encontrar_col_sup(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
-
-                        bip_supervisor = st.text_input("💻 Bipar item para Amostragem (Supervisor)", value="", placeholder="Bipe o item da sua planilha...", key=f"sup_bip_{st.session_state.contador_reset_sup}")
+                # Monta opções formatadas com base nas pastas de inventários existentes no banco
+                opcoes_pastas_divergentes = []
+                for id_pasta in ids_inventarios_com_erro:
+                    match_inv = df_inventarios[df_inventarios['id'].str.replace('#', '', regex=False) == str(id_pasta)]
+                    nome_pasta = match_inv.iloc[0]['nome'] if not match_inv.empty else "Inventário Operacional"
+                    opcoes_pastas_divergentes.append(f"#{id_pasta} – {nome_pasta}")
+                
+                st.warning(f"⚠️ Mapeamos **{len(ids_inventarios_com_erro)}** pasta(s) de inventário contendo divergências na contagem da equipe.")
+                
+                pasta_selecionada_erro = st.selectbox("📂 Escolha a pasta do inventário divergente que deseja tratar:", opcoes_pastas_divergentes, key="sb_pasta_erro_sup")
+                id_pasta_limpo = pasta_selecionada_erro.split(" – ")[0].replace("#", "")
+                
+                # Filtra os materiais errados especificamente dessa pasta operacional
+                df_erros_desta_pasta = df_todas_contagens_divergentes[df_todas_contagens_divergentes['inventario_id'] == id_pasta_limpo]
+                
+                with st.form("form_2contagem_adm_automatico"):
+                    # Cria listas descritivas para facilitar a identificação do item na combo
+                    itens_unicos_erro = df_erros_desta_pasta['cod_produto'].unique()
+                    opcoes_materiais = []
+                    for m_cod in itens_unicos_erro:
+                        match_m = df_erros_desta_pasta[df_erros_desta_pasta['cod_produto'] == m_cod].iloc[0]
+                        opcoes_materiais.append(f"{m_cod} - {match_m['desc_produto']} (Lote: {match_m['lote'] if match_m['lote'] else 'Padrão'})")
                         
-                        if bip_supervisor:
-                            busca_sup = str(bip_supervisor).upper().strip()
-                            cod_sup = busca_sup.split(" - ")[-1].strip() if " - " in busca_sup else busca_sup
-                            item_sup = st.session_state.base_supervisor[st.session_state.base_supervisor[col_cod_sup].astype(str).str.upper().str.strip() == cod_sup]
-                            
-                            if not item_sup.empty:
-                                desc_sup = item_sup.iloc[0][col_desc_sup]
-                                local_sup = item_sup.iloc[0][col_local_sup] if col_local_sup in item_sup.columns else "Não Informado"
-                                id_est_sup = str(item_sup.iloc[0][col_id_est_sup]).strip() if col_id_est_sup in item_sup.columns else ""
-                                try: qtd_sis_sup = int(pd.to_numeric(item_sup.iloc[0][col_qtd_sup], errors='coerce'))
-                                except: qtd_sis_sup = 0
-                                
-                                with st.form("form_auditoria_sup_interno", clear_on_submit=True):
-                                    st.write(f"**Item Selecionado:** {cod_sup} - {desc_sup}")
-                                    col_f1, col_f2, col_f3 = st.columns(3)
-                                    with col_f1: qtd_aud_sup = st.number_input("Quantidade Real Encontrada", min_value=0, step=1, value=0)
-                                    with col_f2: etiq_status = st.selectbox("A etiqueta física está correta?", ["Sim", "Não"])
-                                    with col_f3: local_status = st.selectbox("O material está na localização correta?", ["Sim", "Não"])
-                                    
-                                    ativo_sup_input = st.text_input("🔢 Número do Ativo (Obrigatório)")
-                                        
-                                    if st.form_submit_button("💾 Salvar Auditoria", type="primary", use_container_width=True):
-                                        ativo_sup_l = ativo_sup_input.strip().upper()
-                                        if not ativo_sup_l:
-                                            st.error("❌ Erro: O Número do Ativo é obrigatório!")
-                                        else:
-                                            dif_sup = qtd_aud_sup - qtd_sis_sup
-                                            cursor = conn.cursor()
-                                            cursor.execute("""
-                                                INSERT INTO auditorias_supervisor (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, qtd_sistema, qtd_auditada, diferenca, etiqueta_correta, localizacao_correta, supervisor, data_hora, ativo)
-                                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                            """, (id_inv_sup_atual, id_est_sup, local_sup, cod_sup, desc_sup, qtd_sis_sup, qtd_aud_sup, dif_sup, etiq_status, local_status, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ativo_sup_l))
-                                            conn.commit()
-                                            st.session_state.contador_reset_sup += 1
-                                            st.rerun()
-
-                    # 3ª Contagem
-                    st.write("### 🔄 Auditoria de Divergências (Módulo ADM de 3ª Contagem)")
-                    df_geral_funcionarios_analise = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
+                    material_selecionado_combo = st.selectbox("Escolha o material divergente para aplicar a 2ª Contagem:", opcoes_materiais)
+                    cod_material_alvo = material_selecionado_combo.split(" - ")[0]
                     
-                    if not df_geral_funcionarios_analise.empty:
-                        df_itens_com_erro = df_geral_funcionarios_analise[df_geral_funcionarios_analise['diferenca'] != 0]
-                        if not df_itens_com_erro.empty:
-                            st.warning(f"⚠️ Identificamos {len(df_itens_com_erro)} materiais divergentes na contagem da equipe. Deseja abrir uma 3ª contagem?")
-                            
-                            with st.form("form_3contagem_adm"):
-                                material_recontar = st.selectbox("Escolha o material divergente para recontar", df_itens_com_erro['cod_produto'].unique())
-                                q_real_3 = st.number_input("Quantidade Real Constatada (3ª Contagem ADM)", min_value=0, step=1)
-                                etiq_3 = st.selectbox("Etiqueta Correta?", ["Sim", "Não"], key="etiq3")
-                                local_3 = st.selectbox("Localização Correta?", ["Sim", "Não"], key="local3")
-                                ativo_3_input = st.text_input("🔢 Número do Ativo (Obrigatório)")
-                                
-                                if st.form_submit_button("🔄 Gravar 3ª Contagem Definitiva", type="primary"):
-                                    ativo_3_l = ativo_3_input.strip().upper()
-                                    if not ativo_3_l:
-                                        st.error("❌ Erro: O preenchimento do Número do Ativo é obrigatório!")
-                                    else:
-                                        match_linha = df_itens_com_erro[df_itens_com_erro['cod_produto'] == material_recontar].iloc[0]
-                                        dif_3 = q_real_3 - int(match_linha['qtd_sistema'])
-                                        
-                                        cursor = conn.cursor()
-                                        cursor.execute("""
-                                            INSERT INTO auditorias_supervisor (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, qtd_sistema, qtd_auditada, diferenca, etiqueta_correta, localizacao_correta, supervisor, data_hora, recontagem_3, ativo)
-                                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sim', ?)
-                                        """, (id_inv_sup_atual, match_linha['id_estoque'] if 'id_estoque' in match_linha else "N/I", match_linha['desc_estoque'], material_recontar, match_linha['desc_produto'], int(match_linha['qtd_sistema']), q_real_3, dif_3, etiq_3, local_3, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ativo_3_l))
-                                        conn.commit()
-                                        st.success("✅ 3ª Contagem gravada com sucesso!")
-                                        st.rerun()
+                    # Captura a linha de contexto correta com base no item escolhido
+                    match_linha_contexto = df_erros_desta_pasta[df_erros_desta_pasta['cod_produto'] == cod_material_alvo].iloc[0]
+                    
+                    q_real_2 = st.number_input("Quantidade Real Constatada (2ª Contagem ADM)", min_value=0, step=1)
+                    etiq_2 = st.selectbox("Etiqueta Física está Correta?", ["Sim", "Não"], key="etiq2_new")
+                    local_2 = st.selectbox("Localização Física está Correta?", ["Sim", "Não"], key="local2_new")
+                    
+                    # Auto-popula o ativo pré-existente caso haja, mas obriga preenchimento
+                    ativo_previsto_s = match_linha_contexto['ativo'] if match_linha_contexto['ativo'] else ""
+                    ativo_2_input = st.text_input("🔢 Número do Ativo (Obrigatório)", value=ativo_previsto_s)
+                    
+                    if st.form_submit_button("💾 Gravar 2ª Contagem Definitiva", type="primary"):
+                        ativo_2_l = ativo_2_input.strip().upper()
+                        if not ativo_2_l:
+                            st.error("❌ Erro: O preenchimento do Número do Ativo é obrigatório para fechamento da auditoria!")
                         else:
-                            st.success("🎉 Nenhuma divergência operacional encontrada.")
+                            dif_2 = q_real_2 - int(match_linha_contexto['qtd_sistema'])
+                            agora_sup = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            cursor = conn.cursor()
+                            cursor.execute("""
+                                INSERT INTO auditorias_supervisor (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, qtd_sistema, qtd_auditada, diferenca, etiqueta_correta, localizacao_correta, supervisor, data_hora, recontagem_3, ativo)
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'Sim', ?)
+                            """, (f"SUP-#{id_pasta_limpo}", match_linha_contexto['id_estoque'], match_linha_contexto['desc_estoque'], cod_material_alvo, match_linha_contexto['desc_produto'], int(match_linha_contexto['qtd_sistema']), q_real_2, dif_2, etiq_2, local_2, st.session_state.operador, agora_sup, ativo_2_l))
+                            
+                            # Opcional: Remove ou atualiza a flag da contagem errada para ela sair da fila
+                            cursor.execute("UPDATE contagens SET diferenca = 0 WHERE id = ?", (int(match_linha_contexto['id']),))
+                            
+                            conn.commit()
+                            st.success(f"✅ 2ª Contagem do material {cod_material_alvo} arquivada e gravada com sucesso!")
+                            st.rerun()
+            
+            st.markdown("---")
+            st.write("### 📝 Histórico de 2ªs Contagens Homologadas por Você")
+            df_auditorias_totais_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
+            if df_auditorias_totais_sup.empty:
+                st.info("Nenhuma 2ª contagem definitiva homologada no banco de dados até o momento.")
+            else:
+                st.dataframe(df_auditorias_totais_sup, use_container_width=True, hide_index=True)
 
-                    st.markdown("---")
-                    
-                    st.write("### 🔐 Relatório de Fechamento Amostral Ativo")
-                    if not df_auditorias_atual.empty:
-                        total_sup = len(df_auditorias_atual)
-                        certos_qtd = len(df_auditorias_atual[df_auditorias_atual['diferenca'] == 0])
-                        certos_etiq = len(df_auditorias_atual[df_auditorias_atual['etiqueta_correta'] == "Sim"])
-                        certos_local = len(df_auditorias_atual[df_auditorias_atual['localizacao_correta'] == "Sim"])
-                        
-                        m1, m2, m3, m4 = st.columns(4)
-                        m1.metric("🎯 SALDO CORRETO", f"{(certos_qtd / total_sup)*100:.1f}%")
-                        m2.metric("🏷️ ETIQUETAS OK", f"{(certos_etiq / total_sup)*100:.1f}%")
-                        m3.metric("📍 LOCALIZAÇÃO OK", f"{(certos_local / total_sup)*100:.1f}%")
-                        m4.metric("📋 AMOSTRAS BIPIADAS", f"{total_sup} itens")
-                        
-                        st.write("### 📝 Amostras Coletadas Correntes")
-                        st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
-                else:
-                    st.markdown(f"""
-                        <div class="pasta-secao" style="border-left-color: #27ae60; background-color: #e8f8f5;">
-                            <h4 style="margin: 0; color: #1e8449;">🔓 Relatório de Fechamento Amostral Ativo (Código: {id_inv_sup_atual})</h4>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    
-                    if df_auditorias_atual.empty:
-                        st.info("Nenhuma amostragem registrada nesta pasta encerrada.")
-                    else:
-                        st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
-
-# --- ABA 4: ACURACIDADE ESTOQUE ---
+    # --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
