@@ -403,6 +403,7 @@ else:
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         
+        # --- BOTÃO DE ATUALIZAR REALTIME SEM DESLOGAR ---
         if st.button("🔄 Atualizar Dados", use_container_width=True):
             st.rerun()
             
@@ -1004,7 +1005,7 @@ else:
         df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
         df_sup_filtrados = df_inventarios_sup[
             (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
-            (df_sup_filtrados = df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
+            (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
         ]
         
         if not df_sup_filtrados.empty:
@@ -1141,7 +1142,7 @@ else:
 
     # --- ABA 6: BASE DE ESTOQUE ---
     with aba_base:
-        if st.session_state.base_sistema is not None:
+        if st.session_state.base_sistema is not None and col_cod != "":
             st.subheader("📄 Espelho Base de Saldo do Upload")
             
             if id_inventario_atual:
@@ -1201,6 +1202,7 @@ else:
         criticos_count, auditar_count, bom_count = 0, 0, 0
         
         for est in lista_estoques_fixa:
+            get_data_formatada = ""
             est_id = est["id"]
             est_desc = est["desc"]
             ultima_data_str = mapa_datas.get(est_id, None)
@@ -1209,13 +1211,13 @@ else:
                 try:
                     dt_contagem = datetime.datetime.strptime(ultima_data_str, "%Y-%m-%d %H:%M:%S")
                     dias_passados = (hoje_dt - dt_contagem).days
-                    data_formatada = dt_contagem.strftime("%d/%m/%Y %H:%M")
+                    get_data_formatada = dt_contagem.strftime("%d/%m/%Y %H:%M")
                 except:
                     dias_passados = 999
-                    data_formatada = "Sem histórico"
+                    get_data_formatada = "Sem histórico"
             else:
                 dias_passados = 999
-                data_formatada = "Nunca Contado"
+                get_data_formatada = "Nunca Contado"
                 
             if dias_passados <= 7:
                 status_final = "🟢 Bom"
@@ -1230,7 +1232,7 @@ else:
             linhas_desempenho.append({
                 "Id. Estoque": est_id,
                 "Descrição do Estoque Físico": est_desc,
-                "Última Contagem Realizada": data_formatada,
+                "Última Contagem Realizada": get_data_formatada,
                 "Dias sem Contar": dias_passados if dias_passados != 999 else "—",
                 "Status de Criticidade": status_final
             })
