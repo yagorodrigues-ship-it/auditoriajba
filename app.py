@@ -450,20 +450,39 @@ else:
                     conn.commit()
                     st.rerun()
 
-        # TRAVA 100% CONCLUÍDO
-        if inventario_selected_obj is not None and inventario_selected_obj['status'] == "Aberto":
+        # --- AJUSTE DO FECHAMENTO DA 2a CONTAGEM PELO ALMOXARIFE ---
+        if inventario_selected_obj is not None and inventario_selected_obj['status'] in ["Aberto", "2a Contagem"]:
+            id_pasta_limpo = id_inventario_atual.replace('#', '')
+            pode_fechar = False
             itens_esquecidos_lista = []
-            if st.session_state.base_sistema is not None:
-                df_c_verif = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
-                lista_contados_set = set(df_c_verif['cod_produto'].astype(str).str.upper().str.strip().tolist())
-                
-                for idx, r_base in st.session_state.base_sistema.iterrows():
-                    cod_b = str(r_base[col_cod]).upper().strip()
-                    if cod_b not in lista_contados_set:
-                        itens_esquecidos_lista.append(cod_b)
 
-            if len(itens_esquecidos_lista) == 0:
-                if st.button("🔒 Fechar Inventário (100% Concluído)", use_container_width=True):
+            if st.session_state.base_sistema is not None:
+                if inventario_selected_obj['status'] == "Aberto":
+                    # Validação tradicional para 1ª contagem (todas as linhas)
+                    df_c_verif = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ?", conn, params=(id_pasta_limpo,))
+                    lista_contados_set = set(df_c_verif['cod_produto'].astype(str).str.upper().str.strip().tolist())
+                    for idx, r_base in st.session_state.base_sistema.iterrows():
+                        cod_b = str(r_base[col_cod]).upper().strip()
+                        if cod_b not in lista_contados_set:
+                            itens_esquecidos_lista.append(cod_b)
+                    if len(itens_esquecidos_lista) == 0:
+                        pode_fechar = True
+                else:
+                    # Lógica para fechar a 2ª Contagem: Confere se os itens que estavam em aberto/divergentes já foram recontados
+                    df_recontados = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND fase_contagem = '2a Contagem' AND qtd_contada > 0", conn, params=(id_pasta_limpo,))
+                    set_recontados = set(df_recontados['cod_produto'].astype(str).str.upper().str.strip().tolist())
+                    
+                    df_alvos_divergentes = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND fase_contagem = '2a Contagem'", conn, params=(id_pasta_limpo,))
+                    set_alvos = set(df_alvos_divergentes['cod_produto'].astype(str).str.upper().str.strip().tolist())
+                    
+                    itens_faltantes_recontar = set_alvos - set_recontados
+                    if len(itens_faltantes_recontar) == 0:
+                        pode_fechar = True
+                    else:
+                        itens_esquecidos_lista = list(itens_faltantes_recontar)
+
+            if pode_fechar:
+                if st.button("🔒 Fechar Inventário e Finalizar", use_container_width=True):
                     cursor = conn.cursor()
                     cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (id_inventario_atual,))
                     conn.commit()
@@ -528,113 +547,120 @@ else:
             if codigo_input:
                 busca_limpa = str(codigo_input).upper().strip()
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
+                id_pasta_limpo = id_inventario_atual.replace("#", "")
                 
-                # Filtra todos os itens condizentes com o código mapeado da planilha de saldo
-                itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
+                # --- TRAVA AMOSTRAGEM: SE FOR 2A CONTAGEM, SÓ DEIXA BIPAR SE ESTIVER NA LISTA DE ERROS ---
+                item_autorizado = True
+                if inventario_selected_obj['status'] == "2a Contagem":
+                    df_permitidos = pd.read_sql_query("SELECT id FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND fase_contagem = '2a Contagem'", conn, params=(id_pasta_limpo, codigo_rastreio))
+                    if df_permitidos.empty:
+                        item_autorizado = False
                 
-                if not itens_filtrados.empty:
-                    # LOCALIZAÇÃO FLEXÍVEL DA COLUNA DE LOTE
-                    col_lote_real = None
-                    for c in st.session_state.base_sistema.columns:
-                        if str(c).strip().upper() == "LOTE":
-                            col_lote_real = c
-                            break
-                    
-                    lotes_disponiveis = []
-                    if col_lote_real:
-                        lotes_disponiveis = itens_filtrados[col_lote_real].dropna().astype(str).str.strip().unique().tolist()
-                        lotes_disponiveis = [l for l in lotes_disponiveis if l != "" and l.lower() != "nan"]
-
-                    # LOCALIZAÇÃO FLEXÍVEL DA COLUNA DE ATIVO
-                    col_ativo_real = None
-                    for c in st.session_state.base_sistema.columns:
-                        if str(c).strip().upper() in ["ATIVO", "Nº ATIVO", "NUMERO ATIVO", "COD ATIVO"]:
-                            col_ativo_real = c
-                            break
-
-                    # Escolha do Lote caso existam múltiplos lotes
-                    lote_selecionado = ""
-                    if lotes_disponiveis:
-                        st.warning("⚠️ Múltiplos lotes identificados para este item! Escolha o lote correto abaixo.")
-                        lote_selecionado = st.selectbox("👇 SELECIONE O LOTE PARA CONTAGEM:", lotes_disponiveis, key="lote_selector_bip")
-                        linhas_filtradas_por_lote = itens_filtrados[itens_filtrados[col_lote_real].astype(str).str.strip() == lote_selecionado]
-                    else:
-                        linhas_filtradas_por_lote = itens_filtrados
-
-                    # Extração de múltiplos ativos da seleção de lote atual
-                    ativos_disponiveis = []
-                    if col_ativo_real:
-                        ativos_disponiveis = linhas_filtradas_por_lote[col_ativo_real].dropna().astype(str).str.strip().unique().tolist()
-                        ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
-
-                    # Escolha do Ativo caso múltiplos existam dentro deste lote
-                    ativo_selecionado = ""
-                    if len(ativos_disponiveis) > 1:
-                        st.info("🔢 Múltiplos números de ativos identificados para este lote. Selecione o correspondente:")
-                        ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM:", ativos_disponiveis, key="ativo_selector_bip")
-                        item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote[col_ativo_real].astype(str).str.strip() == ativo_selecionado].iloc[0]
-                    else:
-                        item_especifico = linhas_filtradas_por_lote.iloc[0]
-                        ativo_selecionado = ativos_disponiveis[0] if len(ativos_disponiveis) == 1 else ""
-
-                    unid_val = item_especifico[col_unidade] if col_unidade in st.session_state.base_sistema.columns else "UN"
-                    desc_val = item_especifico[col_desc]
-                    local_val = item_especifico[col_local] if col_local in st.session_state.base_sistema.columns else "Não Informado"
-                    id_estoque_val = str(item_especifico[col_id_estoque]).strip() if col_id_estoque in st.session_state.base_sistema.columns else ""
-                    
-                    try:
-                        qtd_sis = int(pd.to_numeric(item_especifico[col_qtd], errors='coerce'))
-                        if pd.isna(qtd_sis): qtd_sis = 0
-                    except: qtd_sis = 0
-                    
-                    b1, b2, b3, b4 = st.columns(4)
-                    b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
-                    b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
-                    b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
-                    b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">LOTE EM CONTAGEM</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
-                    
-                    st.markdown(f"**Descrição do Material:** {desc_val}")
-                    st.info(f"📋 **Lote Selecionado:** {lote_selecionado if lote_selecionado else 'Não se aplica'} | **Ativo Selecionado:** {ativo_selecionado if ativo_selecionado else 'Padrão / Manual'}")
-                    
-                    with st.form("confirmar_form", clear_on_submit=True):
-                        qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
-                        
-                        if len(ativos_disponiveis) > 1:
-                            ativo_final_input = ativo_selecionado
-                        else:
-                            ativo_final_input = st.text_input("🔢 Número do Ativo (Opcional)", value=ativo_selecionado)
-                            
-                        observacao = st.text_input("📝 Observação (opcional)")
-                        
-                        if st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True):
-                            ativo_l = str(ativo_final_input).strip().upper()
-                            if qtd_fisica <= 0:
-                                st.error("❌ Erro: Informe uma quantidade maior que 0!")
-                            else:
-                                agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                dif_c = qtd_fisica - qtd_sis
-                                cursor = conn.cursor()
-                                
-                                cursor.execute("SELECT fase_contagem FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", (id_inventario_atual.replace("#","") if id_inventario_atual else "", codigo_rastreio, lote_selecionado))
-                                row_fase = cursor.fetchone()
-                                fase_atual_registro = "1a Contagem"
-                                
-                                if inventario_selected_obj['status'] == "2a Contagem":
-                                    fase_atual_registro = "2a Contagem"
-                                    
-                                if row_fase and row_fase[0] == "2a Contagem":
-                                    cursor.execute("DELETE FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", (id_inventario_atual.replace("#","") if id_inventario_atual else "", codigo_rastreio, lote_selecionado))
-
-                                cursor.execute("""
-                                    INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote, fase_contagem)
-                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (id_inventario_atual.replace("#","") if id_inventario_atual else "", id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado, fase_atual_registro))
-                                conn.commit()
-                                st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso para o Lote {lote_selecionado if lote_selecionado else 'Padrão'} ({fase_atual_registro})!"
-                                st.session_state.contador_reset += 1
-                                st.rerun()
+                if not item_autorizado:
+                    st.error("🚫 Bloqueado: Este material está CORRETO no sistema e não foi liberado pelo supervisor para a 2ª Contagem.")
                 else:
-                    st.error("❌ Código não localizado.")
+                    # Filtra todos os itens condizentes com o código mapeado da planilha de saldo
+                    itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
+                    
+                    if not itens_filtrados.empty:
+                        # LOCALIZAÇÃO FLEXÍVEL DA COLUNA DE LOTE
+                        col_lote_real = None
+                        for c in st.session_state.base_sistema.columns:
+                            if str(c).strip().upper() == "LOTE":
+                                col_lote_real = c
+                                break
+                        
+                        lotes_disponiveis = []
+                        if col_lote_real:
+                            lotes_disponiveis = itens_filtrados[col_lote_real].dropna().astype(str).str.strip().unique().tolist()
+                            lotes_disponiveis = [l for l in lotes_disponiveis if l != "" and l.lower() != "nan"]
+
+                        # LOCALIZAÇÃO FLEXÍVEL DA COLUNA DE ATIVO
+                        col_ativo_real = None
+                        for c in st.session_state.base_sistema.columns:
+                            if str(c).strip().upper() in ["ATIVO", "Nº ATIVO", "NUMERO ATIVO", "COD ATIVO"]:
+                                col_ativo_real = c
+                                break
+
+                        # Escolha do Lote caso existam múltiplos lotes
+                        lote_selecionado = ""
+                        if lotes_disponiveis:
+                            st.warning("⚠️ Múltiplos lotes identificados para este item! Escolha o lote correto abaixo.")
+                            lote_selecionado = st.selectbox("👇 SELECIONE O LOTE PARA CONTAGEM:", lotes_disponiveis, key="lote_selector_bip")
+                            linhas_filtradas_por_lote = itens_filtrados[itens_filtrados[col_lote_real].astype(str).str.strip() == lote_selecionado]
+                        else:
+                            linhas_filtradas_por_lote = itens_filtrados
+
+                        # Extração de múltiplos ativos da seleção de lote atual
+                        ativos_disponiveis = []
+                        if col_ativo_real:
+                            ativos_disponiveis = linhas_filtradas_por_lote[col_ativo_real].dropna().astype(str).str.strip().unique().tolist()
+                            ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
+
+                        # Escolha do Ativo caso múltiplos existam dentro deste lote
+                        ativo_selecionado = ""
+                        if len(ativos_disponiveis) > 1:
+                            st.info("🔢 Múltiplos números de ativos identificados para este lote. Selecione o correspondente:")
+                            ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM:", ativos_disponiveis, key="ativo_selector_bip")
+                            item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote[col_ativo_real].astype(str).str.strip() == ativo_selecionado].iloc[0]
+                        else:
+                            item_especifico = linhas_filtradas_por_lote.iloc[0]
+                            ativo_selecionado = ativos_disponiveis[0] if len(ativos_disponiveis) == 1 else ""
+
+                        unid_val = item_especifico[col_unidade] if col_unidade in st.session_state.base_sistema.columns else "UN"
+                        desc_val = item_especifico[col_desc]
+                        local_val = item_especifico[col_local] if col_local in st.session_state.base_sistema.columns else "Não Informado"
+                        id_estoque_val = str(item_especifico[col_id_estoque]).strip() if col_id_estoque in st.session_state.base_sistema.columns else ""
+                        
+                        try:
+                            qtd_sis = int(pd.to_numeric(item_especifico[col_qtd], errors='coerce'))
+                            if pd.isna(qtd_sis): qtd_sis = 0
+                        except: qtd_sis = 0
+                        
+                        b1, b2, b3, b4 = st.columns(4)
+                        b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
+                        b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
+                        b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
+                        b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">LOTE EM CONTAGEM</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
+                        
+                        st.markdown(f"**Descrição do Material:** {desc_val}")
+                        st.info(f"📋 **Lote Selecionado:** {lote_selecionado if lote_selecionado else 'Não se aplica'} | **Ativo Selecionado:** {ativo_selecionado if ativo_selecionado else 'Padrão / Manual'}")
+                        
+                        with st.form("confirmar_form", clear_on_submit=True):
+                            qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
+                            
+                            if len(ativos_disponiveis) > 1:
+                                ativo_final_input = ativo_selecionado
+                            else:
+                                ativo_final_input = st.text_input("🔢 Número do Ativo (Opcional)", value=ativo_selecionado)
+                                
+                            observacao = st.text_input("📝 Observação (opcional)")
+                            
+                            if st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True):
+                                ativo_l = str(ativo_final_input).strip().upper()
+                                if qtd_fisica <= 0:
+                                    st.error("❌ Erro: Informe uma quantidade maior que 0!")
+                                else:
+                                    agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                    dif_c = qtd_fisica - qtd_sis
+                                    cursor = conn.cursor()
+                                    
+                                    fase_atual_registro = "1a Contagem"
+                                    if inventario_selected_obj['status'] == "2a Contagem":
+                                        fase_atual_registro = "2a Contagem"
+                                        # Remove a linha antiga de rascunho da 2a contagem que o supervisor abriu, gravando o valor digitado pelo almoxarife
+                                        cursor.execute("DELETE FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ? AND fase_contagem = '2a Contagem'", (id_pasta_limpo, codigo_rastreio, lote_selecionado))
+
+                                    cursor.execute("""
+                                        INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote, fase_contagem)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                    """, (id_pasta_limpo, id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado, fase_atual_registro))
+                                    conn.commit()
+                                    st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso para o Lote {lote_selecionado if lote_selecionado else 'Padrão'} ({fase_atual_registro})!"
+                                    st.session_state.contador_reset += 1
+                                    st.rerun()
+                    else:
+                        st.error("❌ Código não localizado.")
 
     # --- ABA 2: CONTAGEM ATUAL ---
     with aba_atual:
@@ -863,7 +889,7 @@ else:
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-# --- ABA 4: ACURACIDADE ESTOQUE ---
+    # --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -879,7 +905,6 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                # CORREÇÃO DO ERRO DA IMAGEM: group.columns foi alterado para grupo.columns
                 data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
