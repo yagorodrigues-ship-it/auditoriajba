@@ -595,7 +595,7 @@ else:
                         # Extração de múltiplos ativos da seleção de lote atual
                         ativos_disponiveis = []
                         if col_ativo_real:
-                            ativos_disponiveis = lines_with_lote = linhas_filtradas_por_lote[col_ativo_real].dropna().astype(str).str.strip().unique().tolist()
+                            ativos_disponiveis = linhas_filtradas_por_lote[col_ativo_real].dropna().astype(str).str.strip().unique().tolist()
                             ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
 
                         # Escolha do Ativo caso múltiplos existam dentro deste lote
@@ -879,7 +879,7 @@ else:
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-# --- ABA 4: ACURACIDADE ESTOQUE ---
+# --- ABA 4: ACURACIDADE ESTOQUE (COM O HISTÓRICO INTEGRADO) ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -935,7 +935,7 @@ else:
 
         st.markdown("---")
         
-        # --- TRANSFERIDO: HISTÓRICO DE PASTAS DO SUPERVISOR FIXADO EXCLUSIVAMENTE NA ABA 4 ACURACIDADE ---
+        # --- HISTÓRICO GERAL DO SUPERVISOR TRANSFERIDO PARA CÁ ---
         st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
         c_dt_sup1, c_dt_sup2 = st.columns(2)
         with c_dt_sup1:
@@ -946,7 +946,7 @@ else:
         df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
         df_sup_filtrados = df_inventarios_sup[
             (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
-            (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
+            (df_sup_filtrados = df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
         ]
         
         if not df_sup_filtrados.empty:
@@ -1081,7 +1081,7 @@ else:
 
     # --- ABA 6: BASE DE ESTOQUE ---
     with aba_base:
-        if st.session_state.base_sistema is not None:
+        if st.session_state.base_sistema is not None and col_cod != "":
             st.subheader("📄 Espelho Base de Saldo do Upload")
             
             if id_inventario_atual:
