@@ -403,7 +403,6 @@ else:
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         
-        # --- BOTÃO DE ATUALIZAR REALTIME SEM DESLOGAR ---
         if st.button("🔄 Atualizar Dados", use_container_width=True):
             st.rerun()
             
@@ -414,8 +413,6 @@ else:
             st.rerun()
             
         st.markdown("---")
-        
-        # --- MOVIMENTAÇÃO DE FORMULÁRIO DE NOVO INVENTÁRIO PARA O TOPO DA SIDEBAR (EVITA PERDA DE ESTADO) ---
         with st.expander("➕ Novo Inventário", expanded=df_inventarios.empty):
             with st.form("form_novo", clear_on_submit=True):
                 novo_nome = st.text_input("Nome do Inventário")
@@ -428,7 +425,7 @@ else:
                     novo_id = f"#{maior_id + 1}"
                     hoje = datetime.date.today().strftime("%Y-%m-%d")
                     cursor = conn.cursor()
-                    cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, today := hoje))
+                    cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, hoje))
                     conn.commit()
                     st.rerun()
 
@@ -443,12 +440,16 @@ else:
             id_inventario_atual = " – " in inventario_selected and inventario_selected.split(" – ")[0] or None
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # RECONSTRUÇÃO DA BASE DE SALDO PERSISTENTE VINCULADA AO BANCO DE DADOS E À PASTA ATUAL
+        # --- CORREÇÃO E MAPEAMENTO DA LEITURA PERSISTENTE AUTOMÁTICA NO BANCO ---
         if id_inventario_atual:
             id_pasta_limpo_base = id_inventario_atual.replace("#", "")
             df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
             if not df_base_persistida.empty:
-                st.session_state.base_sistema = df_base_persistida
+                # Renomeia as colunas para o DataFrame bater com o depara dinâmico esperado pelas abas
+                st.session_state.base_sistema = df_base_persistida.rename(columns={
+                    'desc_estoque_fisico': 'descestoquefisico',
+                    'id_estoque_fisico': 'idestoquefísico'
+                })
             else:
                 st.session_state.base_sistema = None
 
@@ -456,8 +457,8 @@ else:
         arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed", key="func_excel_loader")
         if arquivo_excel is not None and id_inventario_atual:
             df_upload_temp = pd.read_excel(arquivo_excel)
-            
             colunas_temp = list(df_upload_temp.columns)
+            
             def mapear_col(opcoes, default_idx):
                 for opcao in opcoes:
                     for col in colunas_temp:
@@ -489,6 +490,9 @@ else:
                 """, (id_pasta_limpo_base, str(r[c_cod_u]).strip(), str(r[c_desc_u]), str(r[c_local_u]), str(r[c_unid_u]), int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0), str(r[c_id_est_u]).strip(), lote_item_v))
             conn.commit()
             st.rerun()
+
+        # RE-MAPEAMENTO DOS RÓTULOS DAS COLUNAS PARA AS CAIXAS AZUIS OPERACIONAIS
+        col_cod, col_desc, col_local, col_unidade, col_qtd, col_id_estoque = "cod_produto", "desc_produto", "descestoquefisico", "unid_medida", "qtd_estoque", "idestoquefísico"
 
         # TRAVA DE FECHAMENTO ADAPTADA
         if inventario_selected_obj is not None and inventario_selected_obj['status'] in ["Aberto", "2a Contagem"]:
@@ -526,10 +530,10 @@ else:
                     conn.commit()
                     st.rerun()
             else:
-                st.error(f" Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
+                st.error(f"❌ Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
                 if eh_supervisor:
                     st.warning("👤 Yago Rodrigues detectado. Deseja forçar o encerramento?")
-                    if st.button(" Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
+                    if st.button("⚠️ Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
                         cursor = conn.cursor()
                         cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (id_inventario_atual,))
                         conn.commit()
@@ -595,7 +599,7 @@ else:
                         item_autorizado = False
                 
                 if not item_autorizado:
-                    st.error(" Bloqueado: Este material está CORRETO no sistema e não foi liberado pelo supervisor para a 2ª Contagem.")
+                    st.error("🚫 Bloqueado: Este material está CORRETO no sistema e não foi liberado pelo supervisor para a 2ª Contagem.")
                 else:
                     itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_rastreio]
                     
@@ -625,8 +629,8 @@ else:
 
                         unid_val = item_especifico['unid_medida']
                         desc_val = item_especifico['desc_produto']
-                        local_val = item_especifico['desc_estoque_fisico']
-                        id_estoque_val = str(item_especifico['id_estoque_fisico']).strip()
+                        local_val = item_especifico['descestoquefisico']
+                        id_estoque_val = str(item_especifico['idestoquefísico']).strip()
                         
                         try:
                             qtd_sys = int(item_especifico['qtd_estoque'])
@@ -1098,6 +1102,7 @@ else:
                                 st.write("**📋 Itens Efetivamente Contados:**")
                                 st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
                                 
+                            # LISTA DE ESQUECIDOS EXTRAÍDA DIRETAMENTE DO BANCO DE DADOS DA PASTA SELECIONADA
                             df_base_local_proc = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_inv_proc,))
                             if not df_base_local_proc.empty:
                                 set_contados_global = set(df_hist_inv['cod_produto'].astype(str).str.upper().str.strip().tolist())
