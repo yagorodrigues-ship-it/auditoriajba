@@ -414,9 +414,27 @@ else:
             st.rerun()
             
         st.markdown("---")
+        
+        # --- MOVIMENTAÇÃO DE FORMULÁRIO DE NOVO INVENTÁRIO PARA O TOPO DA SIDEBAR (EVITA PERDA DE ESTADO) ---
+        with st.expander("➕ Novo Inventário", expanded=df_inventarios.empty):
+            with st.form("form_novo", clear_on_submit=True):
+                novo_nome = st.text_input("Nome do Inventário")
+                if st.form_submit_button("Criar", type="primary") and novo_nome:
+                    if not df_inventarios.empty:
+                        df_limpo_calc = df_inventarios['id'].str.replace('#', '', regex=False).astype(int)
+                        maior_id = df_limpo_calc.max()
+                    else:
+                        maior_id = 38
+                    novo_id = f"#{maior_id + 1}"
+                    hoje = datetime.date.today().strftime("%Y-%m-%d")
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, today := hoje))
+                    conn.commit()
+                    st.rerun()
+
         st.write("📁 **Selecione o inventário**")
         if df_inventarios.empty:
-            st.info("Crie um inventário abaixo.")
+            st.info("Crie um inventário acima.")
             id_inventario_atual = None
             inventario_selected_obj = None
         else:
@@ -472,22 +490,6 @@ else:
             conn.commit()
             st.rerun()
 
-        with st.expander("➕ Novo Inventário", expanded=df_inventarios.empty):
-            with st.form("form_novo", clear_on_submit=True):
-                novo_nome = st.text_input("Nome do Inventário")
-                if st.form_submit_button("Criar", type="primary") and novo_nome:
-                    if not df_inventarios.empty:
-                        df_limpo_calc = df_inventarios['id'].str.replace('#', '', regex=False).astype(int)
-                        maior_id = df_limpo_calc.max()
-                    else:
-                        maior_id = 38
-                    novo_id = f"#{maior_id + 1}"
-                    hoje = datetime.date.today().strftime("%Y-%m-%d")
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, hoje))
-                    conn.commit()
-                    st.rerun()
-
         # TRAVA DE FECHAMENTO ADAPTADA
         if inventario_selected_obj is not None and inventario_selected_obj['status'] in ["Aberto", "2a Contagem"]:
             id_pasta_limpo = id_inventario_atual.replace('#', '')
@@ -524,10 +526,10 @@ else:
                     conn.commit()
                     st.rerun()
             else:
-                st.error(f"❌ Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
+                st.error(f" Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
                 if eh_supervisor:
                     st.warning("👤 Yago Rodrigues detectado. Deseja forçar o encerramento?")
-                    if st.button("⚠️ Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
+                    if st.button(" Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
                         cursor = conn.cursor()
                         cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (id_inventario_atual,))
                         conn.commit()
@@ -593,7 +595,7 @@ else:
                         item_autorizado = False
                 
                 if not item_autorizado:
-                    st.error("🚫 Bloqueado: Este material está CORRETO no sistema e não foi liberado pelo supervisor para a 2ª Contagem.")
+                    st.error(" Bloqueado: Este material está CORRETO no sistema e não foi liberado pelo supervisor para a 2ª Contagem.")
                 else:
                     itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_rastreio]
                     
@@ -1142,7 +1144,7 @@ else:
 
     # --- ABA 6: BASE DE ESTOQUE ---
     with aba_base:
-        if st.session_state.base_sistema is not None and col_cod != "":
+        if st.session_state.base_sistema is not None:
             st.subheader("📄 Espelho Base de Saldo do Upload")
             
             if id_inventario_atual:
