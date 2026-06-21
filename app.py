@@ -413,25 +413,9 @@ else:
             st.rerun()
             
         st.markdown("---")
-        with st.expander("➕ Novo Inventário", expanded=df_inventarios.empty):
-            with st.form("form_novo", clear_on_submit=True):
-                novo_nome = st.text_input("Nome do Inventário")
-                if st.form_submit_button("Criar", type="primary") and novo_nome:
-                    if not df_inventarios.empty:
-                        df_limpo_calc = df_inventarios['id'].str.replace('#', '', regex=False).astype(int)
-                        maior_id = df_limpo_calc.max()
-                    else:
-                        maior_id = 38
-                    novo_id = f"#{maior_id + 1}"
-                    hoje = datetime.date.today().strftime("%Y-%m-%d")
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, hoje))
-                    conn.commit()
-                    st.rerun()
-
         st.write("📁 **Selecione o inventário**")
         if df_inventarios.empty:
-            st.info("Crie um inventário acima.")
+            st.info("Crie um inventário abaixo.")
             id_inventario_atual = None
             inventario_selected_obj = None
         else:
@@ -440,16 +424,12 @@ else:
             id_inventario_atual = " – " in inventario_selected and inventario_selected.split(" – ")[0] or None
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # --- CORREÇÃO E MAPEAMENTO DA LEITURA PERSISTENTE AUTOMÁTICA NO BANCO ---
+        # RECONSTRUÇÃO DA BASE DE SALDO PERSISTENTE VINCULADA AO BANCO DE DADOS E À PASTA ATUAL
         if id_inventario_atual:
             id_pasta_limpo_base = id_inventario_atual.replace("#", "")
             df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
             if not df_base_persistida.empty:
-                # Renomeia as colunas para o DataFrame bater com o depara dinâmico esperado pelas abas
-                st.session_state.base_sistema = df_base_persistida.rename(columns={
-                    'desc_estoque_fisico': 'descestoquefisico',
-                    'id_estoque_fisico': 'idestoquefísico'
-                })
+                st.session_state.base_sistema = df_base_persistida
             else:
                 st.session_state.base_sistema = None
 
@@ -457,8 +437,8 @@ else:
         arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed", key="func_excel_loader")
         if arquivo_excel is not None and id_inventario_atual:
             df_upload_temp = pd.read_excel(arquivo_excel)
-            colunas_temp = list(df_upload_temp.columns)
             
+            colunas_temp = list(df_upload_temp.columns)
             def mapear_col(opcoes, default_idx):
                 for opcao in opcoes:
                     for col in colunas_temp:
@@ -491,8 +471,21 @@ else:
             conn.commit()
             st.rerun()
 
-        # RE-MAPEAMENTO DOS RÓTULOS DAS COLUNAS PARA AS CAIXAS AZUIS OPERACIONAIS
-        col_cod, col_desc, col_local, col_unidade, col_qtd, col_id_estoque = "cod_produto", "desc_produto", "descestoquefisico", "unid_medida", "qtd_estoque", "idestoquefísico"
+        with st.expander("➕ Novo Inventário", expanded=df_inventarios.empty):
+            with st.form("form_novo", clear_on_submit=True):
+                novo_nome = st.text_input("Nome do Inventário")
+                if st.form_submit_button("Criar", type="primary") and novo_nome:
+                    if not df_inventarios.empty:
+                        df_limpo_calc = df_inventarios['id'].str.replace('#', '', regex=False).astype(int)
+                        maior_id = df_limpo_calc.max()
+                    else:
+                        maior_id = 38
+                    novo_id = f"#{maior_id + 1}"
+                    hoje = datetime.date.today().strftime("%Y-%m-%d")
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, hoje))
+                    conn.commit()
+                    st.rerun()
 
         # TRAVA DE FECHAMENTO ADAPTADA
         if inventario_selected_obj is not None and inventario_selected_obj['status'] in ["Aberto", "2a Contagem"]:
@@ -530,10 +523,10 @@ else:
                     conn.commit()
                     st.rerun()
             else:
-                st.error(f"❌ Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
+                st.error(f" Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
                 if eh_supervisor:
                     st.warning("👤 Yago Rodrigues detectado. Deseja forçar o encerramento?")
-                    if st.button("⚠️ Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
+                    if st.button(" Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
                         cursor = conn.cursor()
                         cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (id_inventario_atual,))
                         conn.commit()
@@ -591,7 +584,7 @@ else:
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
                 id_pasta_limpo = id_inventario_atual.replace("#", "")
                 
-                # --- TRAVA AMOSTRAGEM: SE FOR 2A CONTAGEM, SÓ DEIXA BIPAR SE ESTIVER NA LISTA DE ERROS ---
+                # TRAVA AMOSTRAGEM AJUSTADA PARA USAR AS COLUNAS PERSISTIDAS NO BANCO
                 item_autorizado = True
                 if inventario_selected_obj['status'] == "2a Contagem":
                     df_permitidos = pd.read_sql_query("SELECT id FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND fase_contagem = '2a Contagem'", conn, params=(id_pasta_limpo, codigo_rastreio))
@@ -629,8 +622,8 @@ else:
 
                         unid_val = item_especifico['unid_medida']
                         desc_val = item_especifico['desc_produto']
-                        local_val = item_especifico['descestoquefisico']
-                        id_estoque_val = str(item_especifico['idestoquefísico']).strip()
+                        local_val = item_especifico['desc_estoque_fisico']
+                        id_estoque_val = str(item_especifico['id_estoque_fisico']).strip()
                         
                         try:
                             qtd_sys = int(item_especifico['qtd_estoque'])
@@ -1209,7 +1202,6 @@ else:
         criticos_count, auditar_count, bom_count = 0, 0, 0
         
         for est in lista_estoques_fixa:
-            get_data_formatada = ""
             est_id = est["id"]
             est_desc = est["desc"]
             ultima_data_str = mapa_datas.get(est_id, None)
@@ -1218,13 +1210,13 @@ else:
                 try:
                     dt_contagem = datetime.datetime.strptime(ultima_data_str, "%Y-%m-%d %H:%M:%S")
                     dias_passados = (hoje_dt - dt_contagem).days
-                    get_data_formatada = dt_contagem.strftime("%d/%m/%Y %H:%M")
+                    data_formatada = dt_contagem.strftime("%d/%m/%Y %H:%M")
                 except:
                     dias_passados = 999
-                    get_data_formatada = "Sem histórico"
+                    data_formatada = "Sem histórico"
             else:
                 dias_passados = 999
-                get_data_formatada = "Nunca Contado"
+                data_formatada = "Nunca Contado"
                 
             if dias_passados <= 7:
                 status_final = "🟢 Bom"
@@ -1239,7 +1231,7 @@ else:
             linhas_desempenho.append({
                 "Id. Estoque": est_id,
                 "Descrição do Estoque Físico": est_desc,
-                "Última Contagem Realizada": get_data_formatada,
+                "Última Contagem Realizada": data_formatada,
                 "Dias sem Contar": dias_passados if dias_passados != 999 else "—",
                 "Status de Criticidade": status_final
             })
