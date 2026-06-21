@@ -400,6 +400,11 @@ else:
     # SIDEBAR
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
+        
+        # --- BOTÃO DE ATUALIZAR REALTIME SEM DESLOGAR ---
+        if st.button("🔄 Atualizar Dados", use_container_width=True):
+            st.rerun()
+            
         if st.button("🚪 Sair da Conta", use_container_width=True):
             st.session_state.logged_in = False
             st.session_state.operador = ""
@@ -525,7 +530,7 @@ else:
                 itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
                 
                 if not itens_filtrados.empty:
-                    # LOCALIZAÇÃO FLEXÍVEL DA COLUNA DE LOTE (Ignora espaços invisíveis ou variação de letras)
+                    # LOCALIZAÇÃO FLEXÍVEL DA COLUNA DE LOTE
                     col_lote_real = None
                     for c in st.session_state.base_sistema.columns:
                         if str(c).strip().upper() == "LOTE":
@@ -544,7 +549,7 @@ else:
                             col_ativo_real = c
                             break
 
-                    # Primeiro Passo: Escolha do Lote caso existam múltiplos lotes
+                    # Escolha do Lote caso existam múltiplos lotes
                     lote_selecionado = ""
                     if lotes_disponiveis:
                         st.warning("⚠️ Múltiplos lotes identificados para este item! Escolha o lote correto abaixo.")
@@ -553,13 +558,13 @@ else:
                     else:
                         linhas_filtradas_por_lote = itens_filtrados
 
-                    # Segundo Passo: Extração de múltiplos ativos da seleção de lote atual
+                    # Extração de múltiplos ativos da seleção de lote atual
                     ativos_disponiveis = []
                     if col_ativo_real:
                         ativos_disponiveis = linhas_filtradas_por_lote[col_ativo_real].dropna().astype(str).str.strip().unique().tolist()
                         ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
 
-                    # Terceiro Passo: Escolha do Ativo caso múltiplos existam dentro deste lote
+                    # Escolha do Ativo caso múltiplos existam dentro deste lote
                     ativo_selecionado = ""
                     if len(ativos_disponiveis) > 1:
                         st.info("🔢 Múltiplos números de ativos identificados para este lote. Selecione o correspondente:")
@@ -591,7 +596,6 @@ else:
                     with st.form("confirmar_form", clear_on_submit=True):
                         qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
                         
-                        # Exibe campo de entrada textual somente se não foi selecionado em um menu dinâmico
                         if len(ativos_disponiveis) > 1:
                             ativo_final_input = ativo_selecionado
                         else:
@@ -696,7 +700,7 @@ else:
                                 df_limpo_sup_calc = df_inventarios_sup['id'].str.replace('SUP-#', '', regex=False).astype(int)
                                 maior_id_sup = df_limpo_sup_calc.max()
                             else:
-                                maior_id_sup = 0
+                                mayor_id_sup = 0
                             
                             novo_id_sup = f"SUP-#{maior_id_sup + 1}"
                             hoje_sup = datetime.date.today().strftime("%Y-%m-%d")
@@ -708,7 +712,7 @@ else:
             if inv_sup_selecionado_obj is not None and inv_sup_selecionado_obj['status'] == "Aberto":
                 if st.button("🔒 Fechar Inventário Supervisor", use_container_width=True, type="primary", key="btn_close_sup_interno"):
                     cursor = conn.cursor()
-                    cursor.execute("UPDATE inventarios_supervisor SET status = 'Fechado' WHERE id = ?", (id_inv_sup_atual,))
+                    cursor.execute("UPDATE inventarios_supervisor WHERE id = ?", (id_inv_sup_atual,))
                     conn.commit()
                     st.rerun()
 
