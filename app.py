@@ -654,7 +654,7 @@ else:
                                     cursor.execute("""
                                         INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote, fase_contagem)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (id_pasta_limpo, id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado, fase_atual_registro))
+                                """, (id_pasta_limpo, id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado, fase_atual_registro))
                                     conn.commit()
                                     st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso para o Lote {lote_selecionado if lote_selecionado else 'Padrão'} ({fase_atual_registro})!"
                                     st.session_state.contador_reset += 1
@@ -791,7 +791,8 @@ else:
             st.write("#### 📤 Anexar Estoque / Planilha de Amostragem do Supervisor")
             arquivo_supervisor = st.file_uploader("Suba a planilha Excel com as amostras mapeadas (.xlsx)", type=["xlsx"], key="sup_excel_loader_v4")
             
-            if arquivo_supervisor is not None and st.session_state.base_supervisor is None:
+            # --- ATUALIZAÇÃO DA LÓGICA DE DETECÇÃO DA PLANILHA PARA BIPAGEM IMEDIATA ---
+            if arquivo_supervisor is not None:
                 try:
                     df_temp_check = pd.read_excel(arquivo_supervisor)
                     colunas_norm = [str(c).strip().lower().replace("º", "").replace("ó", "o") for c in df_temp_check.columns]
@@ -802,7 +803,6 @@ else:
                     else:
                         st.session_state.base_supervisor = df_temp_check
                         st.session_state.nome_arquivo_supervisor = arquivo_supervisor.name
-                        st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao analisar o arquivo anexo: {e}")
 
@@ -813,6 +813,7 @@ else:
                     st.session_state.nome_arquivo_supervisor = ""
                     st.rerun()
 
+            # Exibe o campo de bipagem se a planilha estiver anexada (na session_state ou carregada na tela no momento)
             if id_inv_sup_atual and inv_sup_selecionado_obj['status'] == "Aberto" and st.session_state.base_supervisor is not None:
                 st.write("#### 💻 Bipar e Contar Item (Lançamento do Supervisor)")
                 
@@ -955,7 +956,7 @@ else:
             with c_dt_sup1:
                 dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
             with c_dt_sup2:
-                dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
+                dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_dt_fim")
                 
             df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
             df_sup_filtrados = df_inventarios_sup[
