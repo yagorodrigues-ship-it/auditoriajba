@@ -523,10 +523,10 @@ else:
                     conn.commit()
                     st.rerun()
             else:
-                st.error(f" Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
+                st.error(f"❌ Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
                 if eh_supervisor:
                     st.warning("👤 Yago Rodrigues detectado. Deseja forçar o encerramento?")
-                    if st.button(" Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
+                    if st.button("⚠️ Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
                         cursor = conn.cursor()
                         cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (id_inventario_atual,))
                         conn.commit()
@@ -584,7 +584,7 @@ else:
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
                 id_pasta_limpo = id_inventario_atual.replace("#", "")
                 
-                # TRAVA AMOSTRAGEM AJUSTADA PARA USAR AS COLUNAS PERSISTIDAS NO BANCO
+                # --- TRAVA AMOSTRAGEM: SE FOR 2A CONTAGEM, SÓ DEIXA BIPAR SE ESTIVER NA LISTA DE ERROS ---
                 item_autorizado = True
                 if inventario_selected_obj['status'] == "2a Contagem":
                     df_permitidos = pd.read_sql_query("SELECT id FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND fase_contagem = '2a Contagem'", conn, params=(id_pasta_limpo, codigo_rastreio))
@@ -1004,7 +1004,7 @@ else:
         df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
         df_sup_filtrados = df_inventarios_sup[
             (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
-            (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
+            (df_sup_filtrados = df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
         ]
         
         if not df_sup_filtrados.empty:
@@ -1095,7 +1095,6 @@ else:
                                 st.write("**📋 Itens Efetivamente Contados:**")
                                 st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
                                 
-                            # LISTA DE ESQUECIDOS EXTRAÍDA DIRETAMENTE DO BANCO DE DADOS DA PASTA SELECIONADA
                             df_base_local_proc = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_inv_proc,))
                             if not df_base_local_proc.empty:
                                 set_contados_global = set(df_hist_inv['cod_produto'].astype(str).str.upper().str.strip().tolist())
