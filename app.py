@@ -654,7 +654,7 @@ else:
                                     cursor.execute("""
                                         INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote, fase_contagem)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (id_pasta_limpo, id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado, fase_atual_registro))
+                                    """, (id_pasta_limpo, id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado, fase_atual_registro))
                                     conn.commit()
                                     st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso para o Lote {lote_selecionado if lote_selecionado else 'Padrão'} ({fase_atual_registro})!"
                                     st.session_state.contador_reset += 1
@@ -890,7 +890,42 @@ else:
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-    # --- ABA 4: ACURACIDADE ESTOQUE ---
+            st.markdown("---")
+            st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
+            c_dt_sup1, c_dt_sup2 = st.columns(2)
+            with c_dt_sup1:
+                dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
+            with c_dt_sup2:
+                # --- CORREÇÃO DA KEY DUPLICADA: Alterado para 'hist_sup_dt_fim' para sanar o erro da imagem ---
+                dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
+                
+            df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
+            df_sup_filtrados = df_inventarios_sup[
+                (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
+                (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
+            ]
+            
+            if not df_sup_filtrados.empty:
+                tam_pagina_sup = 15
+                total_itens_sup = len(df_sup_filtrados)
+                total_paginas_sup = (total_itens_sup - 1) // tam_pagina_sup + 1
+                
+                if st.session_state.pagina_historico_sup >= total_paginas_sup:
+                    st.session_state.pagina_historico_sup = 0
+                    
+                idx_ini_sup = st.session_state.pagina_historico_sup * tam_pagina_sup
+                idx_fim_sup = idx_ini_sup + tam_pagina_sup
+                df_pagina_sup_atual = df_sup_filtrados.iloc[idx_ini_sup:idx_fim_sup]
+                
+                for idx, inv_s in df_pagina_sup_atual.iterrows():
+                    df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
+                    with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
+                        if not df_hist_sup.empty:
+                            excel_sup_hist = converter_para_excel(df_hist_sup)
+                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
+                            st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
+
+# --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -943,76 +978,6 @@ else:
             st.write("")
             excel_acuracidade = converter_para_excel(df_planilha_final)
             st.download_button(label="📥 Exportar Planilha de Acuracidade para Excel", data=excel_acuracidade, file_name="acuracidade_depositos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-
-        st.markdown("---")
-        
-        st.write("### 🔬 Histórico de Auditorias Exclusivas do Supervisor")
-        
-        if df_inventarios_sup.empty:
-            st.info("Nenhum histórico amostral arquivado.")
-        else:
-            st.write("#### 📅 Filtrar Pastas do Supervisor por Período de Abertura")
-            c_dt_sup1, c_dt_sup2 = st.columns(2)
-            with c_dt_sup1:
-                dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
-            with c_dt_sup2:
-                dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_dt_fim")
-                
-            df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
-            df_sup_filtrados = df_inventarios_sup[
-                (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
-                (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
-            ]
-            
-            if df_sup_filtrados.empty:
-                st.warning("⚠️ Nenhum histórico do supervisor foi localizado neste intervalo de datas.")
-            else:
-                tam_pagina_sup = 15
-                total_itens_sup = len(df_sup_filtrados)
-                total_paginas_sup = (total_itens_sup - 1) // tam_pagina_sup + 1
-                
-                if st.session_state.pagina_historico_sup >= total_paginas_sup:
-                    st.session_state.pagina_historico_sup = 0
-                    
-                idx_ini_sup = st.session_state.pagina_historico_sup * tam_pagina_sup
-                idx_fim_sup = idx_ini_sup + tam_pagina_sup
-                
-                df_pagina_sup_atual = df_sup_filtrados.iloc[idx_ini_sup:idx_fim_sup]
-                
-                st.write(f"Exibindo do **{idx_ini_sup + 1}º** ao **{min(idx_fim_sup, total_itens_sup)}º** inventário amostral (Total de {total_itens_sup} pastas do supervisor).")
-                
-                for idx, inv_s in df_pagina_sup_atual.iterrows():
-                    df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
-                    
-                    c_exp, c_del = st.columns([8, 2])
-                    with c_exp:
-                        with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
-                            if not df_hist_sup.empty:
-                                excel_sup_hist = converter_para_excel(df_hist_sup)
-                                st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
-                                st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
-                    with c_del:
-                        if eh_supervisor:
-                            if st.button("🗑️ Deletar Pasta", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
-                                cursor = conn.cursor()
-                                cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
-                                cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
-                                conn.commit()
-                                st.success("Pasta deletada!")
-                                st.rerun()
-                                
-                st.markdown("---")
-                col_p_sup1, col_p_sup_txt, col_p_sup2 = st.columns([2, 6, 2])
-                with col_p_sup1:
-                    if st.button("◀ Anterior (Supervisor)", use_container_width=True, disabled=(st.session_state.pagina_historico_sup == 0)):
-                        st.session_state.pagina_historico_sup -= 1
-                        st.rerun()
-                with col_p_sup_txt:
-                    st.markdown(f"<p style='text-align: center; margin-top: 7px;'>Página <strong>{st.session_state.pagina_historico_sup + 1}</strong> de <strong>{total_paginas_sup}</strong></p>", unsafe_allow_html=True)
-                with col_p_sup2:
-                    if st.button("Próximo (Supervisor) ▶", use_container_width=True, disabled=(st.session_state.pagina_historico_sup >= total_paginas_sup - 1)):
-                        st.session_state.pagina_historico_sup += 1
-                        st.rerun()
 
     # --- ABA 5: HISTÓRICO GERAL ---
     with aba_historico_geral:
