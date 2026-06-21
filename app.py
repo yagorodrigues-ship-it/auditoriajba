@@ -423,7 +423,7 @@ else:
         else:
             lista_inv = [f"{row['id']} – {row['nome']} ({row['status']})" for idx, row in df_inventarios.iterrows()]
             inventario_selected = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
-            id_inventario_atual = inventario_selected.split(" – ")[0]
+            id_inventario_atual = presidential_id = " – " in inventario_selected and inventario_selected.split(" – ")[0] or None
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
         with st.expander("➕ Novo Inventário", expanded=df_inventarios.empty):
@@ -503,7 +503,7 @@ else:
     with aba_contar:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
-        elif inventario_selected_obj['status'] == "Fechado":
+        elif presidential_id and inventario_selected_obj['status'] == "Fechado":
             st.error("🔒 Inventário selecionado está Fechado.")
         else:
             c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
@@ -525,26 +525,28 @@ else:
                 itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
                 
                 if not itens_filtrados.empty:
-                    # Verifica se existe coluna de lote na base e extrai os lotes únicos deste produto
-                    tem_coluna_lote = 'lote' in st.session_state.base_sistema.columns or 'LOTE' in st.session_state.base_sistema.columns
-                    col_lote_real = 'lote' if 'lote' in st.session_state.base_sistema.columns else 'LOTE'
+                    # Mapeamento dinâmico das variações da coluna lote/LOTE
+                    col_lote_real = None
+                    for c in itens_filtrados.columns:
+                        if str(c).upper().strip() == "LOTE":
+                            col_lote_real = c
+                            break
                     
                     lotes_disponiveis = []
-                    if tem_coluna_lote:
+                    if col_lote_real:
                         lotes_disponiveis = itens_filtrados[col_lote_real].dropna().astype(str).str.strip().unique().tolist()
                         lotes_disponiveis = [l for l in lotes_disponiveis if l != "" and l.lower() != "nan"]
 
-                    # Interface para escolha dinâmica do lote caso múltiplos existam
+                    # Interface para escolha de Lote reposicionada abaixo da descrição do produto
+                    lote_selecionado = ""
                     if lotes_disponiveis:
-                        st.markdown("### 📦 Lotes Encontrados para este Código:")
-                        lote_selecionado = st.selectbox("Selecione o LOTE que deseja contar fisicamente:", lotes_disponiveis, key="lote_selector_bip")
+                        st.warning("⚠️ Múltiplos lotes identificados para este item! Escolha o lote correto abaixo.")
+                        lote_selecionado = st.selectbox("👇 SELECIONE O LOTE PARA CONTAGEM:", lotes_disponiveis, key="lote_selector_bip")
                         # Filtra a linha correspondente ao lote selecionado
                         item_especifico = itens_filtrados[itens_filtrados[col_lote_real].astype(str).str.strip() == lote_selecionado].iloc[0]
                     else:
-                        lote_selecionado = ""
                         item_especifico = itens_filtrados.iloc[0]
 
-                    # CORREÇÃO DO ERRO: Validação feita diretamente nas colunas do DataFrame (itens_filtrados)
                     unid_val = item_especifico[col_unidade] if col_unidade in itens_filtrados.columns else "UN"
                     desc_val = item_especifico[col_desc]
                     local_val = item_especifico[col_local] if col_local in itens_filtrados.columns else "Não Informado"
@@ -561,7 +563,8 @@ else:
                     b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
                     b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">LOTE EM CONTAGEM</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
                     
-                    st.markdown(f"**Descrição:** {desc_val}")
+                    st.markdown(f"**Descrição do Material:** {desc_val}")
+                    st.info(f"📋 **Lote Vinculado à Contagem Corrente:** {lote_selecionado if lote_selecionado else 'Não se aplica / Lote Único'}")
                     
                     with st.form("confirmar_form", clear_on_submit=True):
                         qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
@@ -579,7 +582,7 @@ else:
                                 cursor.execute("""
                                     INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (id_inventario_atual.replace("#",""), id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado))
+                                """, (id_inventario_atual.replace("#","") if id_inventario_atual else "", id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado))
                                 conn.commit()
                                 st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso para o Lote {lote_selecionado if lote_selecionado else 'Padrão'}!"
                                 st.session_state.contador_reset += 1
@@ -677,7 +680,7 @@ else:
             if inv_sup_selecionado_obj is not None and inv_sup_selecionado_obj['status'] == "Aberto":
                 if st.button("🔒 Fechar Inventário Supervisor", use_container_width=True, type="primary", key="btn_close_sup_interno"):
                     cursor = conn.cursor()
-                    cursor.execute("UPDATE inventarios_supervisor SET status = 'Fechado' WHERE id = ?", (id_inv_sup_atual,))
+                    cursor.execute("UPDATE inventarios_supervisor WHERE id = ?", (id_inv_sup_atual,))
                     conn.commit()
                     st.rerun()
 
