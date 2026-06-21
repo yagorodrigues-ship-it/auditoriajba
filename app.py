@@ -11,7 +11,6 @@ st.set_page_config(page_title="Contagem de Estoque Físico - JBA", layout="wide"
 
 # --- BANCO DE DADOS PERMANENTE E FIXO (SQLITE) ---
 def conectar_banco():
-    # Define um caminho absoluto fixo na pasta atual para evitar duplicação de bancos
     caminho_banco = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'banco_inventario.db') if '__file__' in locals() else 'banco_inventario.db'
     conn = sqlite3.connect(caminho_banco, check_same_thread=False)
     return conn
@@ -596,7 +595,7 @@ else:
                         # Extração de múltiplos ativos da seleção de lote atual
                         ativos_disponiveis = []
                         if col_ativo_real:
-                            ativos_disponiveis = linhas_filtradas_por_lote[col_ativo_real].dropna().astype(str).str.strip().unique().tolist()
+                            ativos_disponiveis = lines_with_lote = linhas_filtradas_por_lote[col_ativo_real].dropna().astype(str).str.strip().unique().tolist()
                             ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
 
                         # Escolha do Ativo caso múltiplos existam dentro deste lote
@@ -650,7 +649,6 @@ else:
                                     fase_atual_registro = "1a Contagem"
                                     if inventario_selected_obj['status'] == "2a Contagem":
                                         fase_atual_registro = "2a Contagem"
-                                        # Remove a linha antiga de rascunho da 2a contagem que o supervisor abriu, gravando o valor digitado pelo almoxarife
                                         cursor.execute("DELETE FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ? AND fase_contagem = '2a Contagem'", (id_pasta_limpo, codigo_rastreio, lote_selecionado))
 
                                     cursor.execute("""
@@ -881,54 +879,7 @@ else:
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-            st.markdown("---")
-            st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
-            c_dt_sup1, c_dt_sup2 = st.columns(2)
-            with c_dt_sup1:
-                dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
-            with c_dt_sup2:
-                dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
-                
-            df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
-            df_sup_filtrados = df_inventarios_sup[
-                (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
-                (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
-            ]
-            
-            if not df_sup_filtrados.empty:
-                tam_pagina_sup = 15
-                total_itens_sup = len(df_sup_filtrados)
-                total_paginas_sup = (total_itens_sup - 1) // tam_pagina_sup + 1
-                
-                if st.session_state.pagina_historico_sup >= total_paginas_sup:
-                    st.session_state.pagina_historico_sup = 0
-                    
-                idx_ini_sup = st.session_state.pagina_historico_sup * tam_pagina_sup
-                idx_fim_sup = idx_ini_sup + tam_pagina_sup
-                df_pagina_sup_atual = df_sup_filtrados.iloc[idx_ini_sup:idx_fim_sup]
-                
-                for idx, inv_s in df_pagina_sup_atual.iterrows():
-                    df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
-                    with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
-                        c_dl, c_del = st.columns([2, 2])
-                        with c_dl:
-                            if not df_hist_sup.empty:
-                                excel_sup_hist = converter_para_excel(df_hist_sup)
-                                st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
-                        with c_del:
-                            if eh_supervisor:
-                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
-                                    cursor = conn.cursor()
-                                    cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
-                                    cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
-                                    conn.commit()
-                                    st.success(f"✅ Pasta {inv_s['id']} excluída com sucesso!")
-                                    st.rerun()
-                                    
-                        if not df_hist_sup.empty:
-                            st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
-
-    # --- ABA 4: ACURACIDADE ESTOQUE ---
+# --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -981,6 +932,55 @@ else:
             st.write("")
             excel_acuracidade = converter_para_excel(df_planilha_final)
             st.download_button(label="📥 Exportar Planilha de Acuracidade para Excel", data=excel_acuracidade, file_name="acuracidade_depositos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+        st.markdown("---")
+        
+        # --- TRANSFERIDO: HISTÓRICO DE PASTAS DO SUPERVISOR FIXADO EXCLUSIVAMENTE NA ABA 4 ACURACIDADE ---
+        st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
+        c_dt_sup1, c_dt_sup2 = st.columns(2)
+        with c_dt_sup1:
+            dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
+        with c_dt_sup2:
+            dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
+            
+        df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
+        df_sup_filtrados = df_inventarios_sup[
+            (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
+            (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
+        ]
+        
+        if not df_sup_filtrados.empty:
+            tam_pagina_sup = 15
+            total_itens_sup = len(df_sup_filtrados)
+            total_paginas_sup = (total_itens_sup - 1) // tam_pagina_sup + 1
+            
+            if st.session_state.pagina_historico_sup >= total_paginas_sup:
+                st.session_state.pagina_historico_sup = 0
+                
+            idx_ini_sup = st.session_state.pagina_historico_sup * tam_pagina_sup
+            idx_fim_sup = idx_ini_sup + tam_pagina_sup
+            df_pagina_sup_atual = df_sup_filtrados.iloc[idx_ini_sup:idx_fim_sup]
+            
+            for idx, inv_s in df_pagina_sup_atual.iterrows():
+                df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
+                with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
+                    c_dl, c_del = st.columns([2, 2])
+                    with c_dl:
+                        if not df_hist_sup.empty:
+                            excel_sup_hist = converter_para_excel(df_hist_sup)
+                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
+                    with c_del:
+                        if eh_supervisor:
+                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
+                                cursor = conn.cursor()
+                                cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
+                                cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
+                                conn.commit()
+                                st.success(f"✅ Pasta {inv_s['id']} excluída com sucesso!")
+                                st.rerun()
+                                    
+                    if not df_hist_sup.empty:
+                        st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
 
     # --- ABA 5: HISTÓRICO GERAL ---
     with aba_historico_geral:
@@ -1116,7 +1116,7 @@ else:
             {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
             {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
             {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
-            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
+            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRAND OBRAS IMPLANTACAO"},
             {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
             {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
             {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
