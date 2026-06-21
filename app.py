@@ -525,7 +525,7 @@ else:
                 itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema[col_cod].astype(str).str.upper().str.strip() == codigo_rastreio]
                 
                 if not itens_filtrados.empty:
-                    # LOCALIZAÇÃO FLEXÍVEL DA COLUNA DE LOTE (Ignora espaços invisíveis ou maiúsculas/minúsculas)
+                    # LOCALIZAÇÃO FLEXÍVEL DA COLUNA DE LOTE (Ignora espaços invisíveis ou variação de letras)
                     col_lote_real = None
                     for c in st.session_state.base_sistema.columns:
                         if str(c).strip().upper() == "LOTE":
@@ -537,29 +537,37 @@ else:
                         lotes_disponiveis = itens_filtrados[col_lote_real].dropna().astype(str).str.strip().unique().tolist()
                         lotes_disponiveis = [l for l in lotes_disponiveis if l != "" and l.lower() != "nan"]
 
-                    # Interface para escolha de Lote reposicionada abaixo da descrição do produto
-                    lote_selecionado = ""
-                    if lotes_disponiveis:
-                        st.warning("⚠️ Múltiplos lotes identificados para este item! Escolha o lote correto abaixo.")
-                        lote_selecionado = st.selectbox("👇 SELECIONE O LOTE PARA CONTAGEM:", lotes_disponiveis, key="lote_selector_bip")
-                        # Filtra todas as correspondências daquele lote específico
-                        linhas_com_lote = itens_filtrados[itens_filtrados[col_lote_real].astype(str).str.strip() == lote_selecionado]
-                        item_especifico = linhas_com_lote.iloc[0]
-                    else:
-                        item_especifico = itens_filtrados.iloc[0]
-                        linhas_com_lote = itens_filtrados
-
                     # LOCALIZAÇÃO FLEXÍVEL DA COLUNA DE ATIVO
                     col_ativo_real = None
                     for c in st.session_state.base_sistema.columns:
                         if str(c).strip().upper() in ["ATIVO", "Nº ATIVO", "NUMERO ATIVO", "COD ATIVO"]:
                             col_ativo_real = c
                             break
-                    
+
+                    # Primeiro Passo: Escolha do Lote caso existam múltiplos lotes
+                    lote_selecionado = ""
+                    if lotes_disponiveis:
+                        st.warning("⚠️ Múltiplos lotes identificados para este item! Escolha o lote correto abaixo.")
+                        lote_selecionado = st.selectbox("👇 SELECIONE O LOTE PARA CONTAGEM:", lotes_disponiveis, key="lote_selector_bip")
+                        linhas_filtradas_por_lote = itens_filtrados[itens_filtrados[col_lote_real].astype(str).str.strip() == lote_selecionado]
+                    else:
+                        linhas_filtradas_por_lote = itens_filtrados
+
+                    # Segundo Passo: Extração de múltiplos ativos da seleção de lote atual
                     ativos_disponiveis = []
                     if col_ativo_real:
-                        ativos_disponiveis = linhas_com_lote[col_ativo_real].dropna().astype(str).str.strip().unique().tolist()
+                        ativos_disponiveis = linhas_filtradas_por_lote[col_ativo_real].dropna().astype(str).str.strip().unique().tolist()
                         ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
+
+                    # Terceiro Passo: Escolha do Ativo caso múltiplos existam dentro deste lote
+                    ativo_selecionado = ""
+                    if len(ativos_disponiveis) > 1:
+                        st.info("🔢 Múltiplos números de ativos identificados para este lote. Selecione o correspondente:")
+                        ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM:", ativos_disponiveis, key="ativo_selector_bip")
+                        item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote[col_ativo_real].astype(str).str.strip() == ativo_selecionado].iloc[0]
+                    else:
+                        item_especifico = linhas_filtradas_por_lote.iloc[0]
+                        ativo_selecionado = ativos_disponiveis[0] if len(ativos_disponiveis) == 1 else ""
 
                     unid_val = item_especifico[col_unidade] if col_unidade in st.session_state.base_sistema.columns else "UN"
                     desc_val = item_especifico[col_desc]
@@ -567,7 +575,6 @@ else:
                     id_estoque_val = str(item_especifico[col_id_estoque]).strip() if col_id_estoque in st.session_state.base_sistema.columns else ""
                     
                     try:
-                        # Se selecionou um lote/ativo específico, pega o saldo daquela combinação
                         qtd_sis = int(pd.to_numeric(item_especifico[col_qtd], errors='coerce'))
                         if pd.isna(qtd_sis): qtd_sis = 0
                     except: qtd_sis = 0
@@ -579,22 +586,21 @@ else:
                     b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">LOTE EM CONTAGEM</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
                     
                     st.markdown(f"**Descrição do Material:** {desc_val}")
-                    st.info(f"📋 **Lote Vinculado à Contagem Corrente:** {lote_selecionado if lote_selecionado else 'Não se aplica / Lote Único'}")
+                    st.info(f"📋 **Lote Selecionado:** {lote_selecionado if lote_selecionado else 'Não se aplica'} | **Ativo Selecionado:** {ativo_selecionado if ativo_selecionado else 'Padrão / Manual'}")
                     
                     with st.form("confirmar_form", clear_on_submit=True):
                         qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
                         
-                        # Se houver múltiplos ativos na planilha para esse item, vira Selectbox. Caso contrário, input livre.
+                        # Exibe campo de entrada textual somente se não foi selecionado em um menu dinâmico
                         if len(ativos_disponiveis) > 1:
-                            ativo_input = st.selectbox("🔢 Selecione o Número do Ativo correspondente:", ativos_disponiveis)
+                            ativo_final_input = ativo_selecionado
                         else:
-                            valor_padrao_ativo = ativos_disponiveis[0] if len(ativos_disponiveis) == 1 else ""
-                            ativo_input = st.text_input("🔢 Número do Ativo (Opcional)", value=valor_padrao_ativo)
+                            ativo_final_input = st.text_input("🔢 Número do Ativo (Opcional)", value=ativo_selecionado)
                             
                         observacao = st.text_input("📝 Observação (opcional)")
                         
                         if st.form_submit_button("✓ Confirmar Contagem", type="primary", use_container_width=True):
-                            ativo_l = str(ativo_input).strip().upper()
+                            ativo_l = str(ativo_final_input).strip().upper()
                             if qtd_fisica <= 0:
                                 st.error("❌ Erro: Informe uma quantidade maior que 0!")
                             else:
@@ -606,7 +612,7 @@ else:
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                 """, (id_inventario_atual.replace("#","") if id_inventario_atual else "", id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado))
                                 conn.commit()
-                                st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso para o Lote {lote_selecionado if lote_selecion0 else 'Padrão'}!"
+                                st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso para o Lote {lote_selecionado if lote_selecionado else 'Padrão'}!"
                                 st.session_state.contador_reset += 1
                                 st.rerun()
                 else:
@@ -877,7 +883,7 @@ else:
                 total_itens_dep = len(grupo)
                 
                 desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
+                data_ultima = group = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
