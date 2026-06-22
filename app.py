@@ -4,15 +4,13 @@ import datetime
 import sqlite3
 import io
 import base64
-import os
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Contagem de Estoque Físico - JBA", layout="wide")
 
-# --- BANCO DE DADOS PERMANENTE E FIXO (SQLITE) ---
+# --- BANCO DE DADOS PERMANENTE (SQLITE) ---
 def conectar_banco():
-    caminho_banco = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'banco_inventario.db') if '__file__' in locals() else 'banco_inventario.db'
-    conn = sqlite3.connect(caminho_banco, check_same_thread=False)
+    conn = sqlite3.connect('banco_inventario.db', check_same_thread=False)
     return conn
 
 def inicializar_banco():
@@ -419,9 +417,10 @@ else:
         st.markdown("---")
         st.write("📂 **Carregar Base de Dados (Funcionários)**")
         arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed", key="func_excel_loader")
-        if arquivo_excel is not None:
+        if arquivo_excel is not None and st.session_state.base_sistema is None:
             st.session_state.base_sistema = pd.read_excel(arquivo_excel)
             st.session_state.nome_arquivo_excel = arquivo_excel.name
+            st.rerun()
             
         st.markdown("---")
         st.write("📁 **Selecione o inventário**")
@@ -614,9 +613,9 @@ else:
                         id_estoque_val = str(item_especifico[col_id_estoque]).strip() if col_id_estoque in st.session_state.base_sistema.columns else ""
                         
                         try:
-                            qtd_sys = int(pd.to_numeric(item_especifico[col_qtd], errors='coerce'))
-                            if pd.isna(qtd_sys): qtd_sys = 0
-                        except: qtd_sys = 0
+                            qtd_sis = int(pd.to_numeric(item_especifico[col_qtd], errors='coerce'))
+                            if pd.isna(qtd_sis): qtd_sis = 0
+                        except: qtd_sis = 0
                         
                         b1, b2, b3, b4 = st.columns(4)
                         b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
@@ -643,18 +642,19 @@ else:
                                     st.error("❌ Erro: Informe uma quantidade maior que 0!")
                                 else:
                                     agora = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                                    dif_c = qtd_fisica - qtd_sys
+                                    dif_c = qtd_fisica - qtd_sis
                                     cursor = conn.cursor()
                                     
                                     fase_atual_registro = "1a Contagem"
                                     if inventario_selected_obj['status'] == "2a Contagem":
                                         fase_atual_registro = "2a Contagem"
+                                        # Remove a linha antiga de rascunho da 2a contagem que o supervisor abriu, gravando o valor digitado pelo almoxarife
                                         cursor.execute("DELETE FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ? AND fase_contagem = '2a Contagem'", (id_pasta_limpo, codigo_rastreio, lote_selecionado))
 
                                     cursor.execute("""
                                         INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote, fase_contagem)
                                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                    """, (id_pasta_limpo, id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sys, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado, fase_atual_registro))
+                                    """, (id_pasta_limpo, id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sis, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado, fase_atual_registro))
                                     conn.commit()
                                     st.session_state.ultimo_item_sucesso = f"✅ Lançamento Efetuado com sucesso para o Lote {lote_selecionado if lote_selecionado else 'Padrão'} ({fase_atual_registro})!"
                                     st.session_state.contador_reset += 1
@@ -791,6 +791,7 @@ else:
             st.write("#### 📤 Anexar Estoque / Planilha de Amostragem do Supervisor")
             arquivo_supervisor = st.file_uploader("Suba a planilha Excel com as amostras mapeadas (.xlsx)", type=["xlsx"], key="sup_excel_loader_v4")
             
+            # --- CORREÇÃO DA TRAVA DA PLANILHA (OPCIONALIDADE DO ATIVO CORRIGIDA) ---
             if arquivo_supervisor is not None:
                 try:
                     df_temp_check = pd.read_excel(arquivo_supervisor)
@@ -806,6 +807,7 @@ else:
                     st.session_state.nome_arquivo_supervisor = ""
                     st.rerun()
 
+            # O formulário agora aparece livremente se a base for carregada, sem travar por erro de Ativo
             if id_inv_sup_atual and inv_sup_selecionado_obj['status'] == "Aberto" and st.session_state.base_supervisor is not None:
                 st.write("#### 💻 Bipar e Contar Item (Lançamento do Supervisor)")
                 
@@ -879,7 +881,7 @@ else:
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-# --- ABA 4: ACURACIDADE ESTOQUE ---
+# --- ABA 4: ACURACIDADE ESTOQUE (AGORA COM O HISTÓRICO VISÍVEL PARA ALMOXARIFES) ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -935,15 +937,13 @@ else:
 
         st.markdown("---")
         
-        # --- HISTÓRICO GERAL DO SUPERVISOR (CHAVES CORRIGIDAS) ---
+        # --- MOVIDO E LIBERADO PARA ALMOXARIFES: HISTÓRICO DE PASTAS DO SUPERVISOR ---
         st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
         c_dt_sup1, c_dt_sup2 = st.columns(2)
         with c_dt_sup1:
-            # CORREÇÃO DA DUPLICIDADE: Chave alterada para evitar conflito com a Aba 3 ou outras views
-            dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="acuracidade_sup_dt_ini")
+            dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
         with c_dt_sup2:
-            # CORREÇÃO DA DUPLICIDADE: Chave alterada para evitar conflito com a Aba 3 ou outras views
-            dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="acuracidade_sup_dt_fim")
+            dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
             
         df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
         df_sup_filtrados = df_inventarios_sup[
@@ -966,22 +966,9 @@ else:
             for idx, inv_s in df_pagina_sup_atual.iterrows():
                 df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
                 with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
-                    c_dl, c_del = st.columns([2, 2])
-                    with c_dl:
-                        if not df_hist_sup.empty:
-                            excel_sup_hist = converter_para_excel(df_hist_sup)
-                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
-                    with c_del:
-                        if eh_supervisor:
-                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
-                                cursor = conn.cursor()
-                                cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
-                                cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
-                                conn.commit()
-                                st.success(f"✅ Pasta {inv_s['id']} excluída com sucesso!")
-                                st.rerun()
-                                    
                     if not df_hist_sup.empty:
+                        excel_sup_hist = converter_para_excel(df_hist_sup)
+                        st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
                         st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
 
     # --- ABA 5: HISTÓRICO GERAL ---
@@ -1083,7 +1070,7 @@ else:
 
     # --- ABA 6: BASE DE ESTOQUE ---
     with aba_base:
-        if st.session_state.base_sistema is not None and col_cod != "":
+        if st.session_state.base_sistema is not None:
             st.subheader("📄 Espelho Base de Saldo do Upload")
             
             if id_inventario_atual:
@@ -1118,7 +1105,7 @@ else:
             {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
             {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
             {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
-            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRAND OBRAS IMPLANTACAO"},
+            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
             {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
             {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
             {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
