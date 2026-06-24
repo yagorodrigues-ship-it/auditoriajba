@@ -4,15 +4,13 @@ import datetime
 import sqlite3
 import io
 import base64
-import os
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Contagem de Estoque Físico - JBA", layout="wide")
 
-# --- BANCO DE DADOS PERMANENTE E FIXO (SQLITE) ---
+# --- BANCO DE DADOS PERMANENTE (SQLITE) ---
 def conectar_banco():
-    caminho_banco = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'banco_inventario.db') if '__file__' in locals() else 'banco_inventario.db'
-    conn = sqlite3.connect(caminho_banco, check_same_thread=False)
+    conn = sqlite3.connect('banco_inventario.db', check_same_thread=False)
     return conn
 
 def inicializar_banco():
@@ -37,21 +35,6 @@ def inicializar_banco():
             nome TEXT,
             data TEXT,
             status TEXT
-        )
-    """)
-    
-    # Tabela de backup persistente para os itens carregados de cada inventário
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS itens_base_inventario (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            inventario_id TEXT,
-            cod_produto TEXT,
-            desc_produto TEXT,
-            desc_estoque_fisico TEXT,
-            unid_medida TEXT,
-            qtd_estoque INTEGER,
-            id_estoque_fisico TEXT,
-            lote TEXT DEFAULT ''
         )
     """)
     
@@ -398,11 +381,30 @@ else:
     eh_supervisor = any(x in nome_usuario_logado_limpo for x in ["yago rodrigues", "administrador", "admin", "supervisor"])
     
     id_inventario_atual_inicial = df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else ""
+    
+    # --- MAPEAMENTO E DEPARA DE COLUNAS ANTECIPADO ---
+    col_cod, col_desc, col_local, col_unidade, col_qtd, col_id_estoque = "", "", "", "", "", ""
+    if st.session_state.base_sistema is not None:
+        colunas_reais = list(st.session_state.base_sistema.columns)
+        def encontrar_coluna(opcoes, default_idx):
+            for opcao in opcoes:
+                for col in colunas_reais:
+                    if opcao.lower().replace(" ", "").replace(".", "") in col.lower().replace(" ", "").replace(".", ""):
+                        return col
+            return colunas_reais[default_idx] if default_idx < len(colunas_reais) else colunas_reais[0]
+
+        col_cod = encontrar_coluna(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
+        col_desc = encontrar_coluna(['descproduto', 'descricao', 'desc'], 1)
+        col_local = encontrar_coluna(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
+        col_unidade = encontrar_coluna(['unidmedida', 'unidade', 'un'], 3)
+        col_qtd = encontrar_coluna(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
+        col_id_estoque = encontrar_coluna(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
 
     # SIDEBAR
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         
+        # --- BOTÃO DE ATUALIZAR REALTIME SEM DESLOGAR ---
         if st.button("🔄 Atualizar Dados", use_container_width=True):
             st.rerun()
             
@@ -605,7 +607,6 @@ else:
                         lotes_disponiveis = itens_filtrados['lote'].dropna().astype(str).str.strip().unique().tolist()
                         lotes_disponiveis = [l for l in lotes_disponiveis if l != "" and l.lower() != "nan"]
 
-                        # Identifica de forma flexível as variações de nomes da coluna do ativo na planilha carregada originalmente
                         col_orig_ativo = None
                         for c_col in itens_filtrados.columns:
                             if str(c_col).strip().upper() in ["ATIVO", "Nº ATIVO", "NUMERO ATIVO", "COD ATIVO"]:
@@ -631,11 +632,10 @@ else:
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ?", conn, params=(id_pasta_limpo, codigo_rastreio))
                         set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
                         
-                        # Mantém na lista de seleção apenas os ativos que NÃO foram contados ainda nesta pasta
                         ativos_filtrados_restantes = [a for a in ativos_disponiveis if str(a).strip().upper() not in set_ativos_lancados]
 
-                        # Seleção final do Ativo ativo
                         ativo_selecionado = ""
+                        # CORREÇÃO DO ERRO DE ATRIBUTO COLUMNS: Validação corrigida para checar na tabela base original (itens_filtrados)
                         if len(ativos_filtrados_restantes) > 1:
                             st.info("🔢 Múltiplos números de ativos identificados para este lote. Selecione o correspondente:")
                             ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM:", ativos_filtrados_restantes, key="ativo_selector_bip")
@@ -644,15 +644,14 @@ else:
                             ativo_selecionado = ativos_filtrados_restantes[0]
                             item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote[col_orig_ativo].astype(str).str.strip() == ativo_selecionado].iloc[0]
                         else:
-                            # Caso onde todos os ativos da base foram computados ou a lista é vazia
                             item_especifico = linhas_filtradas_por_lote.iloc[0]
                             if col_orig_ativo and len(ativos_disponiveis) > 0:
                                 st.warning("⚠️ Todos os ativos cadastrados para este produto já foram computados neste inventário!")
 
-                        unid_val = item_especifico['unid_medida']
+                        unid_val = item_especifico['unid_medida'] if 'unid_medida' in itens_filtrados.columns else "UN"
                         desc_val = item_especifico['desc_produto']
-                        local_val = item_especifico['descestoquefisico']
-                        id_estoque_val = str(item_especifico['idestoquefísico']).strip()
+                        local_val = item_especifico['descestoquefisico'] if 'descestoquefisico' in itens_filtrados.columns else "Não Informado"
+                        id_estoque_val = str(item_especifico['idestoquefísico']).strip() if 'idestoquefísico' in itens_filtrados.columns else ""
                         
                         try:
                             qtd_sys = int(item_especifico['qtd_estoque'])
@@ -671,7 +670,6 @@ else:
                         with st.form("confirmar_form", clear_on_submit=True):
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
                             
-                            # Exibe campo de entrada textual somente se não restaram múltiplos ativos não contados na lista filtrada
                             if len(ativos_filtrados_restantes) > 1:
                                 ativo_final_input = ativo_selecionado
                             else:
@@ -921,54 +919,7 @@ else:
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-            st.markdown("---")
-            st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
-            c_dt_sup1, c_dt_sup2 = st.columns(2)
-            with c_dt_sup1:
-                dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
-            with c_dt_sup2:
-                dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
-                
-            df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
-            df_sup_filtrados = df_inventarios_sup[
-                (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
-                (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
-            ]
-            
-            if not df_sup_filtrados.empty:
-                tam_pagina_sup = 15
-                total_itens_sup = len(df_sup_filtrados)
-                total_paginas_sup = (total_itens_sup - 1) // tam_pagina_sup + 1
-                
-                if st.session_state.pagina_historico_sup >= total_paginas_sup:
-                    st.session_state.pagina_historico_sup = 0
-                    
-                idx_ini_sup = st.session_state.pagina_historico_sup * tam_pagina_sup
-                idx_fim_sup = idx_ini_sup + tam_pagina_sup
-                df_pagina_sup_atual = df_sup_filtrados.iloc[idx_ini_sup:idx_fim_sup]
-                
-                for idx, inv_s in df_pagina_sup_atual.iterrows():
-                    df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
-                    with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
-                        c_dl, c_del = st.columns([2, 2])
-                        with c_dl:
-                            if not df_hist_sup.empty:
-                                excel_sup_hist = converter_para_excel(df_hist_sup)
-                                st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
-                        with c_del:
-                            if eh_supervisor:
-                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
-                                    cursor = conn.cursor()
-                                    cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
-                                    cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
-                                    conn.commit()
-                                    st.success(f"✅ Pasta {inv_s['id']} excluída com sucesso!")
-                                    st.rerun()
-                                    
-                        if not df_hist_sup.empty:
-                            st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
-
-    # --- ABA 4: ACURACIDADE ESTOQUE ---
+# --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -1024,6 +975,7 @@ else:
 
         st.markdown("---")
         
+        # --- MOVIDO E LIBERADO PARA ALMOXARIFES: HISTÓRICO DE PASTAS DO SUPERVISOR ---
         st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
         c_dt_sup1, c_dt_sup2 = st.columns(2)
         with c_dt_sup1:
@@ -1032,9 +984,11 @@ else:
             dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="acuracidade_sup_dt_fim")
             
         df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
+        
+        # CORREÇÃO DO VALUE ERROR DA EXPRESSÃO DE COMPARAÇÃO DE DATAS: Removido operador condicional duplo inválido
         df_sup_filtrados = df_inventarios_sup[
             (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
-            (df_sup_filtrados == df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
+            (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
         ]
         
         if not df_sup_filtrados.empty:
