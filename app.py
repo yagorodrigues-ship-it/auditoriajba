@@ -403,6 +403,7 @@ else:
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         
+        # --- BOTÃO DE ATUALIZAR REALTIME SEM DESLOGAR ---
         if st.button("🔄 Atualizar Dados", use_container_width=True):
             st.rerun()
             
@@ -626,14 +627,12 @@ else:
                             ativos_disponiveis = linhas_filtradas_por_lote[col_orig_ativo].dropna().astype(str).str.strip().unique().tolist()
                             ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
 
-                        # --- FIX: BUSCA ATIVOS CONCLUÍDOS NO INVENTÁRIO ATUAL DE FORMA ROBUSTA ---
+                        # --- DINÂMICA DE FILTRAGEM: REMOVE ATIVOS JÁ LANÇADOS NO INVENTÁRIO CORRENTE ---
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ?", conn, params=(id_pasta_limpo, codigo_rastreio))
                         set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
                         
-                        # Mantém na lista de seleção apenas os ativos que NÃO foram contados ainda nesta pasta
                         ativos_filtrados_restantes = [a for a in ativos_disponiveis if str(a).strip().upper() not in set_ativos_lancados]
 
-                        # Seleção final do Ativo ativo
                         ativo_selecionado = ""
                         if len(ativos_filtrados_restantes) > 1:
                             st.info("🔢 Múltiplos números de ativos identificados para este lote. Selecione o correspondente:")
@@ -918,55 +917,7 @@ else:
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-            st.markdown("---")
-            st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
-            c_dt_sup1, c_dt_sup2 = st.columns(2)
-            with c_dt_sup1:
-                dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
-            with c_dt_sup2:
-                dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
-                
-            df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
-            df_sup_filtrados = df_inventarios_sup[
-                (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
-                (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
-            ]
-            
-            if not df_sup_filtrados.empty:
-                tam_pagina_sup = 15
-                total_itens_sup = len(df_sup_filtrados)
-                total_paginas_sup = (total_itens_sup - 1) // tam_pagina_sup + 1
-                
-                if st.session_state.pagina_historico_sup >= total_paginas_sup:
-                    st.session_state.pagina_historico_sup = 0
-                    
-                idx_ini_sup = st.session_state.pagina_historico_sup * tam_pagina_sup
-                idx_fim_sup = idx_ini_sup + tam_pagina_sup
-                df_pagina_sup_atual = df_sup_filtrados.iloc[idx_ini_sup:idx_fim_sup]
-                
-                for idx, inv_s in df_pagina_sup_atual.iterrows():
-                    df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
-                    with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
-                        c_dl, c_del = st.columns([2, 2])
-                        with c_dl:
-                            if not df_hist_sup.empty:
-                                excel_sup_hist = converter_para_excel(df_hist_sup)
-                                st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
-                        with c_del:
-                            if eh_supervisor:
-                                # --- FIX DUPLICATE KEY: corrigida a sintaxe para extrair a string do ID de forma individual de cada laço ---
-                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{str(inv_s['id'])}", use_container_width=True):
-                                    cursor = conn.cursor()
-                                    cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
-                                    cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
-                                    conn.commit()
-                                    st.success(f"✅ Pasta {inv_s['id']} excluída com sucesso!")
-                                    st.rerun()
-                                    
-                        if not df_hist_sup.empty:
-                            st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
-
-    # --- ABA 4: ACURACIDADE ESTOQUE ---
+# --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -1022,6 +973,7 @@ else:
 
         st.markdown("---")
         
+        # --- HISTÓRICO GERAL DE PASTAS DO SUPERVISOR ---
         st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
         c_dt_sup1, c_dt_sup2 = st.columns(2)
         with c_dt_sup1:
@@ -1047,6 +999,7 @@ else:
             idx_fim_sup = idx_ini_sup + tam_pagina_sup
             df_pagina_sup_atual = df_sup_filtrados.iloc[idx_ini_sup:idx_fim_sup]
             
+            # --- FIX STREAMLIT DUPLICATE ELEMENT KEY: Removidas as duas rotinas que colidiam em loops paralelos ---
             for idx, inv_s in df_pagina_sup_atual.iterrows():
                 df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
                 with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
@@ -1054,10 +1007,10 @@ else:
                     with c_dl:
                         if not df_hist_sup.empty:
                             excel_sup_hist = converter_para_excel(df_hist_sup)
-                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
+                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_{inv_s['id']}_{idx}")
                     with c_del:
                         if eh_supervisor:
-                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{str(inv_s['id'])}", use_container_width=True):
+                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_{str(inv_s['id'])}_{idx}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                 cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -1145,7 +1098,7 @@ else:
                                     st.success("🎯 Inventário Perfeito! 100% mapeado.")
                     with c_del_g:
                         if eh_supervisor:
-                            if st.button("🗑️ Deletar Pasta", key=f"del_folder_ger_{inv['id']}", use_container_width=True):
+                            if st.button("🗑️ Deletar Pasta Operational", key=f"del_folder_ger_{inv['id']}_{idx}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
                                 cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
