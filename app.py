@@ -290,7 +290,7 @@ if "recuperar" in query_params and "token" in query_params:
                     cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
                     conn.commit()
                     conn.close()
-                    st.success("🎉 Senha updated com sucesso! Pode fazer o login na tela principal.")
+                    st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
     st.stop()
 
 # --- TELA DE ACESSO ---
@@ -403,7 +403,6 @@ else:
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         
-        # --- BOTÃO DE ATUALIZAR REALTIME SEM DESLOGAR ---
         if st.button("🔄 Atualizar Dados", use_container_width=True):
             st.rerun()
             
@@ -627,14 +626,15 @@ else:
                             ativos_disponiveis = linhas_filtradas_por_lote[col_orig_ativo].dropna().astype(str).str.strip().unique().tolist()
                             ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
 
-                        # --- DINÂMICA DE FILTRAGEM: REMOVE ATIVOS JÁ LANÇADOS NO INVENTÁRIO CORRENTE ---
+                        # --- FIX: BUSCA ATIVOS CONCLUÍDOS NO INVENTÁRIO ATUAL DE FORMA ROBUSTA ---
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ?", conn, params=(id_pasta_limpo, codigo_rastreio))
                         set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
                         
+                        # Mantém na lista de seleção apenas os ativos que NÃO foram contados ainda nesta pasta
                         ativos_filtrados_restantes = [a for a in ativos_disponiveis if str(a).strip().upper() not in set_ativos_lancados]
 
+                        # Seleção final do Ativo ativo
                         ativo_selecionado = ""
-                        # CRITICO FIX: Checa se existem ativos e atribui de forma correta sem quebrar por Series ou Dataframe
                         if len(ativos_filtrados_restantes) > 1:
                             st.info("🔢 Múltiplos números de ativos identificados para este lote. Selecione o correspondente:")
                             ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM:", ativos_filtrados_restantes, key="ativo_selector_bip")
@@ -927,8 +927,6 @@ else:
                 dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
                 
             df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
-            
-            # CRITICAL FIX: Removida a sintaxe incorreta de atribuição dupla
             df_sup_filtrados = df_inventarios_sup[
                 (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
                 (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
@@ -956,7 +954,8 @@ else:
                                 st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
                         with c_del:
                             if eh_supervisor:
-                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
+                                # --- FIX DUPLICATE KEY: corrigida a sintaxe para extrair a string do ID de forma individual de cada laço ---
+                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{str(inv_s['id'])}", use_container_width=True):
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                     cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -1058,7 +1057,7 @@ else:
                             st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_{inv_s['id']}")
                     with c_del:
                         if eh_supervisor:
-                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{inv_s['id']}", use_container_width=True):
+                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_{str(inv_s['id'])}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                 cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -1205,7 +1204,7 @@ else:
             {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
             {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
             {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
-            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRAND OBRAS IMPLANTACAO"},
+            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
             {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
             {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
             {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
