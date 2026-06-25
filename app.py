@@ -719,7 +719,7 @@ else:
             if modo_visao == "Apenas Minhas Contagens":
                 df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND operador = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''), st.session_state.operador))
             else:
-                df_contagens_mutaias = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''),))
+                df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''),))
 
             if df_contagens_mutaveis.empty:
                 st.info("Nenhum item lançado nessa perspectiva até o momento.")
@@ -957,11 +957,11 @@ else:
                         with c_dl:
                             if not df_hist_sup.empty:
                                 excel_sup_hist = converter_para_excel(df_hist_sup)
-                                st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_{inv_s['id']}_{idx}")
+                                st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_unique_{idx}")
                         with c_del:
                             if eh_supervisor:
-                                # --- COMPACT FIX FOR DUPLICATE KEY: Usando o name da Series (que é o índice real) ---
-                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_{idx}_{inv_s.name}", use_container_width=True):
+                                # --- COMPACT PERMANENT FIX FOR DUPLICATE KEY ERROR ---
+                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_btn_{idx}", use_container_width=True):
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                     cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -981,14 +981,14 @@ else:
             st.info("💡 Nenhuma amostragem coletada no banco de dados para computar as acuracidades.")
         else:
             linhas_planilha_acuracidade = []
-            for dep_id, grupo in df_todas_auditorias_banco.groupby('id_estoque'):
-                certos_qtd = len(grupo[grupo['diferenca'] == 0])
-                certos_etiq = len(grupo[grupo['etiqueta_correta'] == "Sim"])
-                certos_local = len(grupo[grupo['localizacao_correta'] == "Sim"])
-                total_itens_dep = len(grupo)
+            for dep_id, group in df_todas_auditorias_banco.groupby('id_estoque'):
+                certos_qtd = len(group[group['diferenca'] == 0])
+                certos_etiq = len(group[group['etiqueta_correta'] == "Sim"])
+                certos_local = len(group[group['localizacao_correta'] == "Sim"])
+                total_itens_dep = len(group)
                 
-                desc_dep = grupo.iloc[0]['desc_estoque'] if 'desc_estoque' in grupo.columns else "Não Informado"
-                data_ultima = grupo.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in grupo.columns else ""
+                desc_dep = group.iloc[0]['desc_estoque'] if 'desc_estoque' in group.columns else "Não Informado"
+                data_ultima = group.iloc[0]['data_hora'].split(" ")[0] if 'data_hora' in group.columns else ""
                 
                 pct_saldo = (certos_qtd / total_itens_dep) * 100
                 pct_etiq = (certos_etiq / total_itens_dep) * 100
@@ -1060,10 +1060,10 @@ else:
                     with c_dl:
                         if not df_hist_sup.empty:
                             excel_sup_hist = converter_para_excel(df_hist_sup)
-                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_{inv_s['id']}_{idx}")
+                            st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_main_view_{idx}")
                     with c_del:
                         if eh_supervisor:
-                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_{idx}_{inv_s.name}", use_container_width=True):
+                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_main_view_btn_{idx}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                 cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -1210,7 +1210,7 @@ else:
             {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
             {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
             {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
-            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
+            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRAND OBRAS IMPLANTACAO"},
             {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
             {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
             {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
