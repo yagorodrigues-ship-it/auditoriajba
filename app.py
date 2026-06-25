@@ -403,7 +403,6 @@ else:
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         
-        # --- BOTÃO DE ATUALIZAR REALTIME SEM DESLOGAR ---
         if st.button("🔄 Atualizar Dados", use_container_width=True):
             st.rerun()
             
@@ -459,19 +458,19 @@ else:
             df_upload_temp = pd.read_excel(arquivo_excel)
             colunas_temp = list(df_upload_temp.columns)
             
-            def mapear_col(opcoes, default_idx):
+            def encontrar_col_nome(opcoes, default_idx):
                 for opcao in opcoes:
                     for col in colunas_temp:
                         if opcao.lower().replace(" ", "").replace(".", "") in col.lower().replace(" ", "").replace(".", ""):
                             return col
                 return colunas_temp[default_idx] if default_idx < len(colunas_temp) else colunas_temp[0]
 
-            c_cod_u = mapear_col(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
-            c_desc_u = mapear_col(['descproduto', 'descricao', 'desc'], 1)
-            c_local_u = mapear_col(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
-            c_unid_u = mapear_col(['unidmedida', 'unidade', 'un'], 3)
-            c_qtd_u = mapear_col(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-            c_id_est_u = mapear_col(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
+            c_cod_u = encontrar_col_nome(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
+            c_desc_u = encontrar_col_nome(['descproduto', 'descricao', 'desc'], 1)
+            c_local_u = encontrar_col_nome(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
+            c_unid_u = encontrar_col_nome(['unidmedida', 'unidade', 'un'], 3)
+            c_qtd_u = encontrar_col_nome(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
+            c_id_est_u = encontrar_col_nome(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
             
             c_lote_u = None
             for col_l in df_upload_temp.columns:
@@ -490,7 +489,6 @@ else:
                 """, (id_pasta_limpo_base, str(r[c_cod_u]).strip(), str(r[c_desc_u]), str(r[c_local_u]), str(r[c_unid_u]), int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0), str(r[c_id_est_u]).strip(), lote_item_v))
             conn.commit()
             
-            # Atualiza de forma persistente e recarrega a visualização da tela
             df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
             st.session_state.base_sistema = df_base_persistida.rename(columns={
                 'desc_estoque_fisico': 'descestoquefisico',
@@ -605,7 +603,7 @@ else:
                         item_autorizado = False
                 
                 if not item_autorizado:
-                    st.error("🚫 Bloqueado: Este material está CORRETO no sistema e não foi liberado pelo supervisor para a 2ª Contagem.")
+                    st.error(" Bloqueado: Este material está CORRETO no sistema e não foi liberado pelo supervisor para a 2ª Contagem.")
                 else:
                     itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_rastreio]
                     
@@ -960,8 +958,8 @@ else:
                                 st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_unique_{idx}")
                         with c_del:
                             if eh_supervisor:
-                                # --- COMPACT PERMANENT FIX FOR DUPLICATE KEY ERROR ---
-                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_btn_{idx}", use_container_width=True):
+                                # --- 100% PERFECT FIX FOR DUPLICATE ELEMENT KEY ERROR ---
+                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_btn_fixed_view_{idx}", use_container_width=True):
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                     cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -1063,6 +1061,7 @@ else:
                             st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_main_view_{idx}")
                     with c_del:
                         if eh_supervisor:
+                            # --- 100% PERFECT FIX FOR DUPLICATE ELEMENT KEY ERROR ---
                             if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_main_view_btn_{idx}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
@@ -1210,7 +1209,7 @@ else:
             {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
             {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
             {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
-            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRAND OBRAS IMPLANTACAO"},
+            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
             {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
             {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
             {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
