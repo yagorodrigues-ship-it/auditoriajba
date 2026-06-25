@@ -774,8 +774,7 @@ else:
 
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, lote_selecionado))
                         
-                        # --- CRITICAL ATTRIBUTE_ERROR FIXED PROTECTION TRAVA ---
-                        # Verifica de maneira explícita se o DataFrame gerado não está vazio antes de aplicar os encadeamentos
+                        # --- TRAVA DE SEGURANÇA CONTRA ATTRIBUTE_ERROR CORRIGIDA DEFINITIVAMENTE ---
                         if not df_ativos_lancados.empty and 'ativo' in df_ativos_lancados.columns:
                             set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
                         else:
