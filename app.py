@@ -432,7 +432,7 @@ else:
 
         st.write("📁 **Selecione o inventário**")
         if df_inventarios.empty:
-            st.info("Crie um inventário abaixo.")
+            st.info("Crie um inventário acima.")
             id_inventario_atual = None
             inventario_selected_obj = None
         else:
@@ -441,7 +441,7 @@ else:
             id_inventario_atual = " – " in inventario_selected and inventario_selected.split(" – ")[0] or None
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # RECONSTRUÇÃO DA BASE DE SALDO PERSISTENTE VINCULADA AO BANCO DE DADOS E À PASTA ATUAL
+        # --- CORREÇÃO DO FLUXO: CARREGAMENTO DA PLANILHA DO BANCO ANTES DA SEÇÃO DE UPLOAD ---
         if id_inventario_atual:
             id_pasta_limpo_base = id_inventario_atual.replace("#", "")
             df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
@@ -459,19 +459,19 @@ else:
             df_upload_temp = pd.read_excel(arquivo_excel)
             colunas_temp = list(df_upload_temp.columns)
             
-            def mapear_col(opcoes, default_idx):
+            def encontrar_col_nome(opcoes, default_idx):
                 for opcao in opcoes:
                     for col in colunas_temp:
                         if opcao.lower().replace(" ", "").replace(".", "") in col.lower().replace(" ", "").replace(".", ""):
                             return col
                 return colunas_temp[default_idx] if default_idx < len(colunas_temp) else colunas_temp[0]
 
-            c_cod_u = mapear_col(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
-            c_desc_u = mapear_col(['descproduto', 'descricao', 'desc'], 1)
-            c_local_u = mapear_col(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
-            c_unid_u = mapear_col(['unidmedida', 'unidade', 'un'], 3)
-            c_qtd_u = mapear_col(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-            c_id_est_u = mapear_col(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
+            c_cod_u = encontrar_col_nome(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
+            c_desc_u = encontrar_col_nome(['descproduto', 'descricao', 'desc'], 1)
+            c_local_u = encontrar_col_nome(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
+            c_unid_u = encontrar_col_nome(['unidmedida', 'unidade', 'un'], 3)
+            c_qtd_u = encontrar_col_nome(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
+            c_id_est_u = encontrar_col_nome(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
             
             c_lote_u = None
             for col_l in df_upload_temp.columns:
@@ -489,6 +489,13 @@ else:
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 """, (id_pasta_limpo_base, str(r[c_cod_u]).strip(), str(r[c_desc_u]), str(r[c_local_u]), str(r[c_unid_u]), int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0), str(r[c_id_est_u]).strip(), lote_item_v))
             conn.commit()
+            
+            # Força o recarregamento com o banco atualizado imediatamente na session_state
+            df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
+            st.session_state.base_sistema = df_base_persistida.rename(columns={
+                'desc_estoque_fisico': 'descestoquefisico',
+                'id_estoque_fisico': 'idestoquefísico'
+            })
             st.rerun()
 
         col_cod, col_desc, col_local, col_unidade, col_qtd, col_id_estoque = "cod_produto", "desc_produto", "descestoquefisico", "unid_medida", "qtd_estoque", "idestoquefísico"
@@ -648,8 +655,8 @@ else:
 
                         unid_val = item_especifico['unid_medida'] if 'unid_medida' in itens_filtrados.columns else "UN"
                         desc_val = item_especifico['desc_produto']
-                        local_val = item_especifico['descestoquefisico'] if 'descestoquefisico' in itens_filtrados.columns else "Não Informado"
-                        id_estoque_val = str(item_especifico['idestoquefísico']).strip() if 'idestoquefísico' in itens_filtrados.columns else ""
+                        local_val = item_especifico['descestoquefisico']
+                        id_estoque_val = str(item_especifico['idestoquefísico']).strip()
                         
                         try:
                             qtd_sys = int(item_especifico['qtd_estoque'])
@@ -917,7 +924,54 @@ else:
                 st.write("### 📝 Amostras Coletadas Coletas na Pasta Atual")
                 st.dataframe(df_auditorias_atual, use_container_width=True, hide_index=True)
 
-# --- ABA 4: ACURACIDADE ESTOQUE ---
+            st.markdown("---")
+            st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
+            c_dt_sup1, c_dt_sup2 = st.columns(2)
+            with c_dt_sup1:
+                dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
+            with c_dt_sup2:
+                dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
+                
+            df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
+            df_sup_filtrados = df_inventarios_sup[
+                (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
+                (df_inventarios_sup['datetime_parsed'] <= dt_fim_sup)
+            ]
+            
+            if not df_sup_filtrados.empty:
+                tam_pagina_sup = 15
+                total_itens_sup = len(df_sup_filtrados)
+                total_paginas_sup = (total_itens_sup - 1) // tam_pagina_sup + 1
+                
+                if st.session_state.pagina_historico_sup >= total_paginas_sup:
+                    st.session_state.pagina_historico_sup = 0
+                    
+                idx_ini_sup = st.session_state.pagina_historico_sup * tam_pagina_sup
+                idx_fim_sup = idx_ini_sup + tam_pagina_sup
+                df_pagina_sup_atual = df_sup_filtrados.iloc[idx_ini_sup:idx_fim_sup]
+                
+                for idx, inv_s in df_pagina_sup_atual.iterrows():
+                    df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
+                    with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
+                        c_dl, c_del = st.columns([2, 2])
+                        with c_dl:
+                            if not df_hist_sup.empty:
+                                excel_sup_hist = converter_para_excel(df_hist_sup)
+                                st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_{inv_s['id']}_{idx}")
+                        with c_del:
+                            if eh_supervisor:
+                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_{str(inv_s['id'])}_{idx}", use_container_width=True):
+                                    cursor = conn.cursor()
+                                    cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
+                                    cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
+                                    conn.commit()
+                                    st.success(f"✅ Pasta {inv_s['id']} excluída com sucesso!")
+                                    st.rerun()
+                                    
+                        if not df_hist_sup.empty:
+                            st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
+
+    # --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
@@ -973,13 +1027,12 @@ else:
 
         st.markdown("---")
         
-        # --- HISTÓRICO GERAL DE PASTAS DO SUPERVISOR ---
         st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
         c_dt_sup1, c_dt_sup2 = st.columns(2)
         with c_dt_sup1:
-            dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="acuracidade_sup_dt_ini")
+            st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="acuracidade_sup_dt_ini")
         with c_dt_sup2:
-            dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="acuracidade_sup_dt_fim")
+            st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="acuracidade_sup_dt_fim")
             
         df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
         df_sup_filtrados = df_inventarios_sup[
@@ -999,7 +1052,6 @@ else:
             idx_fim_sup = idx_ini_sup + tam_pagina_sup
             df_pagina_sup_atual = df_sup_filtrados.iloc[idx_ini_sup:idx_fim_sup]
             
-            # --- FIX STREAMLIT DUPLICATE ELEMENT KEY: Removidas as duas rotinas que colidiam em loops paralelos ---
             for idx, inv_s in df_pagina_sup_atual.iterrows():
                 df_hist_sup = pd.read_sql_query("SELECT * FROM auditorias_supervisor WHERE inventario_id = ? ORDER BY id DESC", conn, params=(inv_s['id'],))
                 with st.expander(f"📁 {inv_s['id']} – {inv_s['nome']} | {inv_s['data']} | {len(df_hist_sup)} itens auditados"):
@@ -1157,7 +1209,7 @@ else:
             {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
             {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
             {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
-            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
+            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRAND OBRAS IMPLANTACAO"},
             {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
             {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
             {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
