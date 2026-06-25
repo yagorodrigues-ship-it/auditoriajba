@@ -603,7 +603,7 @@ else:
                         item_autorizado = False
                 
                 if not item_autorizado:
-                    st.error(" Bloqueado: Este material está CORRETO no sistema e não foi liberado pelo supervisor para a 2ª Contagem.")
+                    st.error("🚫 Bloqueado: Este material está CORRETO no sistema e não foi liberado pelo supervisor para a 2ª Contagem.")
                 else:
                     itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_rastreio]
                     
@@ -634,7 +634,12 @@ else:
 
                         # --- DINÂMICA DE FILTRAGEM: REMOVE ATIVOS JÁ LANÇADOS NO INVENTÁRIO CORRENTE ---
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ?", conn, params=(id_pasta_limpo, codigo_rastreio))
-                        set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
+                        
+                        # PROTEÇÃO SEGURO CONTRA KEYERROR / ATTRIBUTE_ERROR
+                        if not df_ativos_lancados.empty and 'ativo' in df_ativos_lancados.columns:
+                            set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
+                        else:
+                            set_ativos_lancados = set()
                         
                         ativos_filtrados_restantes = [a for a in ativos_disponiveis if str(a).strip().upper() not in set_ativos_lancados]
 
@@ -955,11 +960,10 @@ else:
                         with c_dl:
                             if not df_hist_sup.empty:
                                 excel_sup_hist = converter_para_excel(df_hist_sup)
-                                st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_unique_{idx}")
+                                st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_main_view_{idx}")
                         with c_del:
                             if eh_supervisor:
-                                # --- 100% PERFECT FIX FOR DUPLICATE ELEMENT KEY ERROR ---
-                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_btn_fixed_view_{idx}", use_container_width=True):
+                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_main_view_btn_unique_{idx}", use_container_width=True):
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                     cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -1012,12 +1016,12 @@ else:
             if eh_supervisor:
                 with st.expander("⚙️ Painel do Administrador - Deletar Métricas por Código de Estoque"):
                     lista_estoques_audita = list(df_planilha_final["CÓDIGO ESTOQUE AUDITADO"].unique())
-                    est_para_deletar = st.selectbox("Escolha o Código do Estoque para expurgar do banco", lista_estoques_audita, key="del_est_acuracidade_box")
+                    st.selectbox("Escolha o Código do Estoque para expurgar do banco", lista_estoques_audita, key="del_est_acuracidade_box")
                     if st.button("🚨 Confirmar Exclusão do Estoque", type="primary", use_container_width=True):
                         cursor = conn.cursor()
-                        cursor.execute("DELETE FROM auditorias_supervisor WHERE id_estoque = ?", (est_para_deletar,))
+                        cursor.execute("DELETE FROM auditorias_supervisor WHERE id_estoque = ?", (st.session_state.del_est_acuracidade_box,))
                         conn.commit()
-                        st.success(f"✅ Todos os lançamentos do estoque {est_para_deletar} foram deletados!")
+                        st.success(f"✅ Todos os lançamentos do estoque foram deletados!")
                         st.rerun()
 
             st.write("")
@@ -1061,8 +1065,7 @@ else:
                             st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_main_view_{idx}")
                     with c_del:
                         if eh_supervisor:
-                            # --- 100% PERFECT FIX FOR DUPLICATE ELEMENT KEY ERROR ---
-                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_main_view_btn_{idx}", use_container_width=True):
+                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_main_view_btn_fixed_{idx}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                 cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
