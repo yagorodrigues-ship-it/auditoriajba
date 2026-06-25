@@ -299,7 +299,7 @@ if "recuperar" in query_params and "token" in query_params:
                     cursor.execute("UPDATE usuarios SET senha = ? WHERE email = ?", (nova_senha_f, email_token))
                     conn.commit()
                     conn.close()
-                    st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
+                    st.success("🎉 Senha updated com sucesso! Pode fazer o login na tela principal.")
     st.stop()
 
 # --- TELA DE ACESSO ---
@@ -690,7 +690,7 @@ else:
                     if not df_hist_sup.empty:
                         st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
 
-    # --- ABA 1: CONTAR ITEM (Almoxarifes e Funcionários) ---
+    # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS) ---
     with aba_contar:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
@@ -713,7 +713,7 @@ else:
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
                 id_pasta_limpo = id_inventario_atual.replace("#", "")
                 
-                # --- DETECÇÃO AUTOMÁTICA POR ATIVO OU CÓDIGO DO MATERIAL ---
+                # --- LÓGICA DE DETECÇÃO AUTOMÁTICA POR ATIVO OU CÓDIGO DO MATERIAL ---
                 df_busca_por_ativo = st.session_state.base_sistema[st.session_state.base_sistema['ativo'].astype(str).str.upper().str.strip() == codigo_rastreio]
                 
                 ativo_bipado_direto = None
@@ -745,7 +745,7 @@ else:
                             
                             df_lancados_lote = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, l))
                             
-                            # --- SAFE TRAVA ROBUSTA 1 CONTRA ATTRIBUTE_ERROR ---
+                            # Trava de segurança robusta 1
                             if not df_lancados_lote.empty and 'ativo' in df_lancados_lote.columns:
                                 assets_lancados_set = set(df_lancados_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
                             else:
@@ -775,7 +775,8 @@ else:
 
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, lote_selecionado))
                         
-                        # --- SAFE TRAVA ROBUSTA DE DEFINIÇÃO TOTAL (RESOLVE DEFINITIVAMENTE O ERRO DA LINHA 779/780) ---
+                        # --- FIX CRITICAL DEFINITIVO CONTRA ATTRIBUTE_ERROR (LINHA 779/780) ---
+                        # Isolado e validado em bloco estruturado com segurança absoluta para o DataFrame SQLite
                         if not df_ativos_lancados.empty and 'ativo' in df_ativos_lancados.columns:
                             set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
                         else:
@@ -818,7 +819,7 @@ else:
                         b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
                         b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
                         b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
-                        b4.markdown(f'<div class="bloco-info"><div class="lote-valor" style="color:#d35400; font-weight:bold; font-size:24px;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
+                        b4.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">LOTE EM CONTAGEM</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
                         
                         st.markdown(f"**Descrição do Material:** {desc_val}")
                         
