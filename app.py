@@ -505,7 +505,6 @@ else:
                 """, (id_pasta_limpo_base, str(r[c_cod_u]).strip(), str(r[c_desc_u]), str(r[c_local_u]), str(r[c_unid_u]), int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0), str(r[c_id_est_u]).strip(), lote_item_v, ativo_item_v))
             conn.commit()
             
-            # Atualiza de forma persistente e recarrega a visualização da tela
             df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote, ativo FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
             st.session_state.base_sistema = df_base_persistida.rename(columns={
                 'desc_estoque_fisico': 'descestoquefisico',
@@ -659,13 +658,19 @@ else:
                             linhas_filtradas_por_lote = itens_filtrados
 
                         # Extração de ativos pertencentes ao lote
-                        ativos_do_lote_lista = linhas_filtradas_por_lote['ativo'].dropna().astype(str).str.strip().unique().tolist() if 'ativo' in linhas_filtradas_por_lote.columns else []
+                        col_orig_ativo = None
+                        for c_col in itens_filtrados.columns:
+                            if str(c_col).strip().upper() in ["ATIVO", "Nº ATIVO", "NUMERO ATIVO", "COD ATIVO"]:
+                                col_orig_ativo = c_col
+                                break
+
+                        ativos_do_lote_lista = linhas_filtradas_por_lote[col_orig_ativo].dropna().astype(str).str.strip().unique().tolist() if col_orig_ativo else []
                         ativos_do_lote_lista = [a for a in ativos_do_lote_lista if a != "" and a.lower() != "nan"]
 
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, lote_selecionado))
                         set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist()) if not df_ativos_lancados.empty else set()
                         
-                        # --- REMOVE AUTOMATICAMENTE ATIVOS JÁ LANÇADOS ---
+                        # Remove automaticamente ativos já lançados
                         ativos_filtrados_restantes = [a for a in ativos_do_lote_lista if str(a).strip().upper() not in set_ativos_lancados]
 
                         ativo_selecionado = ""
@@ -680,10 +685,10 @@ else:
                                 item_especifico = df_busca_por_ativo.iloc[0]
                         elif len(ativos_filtrados_restantes) > 1:
                             ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM:", ativos_filtrados_restantes, key="ativo_selector_bip")
-                            item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote['ativo'].astype(str).str.strip() == ativo_selecionado].iloc[0]
+                            item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote[col_orig_ativo].astype(str).str.strip() == ativo_selecionado].iloc[0]
                         elif len(ativos_filtrados_restantes) == 1:
                             ativo_selecionado = ativos_filtrados_restantes[0]
-                            item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote['ativo'].astype(str).str.strip() == ativo_selecionado].iloc[0]
+                            item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote[col_orig_ativo].astype(str).str.strip() == ativo_selecionado].iloc[0]
                         else:
                             item_especifico = linhas_filtradas_por_lote.iloc[0]
                             if len(ativos_do_lote_lista) > 0:
@@ -710,7 +715,10 @@ else:
                         if ja_contado_aviso:
                             st.error(f"🚨 Atenção: O Ativo **{ativo_bipado_direto}** já foi bipado e contabilizado anteriormente neste inventário!")
                         else:
-                            st.success(f"🎯 Ativo **{ativo_selecionado if ativo_selecionado else 'Padrão'}** reconhecido com sucesso via bipagem direta!")
+                            # --- MODIFICAÇÃO SOLICITADA: Mensagem dinâmica trazendo Ativo e Lote reais da planilha ---
+                            nome_ativo_print = ativo_selecionado if ativo_selecionado else "Padrão"
+                            nome_lote_print = lote_selecionado if lote_selecionado else "Padrão"
+                            st.success(f"🎯 Ativo **{nome_ativo_print}** e Lote **{nome_lote_print}** reconhecidos com sucesso via bipagem direta!")
                             
                             with st.form("confirmar_form", clear_on_submit=True):
                                 qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=1 if ativo_bipado_direto else 0)
@@ -736,6 +744,8 @@ else:
                                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                                         """, (id_pasta_limpo, id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sys, qtd_fisica, dif_c, ativo_l, observacao, st.session_state.operador, agora, lote_selecionado, fase_atual_registro))
                                         conn.commit()
+                                        
+                                        # Remove o ativo e atualiza a view instantaneamente para tirá-lo do campo de visão do operador
                                         st.session_state.ultimo_item_sucesso = f"✅ Lançamento efetuado com sucesso para o Ativo {ativo_l}!"
                                         st.session_state.contador_reset += 1
                                         st.rerun()
@@ -842,7 +852,7 @@ else:
                 lista_inv_sup = [f"{r['id']} – {r['nome']} ({r['status']})" for idx, r in df_inventarios_sup.iterrows()]
                 inv_sup_selected = st.selectbox("Selecione a sua Pasta de Auditoria Ativa", lista_inv_sup, key="sel_box_sup_propria_v4")
                 id_inv_sup_atual = inv_sup_selected.split(" – ")[0]
-                inv_sup_selecionado_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
+                inv_sup_selected_obj = df_inventarios_sup[df_inventarios_sup['id'] == id_inv_sup_atual].iloc[0]
             
             with st.expander("➕ Nova Pasta de Auditoria do Supervisor"):
                 with st.form("form_novo_sup_interno_v4", clear_on_submit=True):
@@ -861,7 +871,7 @@ else:
                         conn.commit()
                         st.rerun()
                             
-            if inv_sup_selecionado_obj is not None and inv_sup_selecionado_obj['status'] == "Aberto":
+            if inv_sup_selected_obj is not None and inv_sup_selected_obj['status'] == "Aberto":
                 if st.button("🔒 Encerrar e Fechar Pasta de Auditoria Selecionada", use_container_width=True, type="primary"):
                     cursor = conn.cursor()
                     cursor.execute("UPDATE inventarios_supervisor SET status = 'Fechado' WHERE id = ?", (id_inv_sup_atual,))
@@ -886,7 +896,7 @@ else:
                     st.session_state.nome_arquivo_supervisor = ""
                     st.rerun()
 
-            if id_inv_sup_atual and inv_sup_selecionado_obj['status'] == "Aberto" and st.session_state.base_supervisor is not None:
+            if id_inv_sup_atual and inv_sup_selected_obj['status'] == "Aberto" and st.session_state.base_supervisor is not None:
                 st.write("#### 💻 Bipar e Contar Item (Lançamento do Supervisor)")
                 
                 colunas_sup = list(st.session_state.base_supervisor.columns)
@@ -1011,7 +1021,6 @@ else:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
         
-        # --- CRITICAL FIX: MOVIDO OS INPUTS PARA O TOPO DA DECLARAÇÃO DO FILTRO DO PANDAS ---
         c_dt_sup_v1, c_dt_sup_v2 = st.columns(2)
         with c_dt_sup_v1:
             dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="acuracidade_sup_dt_ini")
@@ -1058,7 +1067,7 @@ else:
                     est_para_deletar = st.selectbox("Escolha o Código do Estoque para expurgar do banco", lista_estoques_audita, key="del_est_acuracidade_box")
                     if st.button("🚨 Confirmar Exclusão do Estoque", type="primary", use_container_width=True):
                         cursor = conn.cursor()
-                        cursor.execute("DELETE FROM auditorias_supervisor WHERE id_estoque = ?", (est_para_deletar,))
+                        cursor.execute("DELETE FROM auditorias_supervisor WHERE id_estoque = ?", (st.session_state.del_est_acuracidade_box,))
                         conn.commit()
                         st.success(f"✅ Todos os lançamentos do estoque foram deletados!")
                         st.rerun()
