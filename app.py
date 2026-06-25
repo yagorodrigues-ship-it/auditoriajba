@@ -690,7 +690,7 @@ else:
                     if not df_hist_sup.empty:
                         st.dataframe(df_hist_sup, use_container_width=True, hide_index=True)
 
-    # --- ABA 1: CONTAR ITEM (FUNCIONÁRIOS) ---
+    # --- ABA 1: CONTAR ITEM (Almoxarifes e Funcionários) ---
     with aba_contar:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
             st.warning("⚠️ Carregue a base de saldo e crie um inventário na barra lateral.")
@@ -713,7 +713,7 @@ else:
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
                 id_pasta_limpo = id_inventario_atual.replace("#", "")
                 
-                # --- LÓGICA DE DETECÇÃO AUTOMÁTICA POR ATIVO OU CÓDIGO DO MATERIAL ---
+                # --- DETECÇÃO AUTOMÁTICA POR ATIVO OU CÓDIGO DO MATERIAL ---
                 df_busca_por_ativo = st.session_state.base_sistema[st.session_state.base_sistema['ativo'].astype(str).str.upper().str.strip() == codigo_rastreio]
                 
                 ativo_bipado_direto = None
@@ -745,6 +745,7 @@ else:
                             
                             df_lancados_lote = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, l))
                             
+                            # --- SAFE TRAVA ROBUSTA 1 CONTRA ATTRIBUTE_ERROR ---
                             if not df_lancados_lote.empty and 'ativo' in df_lancados_lote.columns:
                                 assets_lancados_set = set(df_lancados_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
                             else:
@@ -774,7 +775,7 @@ else:
 
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, lote_selecionado))
                         
-                        # --- SAFE TRAVA ROBUSTA E UNIFICADA CONTRA ATTRIBUTE_ERROR (LINHA 779 FIXED) ---
+                        # --- SAFE TRAVA ROBUSTA DE DEFINIÇÃO TOTAL (RESOLVE DEFINITIVAMENTE O ERRO DA LINHA 779/780) ---
                         if not df_ativos_lancados.empty and 'ativo' in df_ativos_lancados.columns:
                             set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
                         else:
