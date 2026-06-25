@@ -248,8 +248,8 @@ if 'base_supervisor' not in st.session_state:
     st.session_state.base_supervisor = None
 if 'nome_arquivo_excel' not in st.session_state:
     st.session_state.nome_arquivo_excel = ""
-if 'nome_arquivo_supervisor' imag_ref := st.session_state.get('nome_arquivo_supervisor', "") is not None:
-    st.session_state.nome_arquivo_supervisor = st.session_state.get('nome_arquivo_supervisor', "")
+if 'nome_arquivo_supervisor' not in st.session_state:
+    st.session_state.nome_arquivo_supervisor = ""
 if 'operador' not in st.session_state:
     st.session_state.operador = ""
 if 'tela_acesso' not in st.session_state:
@@ -343,7 +343,7 @@ if not st.session_state.logged_in:
             btn_cad = st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True)
             if btn_cad:
                 cpf_l = limpar_documento(novo_cpf)
-                if not nova_nome or not cpf_l or not novo_email or not nova_senha:
+                if not novo_nome or not cpf_l or not novo_email or not nova_senha:
                     st.error("⚠️ Preencha todos os campos!")
                 elif nova_senha != confirma_senha:
                     st.error("❌ As senhas não batem!")
@@ -744,9 +744,14 @@ else:
                             ativos_lote_set = set(df_ativos_do_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
                             
                             df_lancados_lote = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, l))
-                            ativos_lancados_lote_set = set(df_lancados_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
                             
-                            if len(ativos_lote_set - ativos_lancados_lote_set) > 0 or len(ativos_lote_set) == 0:
+                            # --- SAFE Trava para evitar quebra de atributo se o banco vier zerado ---
+                            if not df_lancados_lote.empty and 'ativo' in df_lancados_lote.columns:
+                                assets_lancados_set = set(df_lancados_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
+                            else:
+                                assets_lancados_set = set()
+                                
+                            if len(ativos_lote_set - assets_lancados_set) > 0 or len(ativos_lote_set) == 0:
                                 lotes_disponiveis.append(l)
 
                         lote_selecionado = ""
@@ -770,8 +775,7 @@ else:
 
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, lote_selecionado))
                         
-                        # --- SAFE TRAVA ROBUSTA COMPACTA CONTRA ATTRIBUTE_ERROR ---
-                        # Verifica se a tabela não está vazia e se a coluna 'ativo' de fato existe
+                        # --- SAFE TRAVA ROBUSTA FIX CONTRA ATTRIBUTE_ERROR ---
                         if not df_ativos_lancados.empty and 'ativo' in df_ativos_lancados.columns:
                             set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
                         else:
