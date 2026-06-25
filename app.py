@@ -462,7 +462,7 @@ else:
                 st.session_state.base_sistema = None
 
         st.write("📂 **Carregar Base de Dados (Funcionários)**")
-        arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], label_visibility="collapsed", key="func_excel_loader")
+        arquivo_excel = st.file_uploader("Suba o arquivo Excel (.xlsx)", type=["xlsx"], layout="collapsed", key="func_excel_loader")
         if arquivo_excel is not None and id_inventario_atual:
             df_upload_temp = pd.read_excel(arquivo_excel)
             colunas_temp = list(df_upload_temp.columns)
@@ -745,7 +745,6 @@ else:
                             
                             df_lancados_lote = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, l))
                             
-                            # --- SAFE Trava para evitar quebra de atributo se o banco vier zerado ---
                             if not df_lancados_lote.empty and 'ativo' in df_lancados_lote.columns:
                                 assets_lancados_set = set(df_lancados_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
                             else:
@@ -775,7 +774,8 @@ else:
 
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, lote_selecionado))
                         
-                        # --- SAFE TRAVA ROBUSTA FIX CONTRA ATTRIBUTE_ERROR ---
+                        # --- SAFE TRAVA COMPACTA DEFINITIVA PARA EVITAR ATTRIBUTE_ERROR ---
+                        # Aqui fazemos a conferência se o frame veio de fato populado antes de rodar os métodos encadeados
                         if not df_ativos_lancados.empty and 'ativo' in df_ativos_lancados.columns:
                             set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
                         else:
