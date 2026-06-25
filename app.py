@@ -412,7 +412,7 @@ else:
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         
-        if st.button("🔄 Actualizar Dados", use_container_width=True):
+        if st.button("🔄 Atualizar Dados", use_container_width=True):
             st.rerun()
             
         if st.button("🚪 Sair da Conta", use_container_width=True):
@@ -505,6 +505,7 @@ else:
                 """, (id_pasta_limpo_base, str(r[c_cod_u]).strip(), str(r[c_desc_u]), str(r[c_local_u]), str(r[c_unid_u]), int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0), str(r[c_id_est_u]).strip(), lote_item_v, ativo_item_v))
             conn.commit()
             
+            # Atualiza de forma persistente e recarrega a visualização da tela
             df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote, ativo FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
             st.session_state.base_sistema = df_base_persistida.rename(columns={
                 'desc_estoque_fisico': 'descestoquefisico',
@@ -597,7 +598,6 @@ else:
         else:
             c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
             with c_busca:
-                # Modificado placeholder para indicar que aceita bipar o ativo direto
                 codigo_input = st.text_input("💻 Digite/Bipe o Código do Produto ou o número do Ativo", value="", placeholder="Bipe a etiqueta aqui...", key=f"bip_{st.session_state.contador_reset}")
             with c_filtro:
                 st.selectbox("📍 Estoque Físico", ["Todos"], key=f"f_{st.session_state.contador_reset}")
@@ -613,12 +613,10 @@ else:
                 id_pasta_limpo = id_inventario_atual.replace("#", "")
                 
                 # --- LÓGICA DE DETECÇÃO AUTOMÁTICA POR ATIVO OU CÓDIGO DO MATERIAL ---
-                # Primeiro verifica se o valor bipeado corresponde a um Ativo cadastrado na planilha base
                 df_busca_por_ativo = st.session_state.base_sistema[st.session_state.base_sistema['ativo'].astype(str).str.upper().str.strip() == codigo_rastreio]
                 
                 ativo_bipado_direto = None
                 if not df_busca_por_ativo.empty:
-                    # Se achou pelo Ativo, captura o Código do Produto real correspondente
                     ativo_bipado_direto = codigo_rastreio
                     codigo_rastreio = str(df_busca_por_ativo.iloc[0]['cod_produto']).upper().strip()
                 
@@ -651,7 +649,6 @@ else:
                                 lotes_disponiveis.append(l)
 
                         lote_selecionado = ""
-                        # Se o ativo foi bipado direto, descobre a qual lote ele pertence e força a seleção automática
                         if ativo_bipado_direto:
                             lote_selecionado = str(df_busca_por_ativo.iloc[0]['lote']).strip()
                             linhas_filtradas_por_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == lote_selecionado]
@@ -668,13 +665,12 @@ else:
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, lote_selecionado))
                         set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist()) if not df_ativos_lancados.empty else set()
                         
-                        # Remove ativos já lançados
+                        # --- REMOVE AUTOMATICAMENTE ATIVOS JÁ LANÇADOS ---
                         ativos_filtrados_restantes = [a for a in ativos_do_lote_lista if str(a).strip().upper() not in set_ativos_lancados]
 
                         ativo_selecionado = ""
                         ja_contado_aviso = False
 
-                        # Se bipou o ativo direto, valida se ele ainda está pendente ou se já foi contado
                         if ativo_bipado_direto:
                             if ativo_bipado_direto in set_ativos_lancados:
                                 ja_contado_aviso = True
@@ -967,10 +963,10 @@ else:
             st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
             c_dt_sup1, c_dt_sup2 = st.columns(2)
             with c_dt_sup1:
-                st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="acuracidade_sup_dt_ini")
+                dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="hist_sup_dt_ini")
             with c_dt_sup2:
-                st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="acuracidade_sup_dt_fim")
-            
+                dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="hist_sup_dt_fim")
+                
             df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
             df_sup_filtrados = df_inventarios_sup[
                 (df_inventarios_sup['datetime_parsed'] >= dt_ini_sup) & 
@@ -999,7 +995,7 @@ else:
                                 st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_unique_aba3_{idx}")
                         with c_del:
                             if eh_supervisor:
-                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_main_view_btn_fixed_aba3_{idx}", use_container_width=True):
+                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_main_view_btn_unique_aba3_{idx}", use_container_width=True):
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                     cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -1015,6 +1011,13 @@ else:
         st.title("📈 Acuracidade - Controle Amostral")
         df_todas_auditorias_banco = pd.read_sql_query("SELECT * FROM auditorias_supervisor ORDER BY id DESC", conn)
         
+        # --- CRITICAL FIX: MOVIDO OS INPUTS PARA O TOPO DA DECLARAÇÃO DO FILTRO DO PANDAS ---
+        c_dt_sup_v1, c_dt_sup_v2 = st.columns(2)
+        with c_dt_sup_v1:
+            dt_ini_sup = st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="acuracidade_sup_dt_ini")
+        with c_dt_sup_v2:
+            dt_fim_sup = st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="acuracidade_sup_dt_fim")
+
         if df_todas_auditorias_banco.empty:
             st.info("💡 Nenhuma amostragem coletada no banco de dados para computar as acuracidades.")
         else:
@@ -1065,13 +1068,7 @@ else:
             st.download_button(label="📥 Exportar Planilha de Acuracidade para Excel", data=excel_acuracidade, file_name="acuracidade_depositos.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
         st.markdown("---")
-        
         st.write("### 🔬 Histórico Geral de Auditorias de Pastas do Supervisor por Período")
-        c_dt_sup1, c_dt_sup2 = st.columns(2)
-        with c_dt_sup1:
-            st.date_input("Data Inicial (Supervisor)", datetime.date.today() - datetime.timedelta(days=90), key="acuracidade_sup_dt_ini")
-        with c_dt_sup2:
-            st.date_input("Data Final (Supervisor)", datetime.date.today() + datetime.timedelta(days=1), key="acuracidade_sup_dt_fim")
             
         df_inventarios_sup['datetime_parsed'] = pd.to_datetime(df_inventarios_sup['data'], errors='coerce').dt.date
         df_sup_filtrados = df_inventarios_sup[
