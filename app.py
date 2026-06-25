@@ -432,7 +432,7 @@ else:
 
         st.write("📁 **Selecione o inventário**")
         if df_inventarios.empty:
-            st.info("Crie um inventário acima.")
+            st.info("Crie um inventário abaixo.")
             id_inventario_atual = None
             inventario_selected_obj = None
         else:
@@ -441,7 +441,7 @@ else:
             id_inventario_atual = " – " in inventario_selected and inventario_selected.split(" – ")[0] or None
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # --- CORREÇÃO DO FLUXO: CARREGAMENTO DA PLANILHA DO BANCO ANTES DA SEÇÃO DE UPLOAD ---
+        # RECONSTRUÇÃO DA BASE DE SALDO PERSISTENTE VINCULADA AO BANCO DE DADOS E À PASTA ATUAL
         if id_inventario_atual:
             id_pasta_limpo_base = id_inventario_atual.replace("#", "")
             df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
@@ -459,19 +459,19 @@ else:
             df_upload_temp = pd.read_excel(arquivo_excel)
             colunas_temp = list(df_upload_temp.columns)
             
-            def encontrar_col_nome(opcoes, default_idx):
+            def mapear_col(opcoes, default_idx):
                 for opcao in opcoes:
                     for col in colunas_temp:
                         if opcao.lower().replace(" ", "").replace(".", "") in col.lower().replace(" ", "").replace(".", ""):
                             return col
                 return colunas_temp[default_idx] if default_idx < len(colunas_temp) else colunas_temp[0]
 
-            c_cod_u = encontrar_col_nome(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
-            c_desc_u = encontrar_col_nome(['descproduto', 'descricao', 'desc'], 1)
-            c_local_u = encontrar_col_nome(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
-            c_unid_u = encontrar_col_nome(['unidmedida', 'unidade', 'un'], 3)
-            c_qtd_u = encontrar_col_nome(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
-            c_id_est_u = encontrar_col_nome(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
+            c_cod_u = mapear_col(['códproduto', 'codproduto', 'codigo', 'cod'], 0)
+            c_desc_u = mapear_col(['descproduto', 'descricao', 'desc'], 1)
+            c_local_u = mapear_col(['descestoquefisico', 'localizacao', 'local', 'estoquefisico'], 2)
+            c_unid_u = mapear_col(['unidmedida', 'unidade', 'un'], 3)
+            c_qtd_u = mapear_col(['qtdestoque', 'quantidade', 'saldo', 'qtd'], -1)
+            c_id_est_u = mapear_col(['idestoquefísico', 'idestoqfísico', 'idestoque', 'codestoque'], 0)
             
             c_lote_u = None
             for col_l in df_upload_temp.columns:
@@ -490,7 +490,7 @@ else:
                 """, (id_pasta_limpo_base, str(r[c_cod_u]).strip(), str(r[c_desc_u]), str(r[c_local_u]), str(r[c_unid_u]), int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0), str(r[c_id_est_u]).strip(), lote_item_v))
             conn.commit()
             
-            # Força o recarregamento com o banco atualizado imediatamente na session_state
+            # Atualiza de forma persistente e recarrega a visualização da tela
             df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
             st.session_state.base_sistema = df_base_persistida.rename(columns={
                 'desc_estoque_fisico': 'descestoquefisico',
@@ -719,7 +719,7 @@ else:
             if modo_visao == "Apenas Minhas Contagens":
                 df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND operador = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''), st.session_state.operador))
             else:
-                df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''),))
+                df_contagens_mutaias = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''),))
 
             if df_contagens_mutaveis.empty:
                 st.info("Nenhum item lançado nessa perspectiva até o momento.")
@@ -960,7 +960,8 @@ else:
                                 st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_{inv_s['id']}_{idx}")
                         with c_del:
                             if eh_supervisor:
-                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_{str(inv_s['id'])}_{idx}", use_container_width=True):
+                                # --- COMPACT FIX FOR DUPLICATE KEY: Usando o name da Series (que é o índice real) ---
+                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_{idx}_{inv_s.name}", use_container_width=True):
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                     cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -1062,7 +1063,7 @@ else:
                             st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_{inv_s['id']}_{idx}")
                     with c_del:
                         if eh_supervisor:
-                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_{str(inv_s['id'])}_{idx}", use_container_width=True):
+                            if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_{idx}_{inv_s.name}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                 cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -1120,7 +1121,7 @@ else:
                         with st.expander(f"📁 {inv['id']} – {inv['nome']} | Data: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} contados)"):
                             if not df_hist_inv.empty:
                                 excel_geral_hist = converter_para_excel(df_hist_inv)
-                                st.download_button(label="📥 Baixar Lançamentos Feitos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}")
+                                st.download_button(label="📥 Baixar Lançamentos Feitos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}_{idx}")
                                 
                                 colunas_existentes_hist = list(df_hist_inv.columns)
                                 ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora', 'fase_contagem']
@@ -1209,7 +1210,7 @@ else:
             {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
             {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
             {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
-            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRAND OBRAS IMPLANTACAO"},
+            {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
             {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
             {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
             {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
