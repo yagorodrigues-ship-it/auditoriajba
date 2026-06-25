@@ -774,7 +774,7 @@ else:
 
                         df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, lote_selecionado))
                         
-                        # --- TRAVA DE SEGURANÇA CONTRA ATTRIBUTE_ERROR CORRIGIDA DEFINITIVAMENTE ---
+                        # --- SAFE TRAVA ROBUSTA E UNIFICADA CONTRA ATTRIBUTE_ERROR (LINHA 779 FIXED) ---
                         if not df_ativos_lancados.empty and 'ativo' in df_ativos_lancados.columns:
                             set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
                         else:
@@ -938,7 +938,7 @@ else:
                 
                 for idx, inv in df_pagina_atual.iterrows():
                     id_inv_proc = inv['id'].replace('#','')
-                    df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inv_proc,))
+                    df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventory_id = ? ORDER BY id DESC" if 'inventory_id' in (df_cols := pd.read_sql_query("PRAGMA table_info(contagens)", conn)['name'].tolist()) else "SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inv_proc,))
                     
                     c_exp_g, c_del_g = st.columns([8, 2])
                     with c_exp_g:
@@ -947,15 +947,15 @@ else:
                                 excel_geral_hist = converter_para_excel(df_hist_inv)
                                 st.download_button(label="📥 Baixar Lançamentos Feitos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}_{idx}")
                                 
-                                colunas_existentes_hist = list(df_hist_inv.columns)
                                 ordem_colunas_print = ['id', 'inventario_id', 'id_estoque', 'desc_estoque', 'cod_produto', 'desc_produto', 'unid_medida', 'qtd_sistema', 'qtd_contada', 'diferenca', 'ativo', 'observacao', 'operador', 'data_hora', 'fase_contagem']
+                                colunas_reais_print = [c for c_name in ordem_colunas_print if (c := c_name if c_name in df_hist_inv.columns else ('inventario_id' if c_name == 'inventario_id' and 'inventario_id' in df_hist_inv.columns else None))]
                                     
                                 st.write("**📋 Itens Efetivamente Contados:**")
-                                st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
+                                st.dataframe(df_hist_inv[[col for col in colunas_reais_print if col]], use_container_width=True, hide_index=True)
                                 
                             df_base_local_proc = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_inv_proc,))
                             if not df_base_local_proc.empty:
-                                set_contados_global = set(df_hist_inv['cod_produto'].astype(str).str.upper().str.strip().tolist())
+                                set_contados_global = set(df_hist_inv['cod_produto'].astype(str).str.upper().str.strip().tolist()) if not df_hist_inv.empty else set()
                                 esquecidos_linhas = []
                                 for _, row_b in df_base_local_proc.iterrows():
                                     c_atual = str(row_b['cod_produto']).upper().strip()
@@ -1004,7 +1004,7 @@ else:
             
             if id_inventario_atual:
                 df_lancados_reais = pd.read_sql_query("SELECT cod_produto, operador FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
-                mapa_contados = dict(zip(df_lancados_reais['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_reais['operador']))
+                mapa_contados = dict(zip(df_lancados_reais['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_reais['operador'])) if not df_lancados_reais.empty else {}
             else:
                 mapa_contados = {}
             
@@ -1053,7 +1053,7 @@ else:
             GROUP BY id_estoque
         """, conn)
         
-        mapa_datas = dict(zip(df_ultimas_contagens['id_estoque'].astype(str).str.strip(), df_ultimas_contagens['ultima_data']))
+        mapa_datas = dict(zip(df_ultimas_contagens['id_estoque'].astype(str).str.strip(), df_ultimas_contagens['ultima_data'])) if not df_ultimas_contagens.empty else {}
         hoje_dt = datetime.datetime.now()
         linhas_desempenho = []
         criticos_count, auditar_count, bom_count = 0, 0, 0
