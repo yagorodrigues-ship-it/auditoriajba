@@ -51,7 +51,8 @@ def inicializar_banco():
             unid_medida TEXT,
             qtd_estoque INTEGER,
             id_estoque_fisico TEXT,
-            lote TEXT DEFAULT ''
+            lote TEXT DEFAULT '',
+            ativo TEXT DEFAULT ''
         )
     """)
     
@@ -109,6 +110,14 @@ def inicializar_banco():
     """)
     
     # --- MIGRACAO AUTOMATICA ---
+    try:
+        cursor.execute("PRAGMA table_info(itens_base_inventario)")
+        cols = [col[1] for col in cursor.fetchall()]
+        if 'ativo' not in cols:
+            cursor.execute("ALTER TABLE itens_base_inventario ADD COLUMN ativo TEXT DEFAULT ''")
+    except:
+        pass
+
     try:
         cursor.execute("PRAGMA table_info(contagens)")
         colunas_existentes = [coluna[1] for coluna in cursor.fetchall()]
@@ -403,7 +412,6 @@ else:
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         
-        # --- BOTÃO DE ATUALIZAR REALTIME SEM DESLOGAR ---
         if st.button("🔄 Atualizar Dados", use_container_width=True):
             st.rerun()
             
@@ -444,7 +452,7 @@ else:
         # RECONSTRUÇÃO DA BASE DE SALDO PERSISTENTE VINCULADA AO BANCO DE DADOS E À PASTA ATUAL
         if id_inventario_atual:
             id_pasta_limpo_base = id_inventario_atual.replace("#", "")
-            df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
+            df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote, ativo FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
             if not df_base_persistida.empty:
                 st.session_state.base_sistema = df_base_persistida.rename(columns={
                     'desc_estoque_fisico': 'descestoquefisico',
@@ -479,18 +487,25 @@ else:
                     c_lote_u = col_l
                     break
 
+            c_ativo_u = None
+            for col_a in df_upload_temp.columns:
+                if str(col_a).strip().upper() in ["ATIVO", "Nº ATIVO", "NUMERO ATIVO", "COD ATIVO"]:
+                    c_ativo_u = col_a
+                    break
+
             cursor_db = conn.cursor()
             cursor_db.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (id_pasta_limpo_base,))
             
             for _, r in df_upload_temp.iterrows():
                 lote_item_v = str(r[c_lote_u]).strip() if c_lote_u and pd.notna(r[c_lote_u]) else ""
+                ativo_item_v = str(r[c_ativo_u]).strip() if c_ativo_u and pd.notna(r[c_ativo_u]) else ""
                 cursor_db.execute("""
-                    INSERT INTO itens_base_inventario (inventario_id, cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (id_pasta_limpo_base, str(r[c_cod_u]).strip(), str(r[c_desc_u]), str(r[c_local_u]), str(r[c_unid_u]), int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0), str(r[c_id_est_u]).strip(), lote_item_v))
+                    INSERT INTO itens_base_inventario (inventario_id, cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote, ativo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (id_pasta_limpo_base, str(r[c_cod_u]).strip(), str(r[c_desc_u]), str(r[c_local_u]), str(r[c_unid_u]), int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0), str(r[c_id_est_u]).strip(), lote_item_v, ativo_item_v))
             conn.commit()
             
-            df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
+            df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote, ativo FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
             st.session_state.base_sistema = df_base_persistida.rename(columns={
                 'desc_estoque_fisico': 'descestoquefisico',
                 'id_estoque_fisico': 'idestoquefísico'
@@ -609,52 +624,53 @@ else:
                     itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_rastreio]
                     
                     if not itens_filtrados.empty:
-                        lotes_disponiveis = itens_filtrados['lote'].dropna().astype(str).str.strip().unique().tolist()
-                        lotes_disponiveis = [l for l in lotes_disponiveis if l != "" and l.lower() != "nan"]
+                        # --- DINÂMICA DE FILTRAGEM DE LOTES DISPONÍVEIS ---
+                        lotes_totais = itens_filtrados['lote'].dropna().astype(str).str.strip().unique().tolist()
+                        lotes_totais = [l for l in lotes_totais if l != "" and l.lower() != "nan"]
 
-                        col_orig_ativo = None
-                        for c_col in itens_filtrados.columns:
-                            if str(c_col).strip().upper() in ["ATIVO", "Nº ATIVO", "NUMERO ATIVO", "COD ATIVO"]:
-                                col_orig_ativo = c_col
-                                break
+                        # Filtra lotes cujos ativos já foram todos contabilizados nesta pasta
+                        lotes_disponiveis = []
+                        for l in lotes_totais:
+                            df_ativos_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == l]
+                            ativos_lote_set = set(df_ativos_do_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
+                            
+                            df_lancados_lote = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, l))
+                            ativos_lancados_lote_set = set(df_lancados_reais := df_lancados_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
+                            
+                            if len(ativos_lote_set - ativos_lancados_lote_set) > 0 or len(ativos_lote_set) == 0:
+                                lotes_disponiveis.append(l)
 
-                        # Escolha do Lote caso existam múltiplos lotes
                         lote_selecionado = ""
                         if lotes_disponiveis:
-                            st.warning("⚠️ Múltiplos lotes identificados para este item! Escolha o lote correto abaixo.")
                             lote_selecionado = st.selectbox("👇 SELECIONE O LOTE PARA CONTAGEM:", lotes_disponiveis, key="lote_selector_bip")
                             linhas_filtradas_por_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == lote_selecionado]
                         else:
                             linhas_filtradas_por_lote = itens_filtrados
 
-                        # Extração de múltiplos ativos da seleção de lote atual
-                        ativos_disponiveis = []
-                        if col_orig_ativo:
-                            ativos_disponiveis = linhas_filtradas_por_lote[col_orig_ativo].dropna().astype(str).str.strip().unique().tolist()
-                            ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
+                        # Extração e filtragem dinâmica de múltiplos ativos pertencentes APENAS ao lote selecionado
+                        ativos_do_lote_lista = linhas_filtradas_por_lote['ativo'].dropna().astype(str).str.strip().unique().tolist() if 'ativo' in linhas_filtradas_por_lote.columns else []
+                        ativos_do_lote_lista = [a for a in ativos_do_lote_lista if a != "" and a.lower() != "nan"]
 
-                        # --- DINÂMICA DE FILTRAGEM: REMOVE ATIVOS JÁ LANÇADOS NO INVENTÁRIO CORRENTE ---
-                        df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ?", conn, params=(id_pasta_limpo, codigo_rastreio))
-                        
+                        df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, lote_selecionado))
                         if not df_ativos_lancados.empty and 'ativo' in df_ativos_lancados.columns:
                             set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
                         else:
                             set_ativos_lancados = set()
                         
-                        ativos_filtrados_restantes = [a for a in ativos_disponiveis if str(a).strip().upper() not in set_ativos_lancados]
+                        # --- REMOVE AUTOMATICAMENTE ATIVOS JÁ LANÇADOS ---
+                        ativos_filtrados_restantes = [a for a in ativos_do_lote_lista if str(a).strip().upper() not in set_ativos_lancados]
 
                         ativo_selecionado = ""
                         if len(ativos_filtrados_restantes) > 1:
-                            st.info("🔢 Múltiplos números de ativos identificados para este lote. Selecione o correspondente:")
-                            ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM:", ativos_filtrados_restantes, key="ativo_selector_bip")
-                            item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote[col_orig_ativo].astype(str).str.strip() == ativo_selecionado].iloc[0]
+                            ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM:", const_list := ativos_filtrados_restantes, key="ativo_selector_bip")
+                            item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote['ativo'].astype(str).str.strip() == ativo_selecionado].iloc[0]
                         elif len(ativos_filtrados_restantes) == 1:
                             ativo_selecionado = ativos_filtrados_restantes[0]
-                            item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote[col_orig_ativo].astype(str).str.strip() == ativo_selecionado].iloc[0]
+                            item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote['ativo'].astype(str).str.strip() == ativo_selecionado].iloc[0]
                         else:
-                            item_especifico = lines_filtradas_por_lote = linhas_filtradas_por_lote.iloc[0]
-                            if col_orig_ativo and len(ativos_disponiveis) > 0:
-                                st.warning("⚠️ Todos os ativos cadastrados para este produto já foram computados neste inventário!")
+                            item_especifico = linhas_filtradas_por_lote.iloc[0]
+                            if len(ativos_do_lote_lista) > 0:
+                                st.warning("⚠️ Todos os ativos cadastrados para este lote já foram contabilizados!")
 
                         unid_val = item_especifico['unid_medida'] if 'unid_medida' in itens_filtrados.columns else "UN"
                         desc_val = item_especifico['desc_produto']
@@ -960,12 +976,10 @@ else:
                         with c_dl:
                             if not df_hist_sup.empty:
                                 excel_sup_hist = converter_para_excel(df_hist_sup)
-                                # --- FIX DUPLICATE KEY (Aba 3 Sufixo Fixado) ---
                                 st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_unique_aba3_{idx}")
                         with c_del:
                             if eh_supervisor:
-                                # --- FIX DUPLICATE KEY (Aba 3 Sufixo Fixado) ---
-                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_btn_fixed_view_aba3_{idx}", use_container_width=True):
+                                if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_main_view_btn_unique_aba3_{idx}", use_container_width=True):
                                     cursor = conn.cursor()
                                     cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
                                     cursor.execute("DELETE FROM auditorias_supervisor WHERE inventario_id = ?", (inv_s['id'],))
@@ -1021,7 +1035,7 @@ else:
                     est_para_deletar = st.selectbox("Escolha o Código do Estoque para expurgar do banco", lista_estoques_audita, key="del_est_acuracidade_box")
                     if st.button("🚨 Confirmar Exclusão do Estoque", type="primary", use_container_width=True):
                         cursor = conn.cursor()
-                        cursor.execute("DELETE FROM auditorias_supervisor WHERE id_estoque = ?", (est_para_deletar,))
+                        cursor.execute("DELETE FROM auditorias_supervisor WHERE id_estoque = ?", (st.session_state.del_est_acuracidade_box,))
                         conn.commit()
                         st.success(f"✅ Todos os lançamentos do estoque foram deletados!")
                         st.rerun()
@@ -1064,11 +1078,9 @@ else:
                     with c_dl:
                         if not df_hist_sup.empty:
                             excel_sup_hist = converter_para_excel(df_hist_sup)
-                            # --- FIX DUPLICATE KEY (Aba 4 Sufixo Fixado) ---
                             st.download_button(label="📥 Baixar Pasta em Excel", data=excel_sup_hist, file_name=f"auditoria_{inv_s['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_sup_hist_main_view_aba4_{idx}")
                     with c_del:
                         if eh_supervisor:
-                            # --- FIX DUPLICATE KEY (Aba 4 Sufixo Fixado) ---
                             if st.button("🗑️ Deletar Pasta de Auditoria", key=f"del_folder_sup_hist_main_view_btn_fixed_aba4_{idx}", use_container_width=True):
                                 cursor = conn.cursor()
                                 cursor.execute("DELETE FROM inventarios_supervisor WHERE id = ?", (inv_s['id'],))
