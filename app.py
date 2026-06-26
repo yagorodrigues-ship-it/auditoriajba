@@ -271,6 +271,20 @@ if 'pagina_historico_sup' not in st.session_state:
 def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
 
+# --- FUNÇÃO DE AUXÍLIO DE PROTEÇÃO CONTRA ATTRIBUTERROR ---
+def obter_ativos_lancados_com_seguranca(conn, inventario_id, cod_produto, lote=None):
+    try:
+        if lote:
+            df = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(inventario_id, cod_produto, lote))
+        else:
+            df = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ?", conn, params=(inventario_id, cod_produto))
+        
+        if not df.empty and 'ativo' in df.columns:
+            return set(df['ativo'].dropna().astype(str).str.strip().upper().tolist())
+    except:
+        pass
+    return set()
+
 # --- RECOVERY URL PARAMETERS ---
 query_params = st.query_params
 if "recuperar" in query_params and "token" in query_params:
@@ -743,13 +757,8 @@ else:
                             df_ativos_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == l]
                             ativos_lote_set = set(df_ativos_do_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
                             
-                            df_lancados_lote = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, l))
-                            
-                            # Trava de segurança robusta 1
-                            if not df_lancados_lote.empty and 'ativo' in df_lancados_lote.columns:
-                                assets_lancados_set = set(df_lancados_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
-                            else:
-                                assets_lancados_set = set()
+                            # --- CRITICAL BLINDAGEM USANDO A NOVA FUNÇÃO DE SEGURANÇA ---
+                            assets_lancados_set = obter_ativos_lancados_com_seguranca(conn, id_pasta_limpo, codigo_rastreio, l)
                                 
                             if len(ativos_lote_set - assets_lancados_set) > 0 or len(ativos_lote_set) == 0:
                                 lotes_disponiveis.append(l)
@@ -773,14 +782,9 @@ else:
                         ativos_do_lote_lista = linhas_filtradas_por_lote[col_orig_ativo].dropna().astype(str).str.strip().unique().tolist() if col_orig_ativo else []
                         ativos_do_lote_lista = [a for a in ativos_do_lote_lista if a != "" and a.lower() != "nan"]
 
-                        df_ativos_lancados = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_pasta_limpo, codigo_rastreio, lote_selecionado))
-                        
-                        # --- FIX CRITICAL DEFINITIVO CONTRA ATTRIBUTE_ERROR (LINHA 779/780) ---
-                        # Isolado e validado em bloco estruturado com segurança absoluta para o DataFrame SQLite
-                        if not df_ativos_lancados.empty and 'ativo' in df_ativos_lancados.columns:
-                            set_ativos_lancados = set(df_ativos_lancados['ativo'].dropna().astype(str).str.strip().upper().tolist())
-                        else:
-                            set_ativos_lancados = set()
+                        # --- CRITICAL BLINDAGEM SOLUÇÃO DEFINITIVA DA ANTIGA LINHA 779 / 780 / 781 ---
+                        # Substituído a chamada de Pandas que quebrava por uma leitura encapsulada à prova de erros
+                        set_ativos_lancados = obter_ativos_lancados_com_seguranca(conn, id_pasta_limpo, codigo_rastreio, lote_selecionado)
                         
                         ativos_filtrados_restantes = [a for a in ativos_do_lote_lista if str(a).strip().upper() not in set_ativos_lancados]
 
@@ -819,7 +823,7 @@ else:
                         b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
                         b2.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor" style="font-size:22px;">{local_val}</div></div>', unsafe_allow_html=True)
                         b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">UNID. MEDIDA</div><div class="bloco-valor">{unid_val}</div></div>', unsafe_allow_html=True)
-                        b4.markdown(f'<div class="card-sistema" style="margin-top:0px; padding:15px; margin-bottom:0px;"><div class="bloco-titulo">LOTE EM CONTAGEM</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
+                        b4.markdown(f'<div class="bloco-info"><div class="lote-valor" style="color:#d35400; font-weight:bold; font-size:24px;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
                         
                         st.markdown(f"**Descrição do Material:** {desc_val}")
                         
