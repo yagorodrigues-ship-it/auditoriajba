@@ -545,7 +545,7 @@ else:
                     if len(itens_esquecidos_lista) == 0:
                         pode_fechar = True
                 else:
-                    df_recontados = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND fase_contagem = '2a Contagem' AND qtd_contada > 0", conn, params=(id_pasta_limpo,)))
+                    df_recontados = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND fase_contagem = '2a Contagem' AND qtd_contada > 0", conn, params=(id_pasta_limpo,))
                     set_recontados = set(df_recontados['cod_produto'].astype(str).str.upper().str.strip().tolist()) if not df_recontados.empty else set()
                     
                     df_alvos_divergentes = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND fase_contagem = '2a Contagem'", conn, params=(id_pasta_limpo,))
@@ -564,7 +564,7 @@ else:
                     conn.commit()
                     st.rerun()
             else:
-                st.error(f"❌ Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
+                st.error(f"❌ Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materials na lista.")
                 if eh_supervisor:
                     st.warning("👤 Yago Rodrigues detectado. Deseja forçar o encerramento?")
                     if st.button("⚠️ Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
@@ -914,15 +914,12 @@ else:
         st.title("📁 Arquivo Geral de Movimentações")
         
         # --- CARREGAMENTO DIRETAMENTE DAS CONTAGEIS REAIS DO BANCO ---
-        # Varre a tabela de lançamentos reais para encontrar todos os códigos de inventários existentes.
-        # Isso ignora restrições estritas de calendário de criação e garante que nenhuma pasta suma por virada de semana.
         df_pastas_com_contagem = pd.read_sql_query("SELECT DISTINCT inventario_id FROM contagens", conn)
         
         lista_pastas_detectadas = []
         if not df_pastas_com_contagem.empty:
             for _, r_p in df_pastas_com_contagem.iterrows():
                 id_limpo_c = str(r_p['inventario_id']).strip()
-                # Cruza os metadados existentes da tabela de inventários para trazer o nome real da pasta
                 match_meta = df_inventarios[df_inventarios['id'].str.replace('#', '', regex=False) == id_limpo_c]
                 
                 if not match_meta.empty:
@@ -933,8 +930,6 @@ else:
                         "status": match_meta.iloc[0]['status']
                     })
                 else:
-                    # Se os metadados da pasta expirarem da tabela principal por virada de tempo, 
-                    # gera uma linha virtual permanente fixada na listagem de consultas.
                     lista_pastas_detectadas.append({
                         "id": f"#{id_limpo_c}",
                         "nome": f"Inventário Histórico - Saldo Geral #{id_limpo_c}",
@@ -996,17 +991,17 @@ else:
                                 st.dataframe(df_esquecidos_print, use_container_width=True, hide_index=True)
                             else:
                                 st.success("🎯 Inventário Perfeito! 100% mapeado.")
-                with c_del_g:
-                    if eh_supervisor:
-                        if st.button("🗑️ Deletar Pasta", key=f"del_folder_ger_{inv['id']}_{idx}", use_container_width=True):
-                            cursor = conn.cursor()
-                            cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
-                            cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
-                            cursor.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (inv['id'].replace('#',''),))
-                            conn.commit()
-                            st.success("Pasta e dados excluídos permanentemente!")
-                            st.rerun()
-                            
+                    with c_del_g:
+                        if eh_supervisor:
+                            if st.button("🗑️ Deletar Pasta Operational", key=f"del_folder_ger_{inv['id']}_{idx}", use_container_width=True):
+                                cursor = conn.cursor()
+                                cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
+                                cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
+                                cursor.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (inv['id'].replace('#',''),))
+                                conn.commit()
+                                st.success("Pasta e dados excluídos permanentemente!")
+                                st.rerun()
+                                
             st.markdown("---")
             col_pag1, col_pag_texto, col_pag2 = st.columns([2, 6, 2])
             with col_pag1:
