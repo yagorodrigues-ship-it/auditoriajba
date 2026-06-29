@@ -193,6 +193,9 @@ if 'ultimo_item_sucesso' not in st.session_state: st.session_state.ultimo_item_s
 if 'pagina_historico' not in st.session_state: st.session_state.pagina_historico = 0
 if 'pagina_historico_sup' not in st.session_state: st.session_state.pagina_historico_sup = 0
 
+def limpar_documento(doc):
+    return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
+
 # --- TELA DE ACESSO ---
 if not st.session_state.logged_in:
     conn = conectar_banco()
@@ -201,7 +204,8 @@ if not st.session_state.logged_in:
         with st.form("login_form"):
             identificador = st.text_input("CPF (somente números) ou E-mail")
             senha = st.text_input("Senha", type="password")
-            if st.form_submit_button("Entrar no Sistema", type="primary", use_container_width=True):
+            botao_login = st.form_submit_button("Entrar no Sistema", type="primary", use_container_width=True)
+            if botao_login:
                 id_limpo = identificador.strip()
                 doc_limpo = limpar_documento(id_limpo)
                 cursor = conn.cursor()
@@ -218,6 +222,10 @@ if not st.session_state.logged_in:
             if st.button("📝 Criar nova conta", use_container_width=True):
                 st.session_state.tela_acesso = "cadastro"
                 st.rerun()
+        with c_rec:
+            if st.button("🔑 Recuperar/Alterar Senha", use_container_width=True):
+                st.session_state.tela_acesso = "recuperar"
+                st.rerun()
     elif st.session_state.tela_acesso == "cadastro":
         st.title("📝 Cadastro de Colaborador")
         with st.form("cadastro_form"):
@@ -226,7 +234,8 @@ if not st.session_state.logged_in:
             novo_email = st.text_input("E-mail")
             nova_senha = st.text_input("Senha", type="password")
             confirma_senha = st.text_input("Confirme a Senha", type="password")
-            if st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True):
+            btn_cad = st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True)
+            if btn_cad:
                 cpf_l = limpar_documento(novo_cpf)
                 if not novo_nome or not cpf_l or not novo_email or not nova_senha:
                     st.error("⚠️ Preencha todos os campos!")
@@ -250,6 +259,7 @@ if not st.session_state.logged_in:
 # --- TELA LOGADA DO SISTEMA ---
 else:
     conn = conectar_banco()
+    
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
     df_inventarios_sup = pd.read_sql_query("SELECT * FROM inventarios_supervisor ORDER BY data DESC, id DESC", conn)
     
@@ -271,7 +281,12 @@ else:
             with st.form("form_novo", clear_on_submit=True):
                 novo_nome = st.text_input("Nome do Inventário")
                 if st.form_submit_button("Criar", type="primary") and novo_nome:
-                    maior_id = df_inventarios['id'].str.replace('#', '', regex=False).astype(int).max() if not df_inventarios.empty else 38
+                    maior_id = 0
+                    if not df_inventarios.empty:
+                        # Extrai puramente inteiros para evitar falha com a hashtag
+                        ids_nums = df_inventarios['id'].astype(str).str.extract(r'(\d+)').dropna().astype(int)
+                        if not ids_nums.empty:
+                            maior_id = ids_nums.max().iloc[0]
                     novo_id = f"#{maior_id + 1}"
                     cursor = conn.cursor()
                     cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, datetime.date.today().strftime("%Y-%m-%d")))
@@ -287,10 +302,9 @@ else:
             lista_inv = [f"{row['id']} – {row['nome']} ({row['status']})" for idx, row in df_inventarios.iterrows()]
             inventario_selected = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
             
-            # --- CRITICAL FIX EXTRAÇÃO DE ID SEGURO ---
-            # Isola puramente a numeração inteira limpa para evitar falhas de cruzamento no banco de dados SQLite
-            match_id_num = re.search(r'\d+', inventario_selected)
-            id_inventario_atual = match_id_num.group(0) if match_id_num else None
+            # --- FIX DEFINITIVO DE EXTRAÇÃO DO ID DE CONTEXTO ---
+            match_id_num = re.search(r'#(\d+)', inventario_selected)
+            id_inventario_atual = match_id_num.group(1) if match_id_num else None
             inventario_selected_obj = df_inventarios[df_inventarios['id'].str.replace('#', '', regex=False) == id_inventario_atual].iloc[0] if id_inventario_atual else None
 
         if id_inventario_atual:
@@ -352,17 +366,13 @@ else:
         st.write("**PROGRESSO GLOBAL**")
         st.progress(progresso)
 
-    if st.session_state.ultimo_item_sucesso:
-        st.success(st.session_state.ultimo_item_sucesso)
-        st.session_state.ultimo_item_sucesso = ""
-
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque"]
     aba_contar, aba_atual, aba_supervisor, aba_acuracidade, aba_historico_geral, aba_base = st.tabs(abas)
     
     # --- ABA 1: CONTAR ITEM ---
     with aba_contar:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
-            st.warning("⚠️ Mapeie o inventário e faça o upload da base na barra lateral.")
+            st.warning("⚠️ Mapeie o inventário e faça o upload da base na barra lateral para liberar a digitação.")
         elif inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado":
             st.error("🔒 Este inventário operacional está Fechado.")
         else:
@@ -473,7 +483,7 @@ else:
                                     st.session_state.contador_reset += 1
                                     st.rerun()
                 else:
-                    st.error("❌ Código ou Ativo não localizado na base.")
+                    st.error("⚠️ Código ou Ativo não localizado na base deste inventário. Verifique se o arquivo correto foi importado para esta pasta.")
 
     # --- ABA 2: CONTAGEM ATUAL ---
     with aba_atual:
@@ -524,7 +534,7 @@ else:
         else:
             st.dataframe(df_todas_auditorias_banco, use_container_width=True, hide_index=True)
 
-    # --- ABA 5: HISTÓRICO GERAL ---
+    # --- ABA 5: HISTÓRICO GERAL (SISTEMA DE PERSISTÊNCIA VITALÍCIA) ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
         df_pastas_com_contagem = pd.read_sql_query("SELECT DISTINCT inventario_id FROM contagens", conn)
