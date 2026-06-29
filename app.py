@@ -5,6 +5,7 @@ import sqlite3
 import io
 import base64
 import os
+import re
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Contagem de Estoque Físico - JBA", layout="wide")
@@ -192,9 +193,6 @@ if 'ultimo_item_sucesso' not in st.session_state: st.session_state.ultimo_item_s
 if 'pagina_historico' not in st.session_state: st.session_state.pagina_historico = 0
 if 'pagina_historico_sup' not in st.session_state: st.session_state.pagina_historico_sup = 0
 
-def limpar_documento(doc):
-    return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
-
 # --- TELA DE ACESSO ---
 if not st.session_state.logged_in:
     conn = conectar_banco()
@@ -288,11 +286,15 @@ else:
         else:
             lista_inv = [f"{row['id']} – {row['nome']} ({row['status']})" for idx, row in df_inventarios.iterrows()]
             inventario_selected = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
-            id_inventario_atual = inventario_selected.split(" – ")[0] if " – " in inventario_selected else None
-            inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0] if id_inventario_atual else None
+            
+            # --- CRITICAL FIX EXTRAÇÃO DE ID SEGURO ---
+            # Isola puramente a numeração inteira limpa para evitar falhas de cruzamento no banco de dados SQLite
+            match_id_num = re.search(r'\d+', inventario_selected)
+            id_inventario_atual = match_id_num.group(0) if match_id_num else None
+            inventario_selected_obj = df_inventarios[df_inventarios['id'].str.replace('#', '', regex=False) == id_inventario_atual].iloc[0] if id_inventario_atual else None
 
         if id_inventario_atual:
-            id_pasta_limpo_base = id_inventario_atual.replace("#", "")
+            id_pasta_limpo_base = id_inventario_atual
             df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote, ativo FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
             if not df_base_persistida.empty:
                 st.session_state.base_sistema = df_base_persistida.rename(columns={'desc_estoque_fisico': 'descestoquefisico', 'id_estoque_fisico': 'idestoquefísico'})
@@ -338,7 +340,7 @@ else:
         total_itens_base, total_contados, total_pendentes, progresso = 0, 0, 0, 0.0
         if st.session_state.base_sistema is not None and id_inventario_atual:
             total_itens_base = len(st.session_state.base_sistema)
-            df_contagens_atuais_side = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
+            df_contagens_atuais_side = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual,))
             contados_validos_set = set(df_contagens_atuais_side['cod_produto'].astype(str).str.upper().str.strip().tolist()) if not df_contagens_atuais_side.empty else set()
             total_contados = len(df_contagens_atuais_side)
             total_pendentes = max(0, total_itens_base - len(contados_validos_set))
@@ -377,7 +379,7 @@ else:
             if codigo_input:
                 busca_limpa = str(codigo_input).upper().strip()
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
-                id_pasta_limpo = id_inventario_atual.replace("#", "")
+                id_pasta_limpo = id_inventario_atual
                 
                 # Procura por ativo
                 df_busca_por_ativo = st.session_state.base_sistema[st.session_state.base_sistema['ativo'].astype(str).str.upper().str.strip() == codigo_rastreio]
@@ -476,7 +478,7 @@ else:
     # --- ABA 2: CONTAGEM ATUAL ---
     with aba_atual:
         if id_inventario_atual:
-            df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual.replace('#',''),))
+            df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual,))
             if df_contagens_mutaveis.empty:
                 st.info("Nenhum item lançado até o momento.")
             else:
@@ -522,7 +524,7 @@ else:
         else:
             st.dataframe(df_todas_auditorias_banco, use_container_width=True, hide_index=True)
 
-    # --- ABA 5: HISTÓRICO GERAL (PERSISTÊNCIA VITALÍCIA) ---
+    # --- ABA 5: HISTÓRICO GERAL ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
         df_pastas_com_contagem = pd.read_sql_query("SELECT DISTINCT inventario_id FROM contagens", conn)
