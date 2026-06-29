@@ -537,7 +537,7 @@ else:
             if st.session_state.base_sistema is not None:
                 if inventario_selected_obj['status'] == "Aberto":
                     df_c_verif = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ?", conn, params=(id_pasta_limpo,))
-                    lista_contados_set = set(df_c_verif['cod_produto'].astype(str).str.upper().str.strip().tolist())
+                    lista_contados_set = set(df_c_verif['cod_produto'].astype(str).str.upper().str.strip().tolist()) if not df_c_verif.empty else set()
                     for idx, r_base in st.session_state.base_sistema.iterrows():
                         cod_b = str(r_base['cod_produto']).upper().strip()
                         if cod_b not in lista_contados_set:
@@ -545,11 +545,11 @@ else:
                     if len(itens_esquecidos_lista) == 0:
                         pode_fechar = True
                 else:
-                    df_recontados = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND fase_contagem = '2a Contagem' AND qtd_contada > 0", conn, params=(id_pasta_limpo,))
-                    set_recontados = set(df_recontados['cod_produto'].astype(str).str.upper().str.strip().tolist())
+                    df_recontados = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND fase_contagem = '2a Contagem' AND qtd_contada > 0", conn, params=(id_pasta_limpo,)))
+                    set_recontados = set(df_recontados['cod_produto'].astype(str).str.upper().str.strip().tolist()) if not df_recontados.empty else set()
                     
                     df_alvos_divergentes = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ? AND fase_contagem = '2a Contagem'", conn, params=(id_pasta_limpo,))
-                    set_alvos = set(df_alvos_divergentes['cod_produto'].astype(str).str.upper().str.strip().tolist())
+                    set_alvos = set(df_alvos_divergentes['cod_produto'].astype(str).str.upper().str.strip().tolist()) if not df_alvos_divergentes.empty else set()
                     
                     itens_faltantes_recontar = set_alvos - set_recontados
                     if len(itens_faltantes_recontar) == 0:
@@ -564,7 +564,7 @@ else:
                     conn.commit()
                     st.rerun()
             else:
-                st.error(f"❌ Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materials na lista.")
+                st.error(f"❌ Fechamento Bloqueado: Faltam {len(itens_esquecidos_lista)} materiais na lista.")
                 if eh_supervisor:
                     st.warning("👤 Yago Rodrigues detectado. Deseja forçar o encerramento?")
                     if st.button("⚠️ Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
@@ -582,7 +582,7 @@ else:
             else:
                 df_contagens_atuais_side = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? AND operador = ?", conn, params=(id_inventario_atual.replace('#',''), st.session_state.operador))
                 
-            contados_validos_set = set(df_contagens_atuais_side['cod_produto'].astype(str).str.upper().str.strip().tolist())
+            contados_validos_set = set(df_contagens_atuais_side['cod_produto'].astype(str).str.upper().str.strip().tolist()) if not df_contagens_atuais_side.empty else set()
             total_contados = len(df_contagens_atuais_side)
             total_pendentes = max(0, total_itens_base - len(contados_validos_set))
             if total_itens_base > 0:
@@ -909,31 +909,20 @@ else:
         else:
             st.info("Nenhum inventário selecionado.")
 
-    # --- ABA 5: HISTÓRICO GERAL (SISTEMA DE CAPTURA ROBUSTA CONTRA OCULTAÇÕES DE PASTA) ---
+    # --- ABA 5: HISTÓRICO GERAL (SISTEMA DE PERSISTÊNCIA VITALÍCIA) ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
         
-        ignorar_calendario = st.checkbox("🔓 Mostrar todas as pastas sem travar intervalo de datas (Recomendado para ver dados antigos)", value=True)
-        
-        if not ignorar_calendario:
-            c_dt1, c_dt2 = st.columns(2)
-            with c_dt1:
-                data_inicio_filtro = st.date_input("Data Inicial", datetime.date.today() - datetime.timedelta(days=90), key="hist_dt_ini")
-            with c_dt2:
-                data_fim_filtro = st.date_input("Data Final", datetime.date.today() + datetime.timedelta(days=1), key="hist_dt_fim")
-            
-        st.markdown("---")
-        
-        # --- RECONSTRUÇÃO DA CAPTURA INTELEGENTE DE PASTAS ---
-        # Em vez de olhar apenas para a tabela 'inventarios' (que pode sofrer com perdas ou inconsistências), 
-        # puxamos todas as pastas que possuem lançamentos reais guardados no histórico de contagens.
+        # --- CARREGAMENTO DIRETAMENTE DAS CONTAGEIS REAIS DO BANCO ---
+        # Varre a tabela de lançamentos reais para encontrar todos os códigos de inventários existentes.
+        # Isso ignora restrições estritas de calendário de criação e garante que nenhuma pasta suma por virada de semana.
         df_pastas_com_contagem = pd.read_sql_query("SELECT DISTINCT inventario_id FROM contagens", conn)
         
         lista_pastas_detectadas = []
         if not df_pastas_com_contagem.empty:
             for _, r_p in df_pastas_com_contagem.iterrows():
                 id_limpo_c = str(r_p['inventario_id']).strip()
-                # Tenta buscar metadados estruturados na tabela de inventarios
+                # Cruza os metadados existentes da tabela de inventários para trazer o nome real da pasta
                 match_meta = df_inventarios[df_inventarios['id'].str.replace('#', '', regex=False) == id_limpo_c]
                 
                 if not match_meta.empty:
@@ -944,26 +933,20 @@ else:
                         "status": match_meta.iloc[0]['status']
                     })
                 else:
-                    # Se a pasta sumiu da listagem principal por virada de data ou semana, cria uma linha virtual permanente para resgatar
+                    # Se os metadados da pasta expirarem da tabela principal por virada de tempo, 
+                    # gera uma linha virtual permanente fixada na listagem de consultas.
                     lista_pastas_detectadas.append({
                         "id": f"#{id_limpo_c}",
-                        "nome": f"Inventário Histórico - Código #{id_limpo_c}",
-                        "data": "Período Anterior",
-                        "status": "Histórico Fixo"
+                        "nome": f"Inventário Histórico - Saldo Geral #{id_limpo_c}",
+                        "data": "Período Armazenado",
+                        "status": "Histórico Permanente"
                     })
                     
-        # Converte as pastas mapeadas em DataFrame para manter a paginação e os filtros funcionando
         df_inventarios_filtrados = pd.DataFrame(lista_pastas_detectadas)
         
         if df_inventarios_filtrados.empty:
-            st.info("Nenhum inventário operacional ou contagem registrada foi localizado no banco de dados.")
+            st.info("Nenhum inventário operacional ou histórico de contagens registrado foi localizado no banco de dados.")
         else:
-            if not ignorar_calendario:
-                df_inventarios_filtrados['datetime_parsed'] = pd.to_datetime(df_inventarios_filtrados['data'], errors='coerce').dt.date
-                df_inventarios_filtrados = df_inventarios_filtrados[
-                    (df_inventarios_filtrados['datetime_parsed'] >= data_inicio_filtro) | (df_inventarios_filtrados['data'] == "Período Anterior")
-                ]
-            
             tamanho_pagina = 15
             total_itens = len(df_inventarios_filtrados)
             total_paginas = (total_itens - 1) // tamanho_pagina + 1 if total_itens > 0 else 1
@@ -975,7 +958,7 @@ else:
             fim_idx = inicio_idx + tamanho_pagina
             
             df_pagina_atual = df_inventarios_filtrados.iloc[inicio_idx:fim_idx]
-            st.write(f"Exibindo do **{inicio_idx + 1}º** ao **{min(fim_idx, total_itens)}º** inventário (Total de {total_itens} pastas históricas localizadas).")
+            st.write(f"Exibindo do **{inicio_idx + 1}º** ao **{min(fim_idx, total_itens)}º** inventário (Total de {total_itens} pastas permanentes no banco).")
             
             for idx, inv in df_pagina_atual.iterrows():
                 id_inv_proc = inv['id'].replace('#','')
@@ -983,7 +966,7 @@ else:
                     
                 c_exp_g, c_del_g = st.columns([8, 2])
                 with c_exp_g:
-                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Mapeamento: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} contados permanentemente)"):
+                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Período: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} lançamentos salvos)"):
                         if not df_hist_inv.empty:
                             excel_geral_hist = converter_para_excel(df_hist_inv)
                             st.download_button(label="📥 Baixar Lançamentos Feitos em Excel", data=excel_geral_hist, file_name=f"inventario_geral_{inv['id']}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"dl_ger_{inv['id']}_{idx}")
@@ -1015,13 +998,13 @@ else:
                                 st.success("🎯 Inventário Perfeito! 100% mapeado.")
                 with c_del_g:
                     if eh_supervisor:
-                        if st.button("🗑 Romano / Deletar", key=f"del_folder_ger_{inv['id']}_{idx}", use_container_width=True):
+                        if st.button("🗑️ Deletar Pasta", key=f"del_folder_ger_{inv['id']}_{idx}", use_container_width=True):
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
                             cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (inv['id'].replace('#',''),))
                             cursor.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (inv['id'].replace('#',''),))
                             conn.commit()
-                            st.success("Pasta deletada!")
+                            st.success("Pasta e dados excluídos permanentemente!")
                             st.rerun()
                             
             st.markdown("---")
