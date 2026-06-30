@@ -367,7 +367,18 @@ else:
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">✅ LANÇAMENTOS GERAIS</div><div class="card-lateral-valor">{total_contados}</div></div>', unsafe_allow_html=True)
         st.write("**PROGRESSO GLOBAL**")
         st.progress(progresso)
+        
+        # --- BLINDAGEM DO BOTÃO DE FECHAMENTO VOLTADO À SIDEBAR ---
+        if inventario_selected_obj is not None and inventario_selected_obj['status'] in ["Aberto", "2a Contagem"]:
+            st.markdown("---")
+            if st.button("🔒 Fechar Inventário e Finalizar", use_container_width=True, type="primary"):
+                cursor = conn.cursor()
+                cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (f"#{id_inventario_atual}",))
+                conn.commit()
+                st.success("✅ Inventário encerrado com sucesso!")
+                st.rerun()
 
+    st.markdown("---")
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque"]
     aba_contar, aba_atual, aba_supervisor, aba_acuracidade, aba_historico_geral, aba_base = st.tabs(abas)
     
@@ -408,8 +419,7 @@ else:
                     for l in lotes_totais:
                         df_ativos_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == l]
                         
-                        # --- FIX BLINDAGEM COMPACTA PYTHON PURO PARA AS LINHAS 411 A 420 ---
-                        # Remove a conversão do Pandas .str que causava AttributeError em DataFrames sem colunas de ativos preenchidas
+                        # --- FIX BLINDAGEM COMPACTA PYTHON PURO PARA EVITAR ATTRIBUTERROR ---
                         col_verif_ativo = next((c for c in df_ativos_do_lote.columns if str(c).strip().lower() in ['ativo', 'nº ativo', 'numero ativo']), None)
                         if col_verif_ativo is not None and col_verif_ativo in df_ativos_do_lote.columns and not df_ativos_do_lote.empty:
                             lista_bruta_ativos = df_ativos_do_lote[col_verif_ativo].dropna().tolist()
