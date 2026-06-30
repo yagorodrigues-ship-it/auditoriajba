@@ -111,7 +111,6 @@ def inicializar_banco():
     """)
     
     # --- GARANTIA ABSOLUTA DE ADMIN PADRÃO ---
-    # Força a inserção caso o e-mail específico do administrador não exista na tabela
     cursor.execute("SELECT * FROM usuarios WHERE email = 'admin@tel.com.br'")
     if cursor.fetchone() is None:
         cursor.execute("""
@@ -408,7 +407,13 @@ else:
                     lotes_disponiveis = []
                     for l in lotes_totais:
                         df_ativos_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == l]
-                        ativos_lote_set = set(df_ativos_do_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
+                        
+                        # --- FIX BLINDAGEM LINHA 411: Tratamento de DataFrame de lote vazio ---
+                        if not df_ativos_do_lote.empty and 'ativo' in df_ativos_do_lote.columns:
+                            ativos_lote_set = set(df_ativos_do_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
+                        else:
+                            ativos_lote_set = set()
+                            
                         assets_lancados_set = obter_ativos_lancados_com_seguranca(conn, id_pasta_limpo, codigo_rastreio, l)
                         if len(ativos_lote_set - assets_lancados_set) > 0 or len(ativos_lote_set) == 0:
                             lotes_disponiveis.append(l)
@@ -569,7 +574,7 @@ else:
                             st.dataframe(df_hist_inv, use_container_width=True, hide_index=True)
                 with c_del_g:
                     if eh_supervisor:
-                        if st.button("🗑 interviewee Deletar", key=f"del_folder_ger_{inv['id']}_{idx}", use_container_width=True):
+                        if st.button("🗑️ Deletar Pasta", key=f"del_folder_ger_{inv['id']}_{idx}", use_container_width=True):
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
                             cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (id_inv_proc,))
