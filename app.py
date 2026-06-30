@@ -408,9 +408,10 @@ else:
                     for l in lotes_totais:
                         df_ativos_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == l]
                         
-                        # --- FIX BLINDAGEM LINHA 411: Tratamento de DataFrame de lote vazio ---
-                        if not df_ativos_do_lote.empty and 'ativo' in df_ativos_do_lote.columns:
-                            ativos_lote_set = set(df_ativos_do_lote['ativo'].dropna().astype(str).str.strip().upper().tolist())
+                        # --- TRAVA DE SEGURANÇA ROBUSTA CORRIGIDA PARA LINHA 411 ---
+                        col_verif_ativo = next((c for c in df_ativos_do_lote.columns if str(c).strip().lower() in ['ativo', 'nº ativo', 'numero ativo']), None)
+                        if col_verif_ativo and not df_ativos_do_lote.empty:
+                            ativos_lote_set = set(df_ativos_do_lote[col_verif_ativo].dropna().astype(str).str.strip().upper().tolist())
                         else:
                             ativos_lote_set = set()
                             
