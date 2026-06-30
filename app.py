@@ -269,12 +269,12 @@ else:
             cursor_db = conn.cursor()
             cursor_db.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (id_inventario_atual,))
             
-            # --- MOTOR DE MAPEAMENTO DISCRIMINADO EXCLUSIVO CONTRA "ID. ATIVO" ---
+            # --- MOTOR DE PROCURA EXCLUSIVO CONTRA "ID. ATIVO" ---
             def obter_coluna_por_procura(termos, index_padrao, proibir=None):
                 for t in termos:
                     for col in df_upload_temp.columns:
                         col_str = str(col).lower().replace(" ", "").replace(".", "").replace("_", "")
-                        if t.lower() in col_str:
+                        if t.lower() == col_str or (t.lower() in col_str and not proibir):
                             if proibir and any(p.lower() in col_str for p in proibir):
                                 continue
                             return col
@@ -290,8 +290,8 @@ else:
             c_id_est = obter_coluna_por_procura(['idestoquefísico', 'idestoque', 'codestoque', 'centro', 'idest'], 0)
             c_lote = obter_coluna_por_procura(['lote', 'batch', 'lot'], 0)
             
-            # Trava Estrita: Captura apenas se contiver 'ativo', e proíbe terminantemente colunas com o prefixo 'id' ou 'codigo' associados
-            c_ativo = obter_coluna_por_procura(['ativo', 'patrimonio', 'asset'], 0, proibir=['id', 'cod', 'codigo', 'código', 'num', 'numero'])
+            # TRAVA DE SEGURANÇA MÁXIMA: Só aceita se for EXATAMENTE a palavra "ativo" ou "nºativo", proibindo "id"
+            c_ativo = obter_coluna_por_procura(['ativo', 'nºativo', 'patrimonio', 'asset'], 0, proibir=['id', 'cod', 'codigo', 'código', 'identificador'])
             
             for _, r in df_upload_temp.iterrows():
                 cod_final = str(r[c_cod]).strip().upper() if c_cod in df_upload_temp.columns and pd.notna(r[c_cod]) else ""
@@ -302,13 +302,14 @@ else:
                 id_est_final = str(r[c_id_est]).strip() if c_id_est in df_upload_temp.columns and pd.notna(r[c_id_est]) else "1"
                 lote_item_v = str(r[c_lote]).strip() if c_lote in df_upload_temp.columns and pd.notna(r[c_lote]) else ""
                 
-                # Validação final do valor bruto capturado da planilha
                 ativo_item_v = ""
                 if c_ativo in df_upload_temp.columns and pd.notna(r[c_ativo]):
-                    bruto_ativo = str(r[c_ativo]).strip()
-                    # Se o valor for puramente um ID residual igual ao do exemplo relatado (1864380), anula.
-                    if bruto_ativo and bruto_ativo.lower() != 'nan' and bruto_ativo != '1864380':
-                        ativo_item_v = bruto_ativo
+                    col_nome_original = str(c_ativo).lower().replace(" ", "")
+                    # Blindagem dupla: se o nome real da coluna mapeada contiver "id", descarta na hora
+                    if "id" not in col_nome_original:
+                        bruto_ativo = str(r[c_ativo]).strip()
+                        if bruto_ativo and bruto_ativo.lower() != 'nan' and bruto_ativo != '0':
+                            ativo_item_v = bruto_ativo
 
                 if cod_final != "" and cod_final.lower() != 'nan':
                     cursor_db.execute("""
@@ -392,15 +393,13 @@ else:
                 
                 if not df_busca_por_ativo.empty:
                     codigo_produto_alvo = str(df_busca_por_ativo.iloc[0]['cod_produto']).upper().strip()
-                else:
-                    codigo_produto_alvo = codigo_produto_alvo
 
                 itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
                 
                 if not itens_filtrados.empty:
                     def checar_ativo_real(val):
                         s = str(val).strip()
-                        if not s or s.lower() in ['nan', '0', '', '-', 'n/a', 'sem ativo', '1864380']:
+                        if not s or s.lower() in ['nan', '0', '', '-', 'n/a', 'sem ativo']:
                             return False
                         return bool(re.match(r'^\d+$', s))
 
@@ -473,7 +472,7 @@ else:
                                 st.session_state.contador_reset += 1
                                 st.rerun()
                 else:
-                    st.error("⚠️ Código ou Ativo não localizado na base deste inventário. Se acabou de carregar a base, tente criar um novo inventário para ler as colunas corretamente.")
+                    st.error("⚠️ Código ou Ativo não localizado na base deste inventário. Por ter atualizado o filtro, crie um NOVO inventário lateral para processar as colunas corretamente.")
 
     # --- ABA 2: CONTAGEM ATUAL ---
     with aba_atual:
