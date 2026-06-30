@@ -145,10 +145,11 @@ def converter_para_excel(df):
 
 def obter_ativos_lancados_com_seguranca(conn, inventario_id, cod_produto, lote=None):
     try:
+        id_limpo = str(inventario_id).replace('#', '').strip()
         if lote:
-            df = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(inventario_id, cod_produto, lote))
+            df = pd.read_sql_query("SELECT ativo FROM contagens WHERE (inventario_id = ? OR inventario_id = ?) AND cod_produto = ? AND lote = ?", conn, params=(id_limpo, f"#{id_limpo}", cod_produto, lote))
         else:
-            df = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ?", conn, params=(inventario_id, cod_produto))
+            df = pd.read_sql_query("SELECT ativo FROM contagens WHERE (inventario_id = ? OR inventario_id = ?) AND cod_produto = ?", conn, params=(id_limpo, f"#{id_limpo}", cod_produto))
         
         if not df.empty and 'ativo' in df.columns:
             return set(df['ativo'].dropna().astype(str).str.strip().upper().tolist())
@@ -354,29 +355,42 @@ else:
 
         # PROGRESSO LATERAL
         total_itens_base, total_contados, total_pendentes, progresso = 0, 0, 0, 0.0
+        pode_fechar_sozinho = False
         if st.session_state.base_sistema is not None and id_inventario_atual:
             total_itens_base = len(st.session_state.base_sistema)
-            df_contagens_atuais_side = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual,))
+            df_contagens_atuais_side = pd.read_sql_query("SELECT * FROM contagens WHERE (inventario_id = ? OR inventario_id = ?)", conn, params=(id_inventario_atual, f"#{id_inventario_atual}"))
             contados_validos_set = set(df_contagens_atuais_side['cod_produto'].astype(str).str.upper().str.strip().tolist()) if not df_contagens_atuais_side.empty else set()
             total_contados = len(df_contagens_atuais_side)
             total_pendentes = max(0, total_itens_base - len(contados_validos_set))
             if total_itens_base > 0: progresso = min(1.0, len(contados_validos_set) / total_itens_base)
+            if total_pendentes == 0: pode_fechar_sozinho = True
 
         st.markdown("---")
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">📋 ITENS NA BASE</div><div class="card-lateral-valor">{total_itens_base}</div></div>', unsafe_allow_html=True)
         st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">✅ LANÇAMENTOS GERAIS</div><div class="card-lateral-valor">{total_contados}</div></div>', unsafe_allow_html=True)
         st.write("**PROGRESSO GLOBAL**")
         st.progress(progresso)
-        
-        # --- BLINDAGEM DO BOTÃO DE FECHAMENTO VOLTADO À SIDEBAR ---
+
+        # --- MÓDULO DE FECHAMENTO INTELIGENTE ADAPTADO ---
         if inventario_selected_obj is not None and inventario_selected_obj['status'] in ["Aberto", "2a Contagem"]:
             st.markdown("---")
-            if st.button("🔒 Fechar Inventário e Finalizar", use_container_width=True, type="primary"):
-                cursor = conn.cursor()
-                cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (f"#{id_inventario_atual}",))
-                conn.commit()
-                st.success("✅ Inventário encerrado com sucesso!")
-                st.rerun()
+            if pode_fechar_sozinho:
+                if st.button("🔒 Fechar Inventário e Finalizar", use_container_width=True, type="primary"):
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? OR id = ?", (id_inventario_atual, f"#{id_inventario_atual}"))
+                    conn.commit()
+                    st.success("✅ Inventário encerrado com sucesso!")
+                    st.rerun()
+            else:
+                st.error(f"❌ Fechamento Bloqueado: Faltam {total_pendentes} materiais na lista.")
+                if eh_supervisor:
+                    st.warning("👤 Perfil Supervisor Ativo. Liberar encerramento forçado?")
+                    if st.button("⚠️ Forçar Fechamento Incompleto (ADMIN)", use_container_width=True, type="primary"):
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? OR id = ?", (id_inventario_atual, f"#{id_inventario_atual}"))
+                        conn.commit()
+                        st.success("✅ Pasta fechada incompleta com autorização ADM!")
+                        st.rerun()
 
     st.markdown("---")
     abas = ["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📈 Acuracidade Estoque", "📁 Histórico Geral", "📄 Base de Estoque"]
@@ -387,7 +401,7 @@ else:
         if id_inventario_atual is None or st.session_state.base_sistema is None:
             st.warning("⚠️ Mapeie o inventário e faça o upload da base na barra lateral para liberar a digitação.")
         elif inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado":
-            st.error("🔒 Este inventário operacional está Fechado.")
+            st.error("🔒 Este inventário operacional está Fechado e Concluído.")
         else:
             c_busca, c_filtro, c_limpar = st.columns([5, 3, 2])
             with c_busca:
@@ -404,7 +418,6 @@ else:
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
                 id_pasta_limpo = id_inventario_atual
                 
-                # Procura por ativo
                 df_busca_por_ativo = st.session_state.base_sistema[st.session_state.base_sistema['ativo'].astype(str).str.upper().str.strip() == codigo_rastreio]
                 ativo_bipado_direto = None
                 if not df_busca_por_ativo.empty:
@@ -419,7 +432,6 @@ else:
                     for l in lotes_totais:
                         df_ativos_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == l]
                         
-                        # --- FIX BLINDAGEM COMPACTA PYTHON PURO PARA EVITAR ATTRIBUTERROR ---
                         col_verif_ativo = next((c for c in df_ativos_do_lote.columns if str(c).strip().lower() in ['ativo', 'nº ativo', 'numero ativo']), None)
                         if col_verif_ativo is not None and col_verif_ativo in df_ativos_do_lote.columns and not df_ativos_do_lote.empty:
                             lista_bruta_ativos = df_ativos_do_lote[col_verif_ativo].dropna().tolist()
@@ -493,7 +505,7 @@ else:
                                     cursor = conn.cursor()
                                     fase_atual = "1a Contagem" if inventario_selected_obj['status'] == "Aberto" else "2a Contagem"
                                     if fase_atual == "2a Contagem":
-                                        cursor.execute("DELETE FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ? AND fase_contagem = '2a Contagem'", (id_pasta_limpo, codigo_rastreio, lote_selecionado))
+                                        cursor.execute("DELETE FROM contagens WHERE (inventario_id = ? OR inventario_id = ?) AND cod_produto = ? AND lote = ? AND fase_contagem = '2a Contagem'", (id_pasta_limpo, f"#{id_pasta_limpo}", codigo_rastreio, lote_selecionado))
                                     
                                     cursor.execute("""
                                         INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote, fase_contagem)
@@ -509,42 +521,55 @@ else:
     # --- ABA 2: CONTAGEM ATUAL ---
     with aba_atual:
         if id_inventario_atual:
-            df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual,))
+            df_contagens_mutaveis = pd.read_sql_query("SELECT * FROM contagens WHERE (inventario_id = ? OR inventario_id = ?) ORDER BY id DESC", conn, params=(id_inventario_atual, f"#{id_inventario_atual}"))
             if df_contagens_mutaveis.empty:
                 st.info("Nenhum item lançado até o momento.")
             else:
+                if 'inventario_id' in df_contagens_mutaveis.columns:
+                    df_contagens_mutaveis['inventario_id'] = df_contagens_mutaveis['inventario_id'].astype(str).str.replace('#', '', regex=False)
                 st.dataframe(df_contagens_mutaveis, use_container_width=True, hide_index=True)
         else:
             st.info("Selecione um inventário.")
 
-    # --- ABA 3: PAINEL SUPERVISOR ---
+    # --- ABA 3: PAINEL SUPERVISOR REVERSO ---
     with aba_supervisor:
         st.title("🔬 Painel de Gestão e Auditoria do Supervisor")
         if not eh_supervisor:
             st.error("🚫 Acesso restrito ao Supervisor.")
         else:
-            st.subheader("🔄 Módulo ADM de Liberação de 2ª Contagem")
-            df_todas_divergentes = pd.read_sql_query("SELECT * FROM contagens WHERE diferenca != 0 AND fase_contagem = '1a Contagem'", conn)
+            st.subheader("🔄 Reabertura de Contagens por Divergência (Habilitado para Qualquer Status)")
+            df_todas_contadas_historico = pd.read_sql_query("SELECT DISTINCT inventario_id FROM contagens", conn)
             
-            if df_todas_divergentes.empty:
-                st.success("🎉 Nenhuma divergência operacional pendente de tratamento nas primeiras contagens.")
+            if df_todas_contadas_historico.empty:
+                st.info("Nenhuma contagem realizada no banco de dados para auditar.")
             else:
-                ids_com_erro = df_todas_divergentes['inventario_id'].unique().tolist()
-                opcoes_pastas = [f"#{id_p}" for id_p in ids_com_erro]
-                pasta_selecionada_erro = st.selectbox("📂 Escolha a pasta do inventário divergente:", opcoes_pastas, key="sb_reabrir_2a")
-                id_pasta_limpo = pasta_selecionada_erro.replace("#", "")
+                pastas_historicas_opcoes = [f"#{str(row['inventario_id']).replace('#', '')}" for idx, row in df_todas_contadas_historico.iterrows()]
+                pastas_historicas_opcoes = list(set(pastas_historicas_opcoes))
                 
-                df_erros_desta_pasta = df_todas_divergentes[df_todas_divergentes['inventario_id'] == id_pasta_limpo]
-                opcoes_materiais = [f"{r['cod_produto']} - {r['desc_produto']} (Lote: {r['lote']})" for _, r in df_erros_desta_pasta.iterrows()]
-                material_selecionado_combo = st.selectbox("Escolha o material com erro para autorizar a 2ª Contagem:", opcoes_materiais)
-                cod_material_alvo = material_selecionado_combo.split(" - ")[0]
+                sb_pasta_reabrir = st.selectbox("📂 Escolha o Inventário para auditar/reabrir a 2a contagem:", pastas_historicas_opcoes)
+                id_pasta_audit_limpo = sb_pasta_reabrir.replace("#", "")
                 
-                if st.button("🚨 Abrir e Liberar 2ª Contagem para Almoxarife", type="primary", use_container_width=True):
-                    cursor = conn.cursor()
-                    cursor.execute("UPDATE inventarios SET status = '2a Contagem' WHERE id = ?", (f"#{id_pasta_limpo}",))
-                    conn.commit()
-                    st.success(f"🎉 Pasta #{id_pasta_limpo} alterada para '2a Contagem'!")
-                    st.rerun()
+                df_itens_da_pasta = pd.read_sql_query("SELECT id, cod_produto, desc_produto, lote, operador, qtd_contada, diferenca, fase_contagem FROM contagens WHERE (inventario_id = ? OR inventario_id = ?)", conn, params=(id_pasta_audit_limpo, f"#{id_pasta_audit_limpo}"))
+                
+                if df_itens_da_pasta.empty:
+                    st.warning("Nenhum item localizado.")
+                else:
+                    st.dataframe(df_itens_da_pasta, use_container_width=True, hide_index=True)
+                    
+                    with st.form("form_adm_reabertura_forcada"):
+                        opcoes_materiais_reabrir = [f"{r['cod_produto']} - {r['desc_produto']} (Lote: {r['lote']} | Operador: {r['operador']})" for _, r in df_itens_da_pasta.iterrows()]
+                        material_alvo_recontar = st.selectbox("Escolha o item para anular e mandar para 2a Contagem:", opcoes_materials_reabrir)
+                        cod_material_final = material_alvo_recontar.split(" - ")[0]
+                        
+                        if st.form_submit_button("🚨 Forçar Mudar Status e Liberar 2ª Contagem", type="primary", use_container_width=True):
+                            cursor = conn.cursor()
+                            # Altera o status do inventário de volta para "2a Contagem"
+                            cursor.execute("UPDATE inventarios SET status = '2a Contagem' WHERE id = ? OR id = ?", (id_pasta_audit_limpo, f"#{id_pasta_audit_limpo}"))
+                            # Reseta o registro na tabela de contagens para liberar o almoxarife
+                            cursor.execute("UPDATE contagens SET fase_contagem = '2a Contagem', diferenca = 0, qtd_contada = 0 WHERE (inventario_id = ? OR inventario_id = ?) AND cod_produto = ?", (id_pasta_audit_limpo, f"#{id_pasta_audit_limpo}", cod_material_final))
+                            conn.commit()
+                            st.success(f"🎉 Item {cod_material_final} liberado com sucesso para redigitação!")
+                            st.rerun()
 
     # --- ABA 4: ACURACIDADE ESTOQUE ---
     with aba_acuracidade:
@@ -555,7 +580,7 @@ else:
         else:
             st.dataframe(df_todas_auditorias_banco, use_container_width=True, hide_index=True)
 
-    # --- ABA 5: HISTÓRICO GERAL (SISTEMA DE PERSISTÊNCIA VITALÍCIA) ---
+    # --- ABA 5: HISTÓRICO GERAL (SISTEMA DE PERSISTÊNCIA AMOSTRAL AMOSTRADA) ---
     with aba_historico_geral:
         st.title("📁 Arquivo Geral de Movimentações")
         df_pastas_com_contagem = pd.read_sql_query("SELECT DISTINCT inventario_id FROM contagens", conn)
@@ -565,35 +590,39 @@ else:
         else:
             lista_pastas_detectadas = []
             for _, r_p in df_pastas_com_contagem.iterrows():
-                id_limpo_c = str(r_p['inventario_id']).strip()
+                id_limpo_c = str(r_p['inventario_id']).replace('#', '').strip()
                 match_meta = df_inventarios[df_inventarios['id'].str.replace('#', '', regex=False) == id_limpo_c]
+                
                 lista_pastas_detectadas.append({
                     "id": f"#{id_limpo_c}",
-                    "nome": match_meta.iloc[0]['nome'] if not match_meta.empty else f"Pasta de Saldo Geral #{id_limpo_c}",
-                    "data": match_meta.iloc[0]['data'] if not match_meta.empty else "Armazenado",
-                    "status": match_meta.iloc[0]['status'] if not match_meta.empty else "Histórico Permanente"
+                    "nome": match_meta.iloc[0]['nome'] if not match_meta.empty else f"Inventário Mapeado JBA - Código {id_limpo_c}",
+                    "data": match_meta.iloc[0]['data'] if not match_meta.empty else "Histórico",
+                    "status": match_meta.iloc[0]['status'] if not match_meta.empty else "Encerrado/Armazenado"
                 })
             
-            df_inventarios_filtrados = pd.DataFrame(lista_pastas_detectadas)
+            df_inventarios_filtrados = pd.DataFrame(lista_pastas_detectadas).drop_duplicates(subset=['id'])
             for idx, inv in df_inventarios_filtrados.iterrows():
                 id_inv_proc = inv['id'].replace('#','')
-                df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inv_proc,))
+                df_hist_inv = pd.read_sql_query("SELECT * FROM contagens WHERE (inventario_id = ? OR inventario_id = ?) ORDER BY id DESC", conn, params=(id_inv_proc, f"#{id_inv_proc}"))
                 
+                if 'inventario_id' in df_hist_inv.columns:
+                    df_hist_inv['inventario_id'] = df_hist_inv['inventario_id'].astype(str).str.replace('#', '', regex=False)
+                    
                 c_exp_g, c_del_g = st.columns([8, 2])
                 with c_exp_g:
-                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Período: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} lançamentos salvos)"):
+                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Mapeamento: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} lançamentos salvos)"):
                         if not df_hist_inv.empty:
-                            st.download_button(label="📥 Baixar Excel", data=converter_para_excel(df_hist_inv), file_name=f"inventario_{inv['id']}.xlsx", key=f"dl_ger_{inv['id']}_{idx}")
+                            st.download_button(label="📥 Baixar Planilha em Excel", data=converter_para_excel(df_hist_inv), file_name=f"inventario_{inv['id']}.xlsx", key=f"dl_ger_{inv['id']}_{idx}")
                             st.dataframe(df_hist_inv, use_container_width=True, hide_index=True)
                 with c_del_g:
                     if eh_supervisor:
                         if st.button("🗑️ Deletar Pasta", key=f"del_folder_ger_{inv['id']}_{idx}", use_container_width=True):
                             cursor = conn.cursor()
-                            cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
-                            cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (id_inv_proc,))
-                            cursor.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (id_inv_proc,))
+                            cursor.execute("DELETE FROM inventarios WHERE id = ? OR id = ?", (id_inv_proc, f"#{id_inv_proc}"))
+                            cursor.execute("DELETE FROM contagens WHERE inventario_id = ? OR inventario_id = ?", (id_inv_proc, f"#{id_inv_proc}"))
+                            cursor.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ? OR inventario_id = ?", (id_inv_proc, f"#{id_inv_proc}"))
                             conn.commit()
-                            st.success("Excluído permanentemente!")
+                            st.success("Excluído!")
                             st.rerun()
 
     # --- ABA 6: BASE DE ESTOQUE ---
