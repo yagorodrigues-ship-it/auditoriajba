@@ -408,12 +408,12 @@ else:
                     for l in lotes_totais:
                         df_ativos_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == l]
                         
-                        # --- SAFE ROBUSTA TRAVA CORRIGIDA CONTRA ATTRIBUTERROR DA LINHA 414/415 ---
-                        # Evita erros de processamento limpando a série com dropna() antes de executar conversões de strings
+                        # --- FIX BLINDAGEM COMPACTA PYTHON PURO PARA AS LINHAS 411 A 420 ---
+                        # Remove a conversão do Pandas .str que causava AttributeError em DataFrames sem colunas de ativos preenchidas
                         col_verif_ativo = next((c for c in df_ativos_do_lote.columns if str(c).strip().lower() in ['ativo', 'nº ativo', 'numero ativo']), None)
                         if col_verif_ativo is not None and col_verif_ativo in df_ativos_do_lote.columns and not df_ativos_do_lote.empty:
-                            serie_limpa = df_ativos_do_lote[col_verif_ativo].dropna()
-                            ativos_lote_set = set(serie_limpa.astype(str).str.strip().upper().tolist())
+                            lista_bruta_ativos = df_ativos_do_lote[col_verif_ativo].dropna().tolist()
+                            ativos_lote_set = {str(val).strip().upper() for val in lista_bruta_ativos if str(val).strip() != ""}
                         else:
                             ativos_lote_set = set()
                             
