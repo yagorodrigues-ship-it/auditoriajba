@@ -176,8 +176,7 @@ if not st.session_state.logged_in:
         with st.form("login_form"):
             identificador = st.text_input("CPF (somente números) ou E-mail")
             senha = st.text_input("Senha", type="password")
-            botao_login = st.form_submit_button("Entrar no Sistema", type="primary", use_container_width=True)
-            if botao_login:
+            if st.form_submit_button("Entrar no Sistema", type="primary", use_container_width=True):
                 id_limpo = identificador.strip()
                 doc_limpo = limpar_documento(id_limpo)
                 cursor = conn.cursor()
@@ -200,8 +199,7 @@ if not st.session_state.logged_in:
             novo_email = st.text_input("E-mail")
             nova_senha = st.text_input("Senha", type="password")
             confirma_senha = st.text_input("Confirme a Senha", type="password")
-            btn_cad = st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True)
-            if btn_cad:
+            if st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True):
                 cpf_l = limpar_documento(novo_cpf)
                 if not novo_nome or not cpf_l or not novo_email or not nova_senha:
                     st.error("⚠️ Preencha todos os campos!")
@@ -362,30 +360,25 @@ else:
                     
             if codigo_input:
                 busca_limpa = str(codigo_input).upper().strip()
-                codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
+                codigo_produto_alvo = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
                 id_pasta_limpo = id_inventario_atual
                 
                 df_ja_contados = pd.read_sql_query("SELECT lote, ativo, cod_produto FROM contagens WHERE inventario_id = ?", conn, params=(id_pasta_limpo,))
-                df_busca_por_ativo = st.session_state.base_sistema[st.session_state.base_sistema['ativo'].astype(str).str.upper().str.strip() == codigo_rastreio]
+                df_busca_por_ativo = st.session_state.base_sistema[st.session_state.base_sistema['ativo'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
                 
-                ativo_bipado_direto = None
                 if not df_busca_por_ativo.empty:
-                    ativo_bipado_direto = codigo_rastreio
-                    codigo_rastreio = str(df_busca_por_ativo.iloc[0]['cod_produto']).upper().strip()
+                    codigo_produto_alvo = str(df_busca_por_ativo.iloc[0]['cod_produto']).upper().strip()
+                    itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
                 else:
-                    codigo_rastreio = codigo_rastreio
-                
-                # --- TRAVA DE SEGURANÇA FORÇADA CONTRA FALSOS ATIVOS (EX: REJEITA O ATIVO 1864380 DO CAPACETE) ---
-                if str(codigo_rastreio).upper().strip() == "TECA0227Z":
-                    df_busca_por_ativo = pd.DataFrame()
-                    ativo_bipado_direto = None
+                    codigo_produto_alvo = codigo_produto_alvo
+                    # --- TRAVA PATRIMONIAL DO CAPACETE FIXADA ---
+                    if str(codigo_produto_alvo).upper().strip() == "TECA0227Z":
+                        df_busca_por_ativo = pd.DataFrame()
 
-                itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_rastreio]
+                itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
                 
                 if not itens_filtrados.empty:
-                    # --- FILTRAGEM DINÂMICA PYTHON PURO DE SEGURANÇA ---
                     def checar_ativo_real(val, prod_cod):
-                        # Se for o martelete/capacete específico que não possui ativo patrimonial, bloqueia sumariamente
                         if str(prod_cod).upper().strip() == "TECA0227Z":
                             return False
                         s = str(val).strip()
@@ -393,48 +386,44 @@ else:
                             return False
                         return bool(re.match(r'^\d+$', s))
 
-                    possui_ativo_na_base = any(checar_ativo_real(x, codigo_rastreio) for x in itens_filtrados['ativo'].unique())
+                    possui_ativo_na_base = any(checar_ativo_real(x, codigo_produto_alvo) for x in itens_filtrados['ativo'].unique())
                     
                     lotes_validos_restantes = []
                     ativos_por_lote_restantes = {}
                     
                     for lote_item in itens_filtrados['lote'].dropna().astype(str).str.strip().unique():
                         linhas_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == lote_item]
-                        ativos_do_lote = [a for a in linhas_do_lote['ativo'].dropna().astype(str).str.strip().tolist() if checar_ativo_real(a, codigo_rastreio)]
+                        ativos_do_lote = [a for a in linhas_do_lote['ativo'].dropna().astype(str).str.strip().tolist() if checar_ativo_real(a, codigo_produto_alvo)]
                         
-                        ativos_filtrados = [
-                            a for a in ativos_do_lote 
-                            if not (
-                                (df_ja_contados['cod_produto'].astype(str).str.strip().str.upper() == codigo_rastreio) & 
-                                (df_ja_contados['lote'].astype(str).str.strip().str.upper() == lote_item.upper()) & 
-                                (df_ja_contados['ativo'].astype(str).str.strip().str.upper() == str(a).strip().upper())
-                            ).any()
-                        ]
-                        
-                        if len(ativos_filtrados) > 0 or not possui_ativo_na_base:
-                            lotes_validos_restantes.append(lote_item)
-                            ativos_por_lote_restantes[lote_item] = ativos_filtrados
+                        # --- SOLUÇÃO PYTHON PURO DO NAMEERROR DA LINHA 398 ---
+                        # Elimina o lote se ele já constar como contabilizado na tabela de contagens
+                        if not possui_ativo_na_base:
+                            if not ((df_ja_contados['cod_produto'].astype(str).str.strip().str.upper() == codigo_produto_alvo) & 
+                                    (df_ja_contados['lote'].astype(str).str.strip().str.upper() == lote_item.upper())).any():
+                                lotes_validos_restantes.append(lote_item)
+                        else:
+                            ativos_filtrados = [
+                                a for a in ativos_do_lote 
+                                if not (
+                                    (df_ja_contados['cod_produto'].astype(str).str.strip().str.upper() == codigo_produto_alvo) & 
+                                    (df_ja_contados['lote'].astype(str).str.strip().str.upper() == lote_item.upper()) & 
+                                    (df_ja_contados['ativo'].astype(str).str.strip().str.upper() == str(a).strip().upper())
+                                ).any()
+                            ]
+                            if len(ativos_filtrados) > 0:
+                                lotes_validos_restantes.append(lote_item)
+                                ativos_por_lote_restantes[lote_item] = ativos_filtrados
 
                     if not lotes_validos_restantes:
                         st.success("🎉 Todos os lotes e ativos deste produto já foram completamente contabilizados!")
                     else:
-                        if not df_busca_por_ativo.empty:
-                            lote_padrao = str(df_busca_por_ativo.iloc[0]['lote']).strip()
-                            lote_selecionado = lote_padrao if lote_padrao in lotes_validos_restantes else lotes_validos_restantes[0]
-                        else:
-                            lote_selecionado = st.selectbox("👇 SELECIONE O LOTE PARA CONTAGEM (Apenas pendentes):", lotes_validos_restantes, key="lote_selector_bip")
+                        lote_selecionado = st.selectbox("👇 SELECIONE O LOTE PARA CONTAGEM (Apenas pendentes):", lotes_validos_restantes, key="lote_selector_bip")
 
                         ativos_disponiveis_no_lote = ativos_por_lote_restantes.get(lote_selecionado, [])
                         ativo_selecionado = ""
                         
                         if possui_ativo_na_base and ativos_disponiveis_no_lote:
-                            if not df_busca_por_ativo.empty:
-                                ativo_selecionado = busca_limpa
-                                if ativo_selecionado not in ativos_disponiveis_no_lote:
-                                    st.error(f"🚨 O Ativo {ativo_selecionado} já consta como lançado no banco de dados!")
-                                    ativo_selecionado = ""
-                            else:
-                                ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM (Apenas pendentes):", ativos_disponiveis_no_lote, key="ativo_selector_bip")
+                            ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM (Apenas pendentes):", ativos_disponiveis_no_lote, key="ativo_selector_bip")
 
                         item_especifico = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == lote_selecionado].iloc[0]
 
@@ -445,7 +434,7 @@ else:
                         qtd_sys = int(item_especifico['qtd_estoque']) if 'qtd_estoque' in item_especifico else 0
 
                         b1, b2, b3 = st.columns(3)
-                        b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_rastreio}</div></div>', unsafe_allow_html=True)
+                        b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_produto_alvo}</div></div>', unsafe_allow_html=True)
                         b2.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE FÍSICO</div><div class="bloco-valor">{local_val}</div></div>', unsafe_allow_html=True)
                         b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">LOTE EM CONTAGEM</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
                         
@@ -462,7 +451,7 @@ else:
                                 cursor.execute("""
                                     INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote, fase_contagem)
                                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                                """, (id_pasta_limpo, id_estoque_val, local_val, codigo_rastreio, desc_val, unid_val, qtd_sys, qtd_fisica, qtd_fisica - qtd_sys, str(ativo_selecionado).strip().upper(), observacao, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), lote_selecionado, fase_atual))
+                                """, (id_pasta_limpo, id_estoque_val, local_val, codigo_produto_alvo, desc_val, unid_val, qtd_sys, qtd_fisica, qtd_fisica - qtd_sys, str(ativo_selecionado).strip().upper(), observacao, st.session_state.operador, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), lote_selecionado, fase_atual))
                                 conn.commit()
                                 
                                 st.session_state.contador_reset += 1
@@ -479,7 +468,7 @@ else:
             else:
                 st.dataframe(df_contagens_mutaveis, use_container_width=True, hide_index=True)
 
-    # --- ABA 3: PAINEL SUPERVISOR (MODULO REVERSO REATIVADO) ---
+    # --- ABA 3: PAINEL SUPERVISOR ---
     with aba_supervisor:
         if not eh_supervisor:
             st.error("🚫 Painel exclusivo para o Supervisor.")
@@ -491,7 +480,6 @@ else:
                 st.dataframe(df_painel_adm, use_container_width=True, hide_index=True)
                 st.download_button(label="📥 Exportar Lançamentos para Excel", data=converter_para_excel(df_painel_adm), file_name=f"Inventario_Pasta_{id_inventario_atual}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
                 
-                # --- REABERTURA REVERSA FIXADA ---
                 st.markdown("---")
                 st.subheader("🔄 Corrigir e Liberar Item para Recontagem")
                 with st.form("form_correcao_supervisor"):
