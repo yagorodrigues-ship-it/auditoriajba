@@ -110,6 +110,15 @@ def inicializar_banco():
         )
     """)
     
+    # --- GARANTIA ABSOLUTA DE ADMIN PADRÃO ---
+    # Força a inserção caso o e-mail específico do administrador não exista na tabela
+    cursor.execute("SELECT * FROM usuarios WHERE email = 'admin@tel.com.br'")
+    if cursor.fetchone() is None:
+        cursor.execute("""
+            INSERT INTO usuarios (nome, cpf, email, senha) 
+            VALUES (?, ?, ?, ?)
+        """, ("Administrador Tel", "00000000000", "admin@tel.com.br", "123"))
+        
     conn.commit()
     conn.close()
 
@@ -222,10 +231,6 @@ if not st.session_state.logged_in:
             if st.button("📝 Criar nova conta", use_container_width=True):
                 st.session_state.tela_acesso = "cadastro"
                 st.rerun()
-        with c_rec:
-            if st.button("🔑 Recuperar/Alterar Senha", use_container_width=True):
-                st.session_state.tela_acesso = "recuperar"
-                st.rerun()
     elif st.session_state.tela_acesso == "cadastro":
         st.title("📝 Cadastro de Colaborador")
         with st.form("cadastro_form"):
@@ -283,7 +288,6 @@ else:
                 if st.form_submit_button("Criar", type="primary") and novo_nome:
                     maior_id = 0
                     if not df_inventarios.empty:
-                        # Extrai puramente inteiros para evitar falha com a hashtag
                         ids_nums = df_inventarios['id'].astype(str).str.extract(r'(\d+)').dropna().astype(int)
                         if not ids_nums.empty:
                             maior_id = ids_nums.max().iloc[0]
@@ -302,7 +306,6 @@ else:
             lista_inv = [f"{row['id']} – {row['nome']} ({row['status']})" for idx, row in df_inventarios.iterrows()]
             inventario_selected = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
             
-            # --- FIX DEFINITIVO DE EXTRAÇÃO DO ID DE CONTEXTO ---
             match_id_num = re.search(r'#(\d+)', inventario_selected)
             id_inventario_atual = match_id_num.group(1) if match_id_num else None
             inventario_selected_obj = df_inventarios[df_inventarios['id'].str.replace('#', '', regex=False) == id_inventario_atual].iloc[0] if id_inventario_atual else None
@@ -560,13 +563,13 @@ else:
                 
                 c_exp_g, c_del_g = st.columns([8, 2])
                 with c_exp_g:
-                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Status: {inv['status']} ({len(df_hist_inv)} lançamentos salvos)"):
+                    with st.expander(f"📁 {inv['id']} – {inv['nome']} | Período: {inv['data']} | Status: {inv['status']} ({len(df_hist_inv)} lançamentos salvos)"):
                         if not df_hist_inv.empty:
                             st.download_button(label="📥 Baixar Excel", data=converter_para_excel(df_hist_inv), file_name=f"inventario_{inv['id']}.xlsx", key=f"dl_ger_{inv['id']}_{idx}")
                             st.dataframe(df_hist_inv, use_container_width=True, hide_index=True)
                 with c_del_g:
                     if eh_supervisor:
-                        if st.button("🗑️ Deletar Pasta Operational", key=f"del_folder_ger_{inv['id']}_{idx}", use_container_width=True):
+                        if st.button("🗑 interviewee Deletar", key=f"del_folder_ger_{inv['id']}_{idx}", use_container_width=True):
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM inventarios WHERE id = ?", (inv['id'],))
                             cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (id_inv_proc,))
