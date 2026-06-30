@@ -88,42 +88,24 @@ inicializar_banco()
 
 # --- LISTA FIXA DE ESTOQUES JBA ---
 ESTOQUES_JBA = [
-    {"id": "1077", "desc": "JBA - CLASSE D"},
-    {"id": "1078", "desc": "JBA - COPA E COZINHA"},
-    {"id": "1080", "desc": "JBA - DADOS - CLIENTE"},
-    {"id": "1082", "desc": "JBA - VIVO VITA - CLIENTE"},
-    {"id": "1084", "desc": "JBA - EPI-EPC"},
-    {"id": "1086", "desc": "JBA - EQUIPAMENTOS"},
-    {"id": "1088", "desc": "JBA - FERRAMENTAL"},
-    {"id": "1089", "desc": "JBA - KIT FERRAMENTAL CONTRATACOES"},
-    {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"},
-    {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
-    {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"},
-    {"id": "1106", "desc": "JBA - MOBILIARIO"},
-    {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"},
-    {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
-    {"id": "1118", "desc": "JBA - PROPRIO GERAL"},
-    {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
-    {"id": "1124", "desc": "JBA - PROPRIO TIM"},
-    {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
-    {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"},
-    {"id": "1149", "desc": "JBA - UNIFORME"},
-    {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"},
-    {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
-    {"id": "2185", "desc": "JBA - PROPRIO FATURA B PLANTA EXTERNA - BDI"},
-    {"id": "2188", "desc": "1071 - IMPLANTACAO JBA CLIENTE RESERVADO"},
-    {"id": "2189", "desc": "JBA - DEFEITO"},
-    {"id": "2190", "desc": "JBA - DEPARTAMENTO T.I"},
-    {"id": "2194", "desc": "JBA - KITS FERRAMENTAL - DEVOLUCAO"},
-    {"id": "2197", "desc": "JBA - EQUIPAMENTOS TI"},
-    {"id": "2641", "desc": "1259 - IMPLANTACAO JBA - MATERIAL REUTILIZACAO"},
-    {"id": "2643", "desc": "1724 - MANUTENCAO JBA - MATERIAL REUTILIZACAO"},
-    {"id": "2725", "desc": "JBA - RESERVA TIM"},
-    {"id": "2983", "desc": "JBA - FORNECEDORES P/ MANUTENCAO - RECARGA"},
-    {"id": "3193", "desc": "JBA - PROPRIO MATERIAL REAPROVEITAVEL"},
-    {"id": "3395", "desc": "LPA - FTTX - CLIENTE"},
-    {"id": "3484", "desc": "JBA - CELULARES DEFEITO"},
-    {"id": "3546", "desc": "JBA - CELULARES"}
+    {"id": "1077", "desc": "JBA - CLASSE D"}, {"id": "1078", "desc": "JBA - COPA E COZINHA"},
+    {"id": "1080", "desc": "JBA - DADOS - CLIENTE"}, {"id": "1082", "desc": "JBA - VIVO VITA - CLIENTE"},
+    {"id": "1084", "desc": "JBA - EPI-EPC"}, {"id": "1086", "desc": "JBA - EQUIPAMENTOS"},
+    {"id": "1088", "desc": "JBA - FERRAMENTAL"}, {"id": "1089", "desc": "JBA - KIT FERRAMENTAL CONTRATACOES"},
+    {"id": "1090", "desc": "JBA - FERRAMENTAS DE CANTEIRO"}, {"id": "1102", "desc": "1385 - LA JBA - CLIENTE"},
+    {"id": "1104", "desc": "JBA - MATERIAL DE ESCRITORIO - SUPRIMENTOS DE INFORMATICA"}, {"id": "1106", "desc": "JBA - MOBILIARIO"},
+    {"id": "1108", "desc": "1071 - EXEC SEGREGADO IMPLANTACAO JBA - CLIENTE"}, {"id": "1113", "desc": "1385 - MANUTENCAO JBA - CLIENTE"},
+    {"id": "1118", "desc": "JBA - PROPRIO GERAL"}, {"id": "1122", "desc": "JBA - GRANDES OBRAS IMPLANTACAO"},
+    {"id": "1124", "desc": "JBA - PROPRIO TIM"}, {"id": "1140", "desc": "JBA - SPEEDY/FTTX - CLIENTE"},
+    {"id": "1144", "desc": "1385 - MANUTENCAO JBA CLIENTE RESERVADO"}, {"id": "1149", "desc": "JBA - UNIFORME"},
+    {"id": "2149", "desc": "JBA - SPEEDY/FTTX DEVOLUCAO NOVO COM DEFEITO - CLIENTE"}, {"id": "2183", "desc": "1071 - BOL IMPLANTANCAO JBA - CLIENTE"},
+    {"id": "2185", "desc": "JBA - PROPRIO FATURA B PLANTA EXTERNA - BDI"}, {"id": "2188", "desc": "1071 - IMPLANTACAO JBA CLIENTE RESERVADO"},
+    {"id": "2189", "desc": "JBA - DEFEITO"}, {"id": "2190", "desc": "JBA - DEPARTAMENTO T.I"},
+    {"id": "2194", "desc": "JBA - KITS FERRAMENTAL - DEVOLUCAO"}, {"id": "2197", "desc": "JBA - EQUIPAMENTOS TI"},
+    {"id": "2641", "desc": "1259 - IMPLANTACAO JBA - MATERIAL REUTILIZACAO"}, {"id": "2643", "desc": "1724 - MANUTENCAO JBA - MATERIAL REUTILIZACAO"},
+    {"id": "2725", "desc": "JBA - RESERVA TIM"}, {"id": "2983", "desc": "JBA - FORNECEDORES P/ MANUTENCAO - RECARGA"},
+    {"id": "3193", "desc": "JBA - PROPRIO MATERIAL REAPROVEITAVEL"}, {"id": "3395", "desc": "LPA - FTTX - CLIENTE"},
+    {"id": "3484", "desc": "JBA - CELULARES DEFEITO"}, {"id": "3546", "desc": "JBA - CELULARES"}
 ]
 
 # --- FUNÇÃO AUXILIAR PARA EXPORTAR EXCEL ---
@@ -133,7 +115,20 @@ def converter_para_excel(df):
         df.to_excel(writer, index=False, sheet_name='Relatorio')
     return output.getvalue()
 
-# --- ESTILIZAÇÃO ---
+def obter_ativos_lancados_com_seguranca(conn, inventario_id, cod_produto, lote=None):
+    try:
+        id_limpo = str(inventario_id).replace('#', '').strip()
+        if lote:
+            df = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_limpo, cod_produto, lote))
+        else:
+            df = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ?", conn, params=(id_limpo, cod_produto))
+        if not df.empty and 'ativo' in df.columns:
+            return set(df['ativo'].dropna().astype(str).str.strip().upper().tolist())
+    except:
+        pass
+    return set()
+
+# --- ESTILIZAÇÃO COMPLETA ---
 st.markdown("""
     <style>
     div.stButton > button:first-child[kind="primary"] {
@@ -157,6 +152,7 @@ st.markdown("""
     }
     .bloco-titulo { color: #7f8c8d; font-size: 11px; font-weight: bold; letter-spacing: 0.5px; }
     .bloco-valor { color: #1b4f72; font-size: 24px; font-weight: bold; }
+    .card-sistema { background-color: #ebf5fb; padding: 20px; border-radius: 8px; border: 1px solid #d4e6f1; margin-top: 15px; margin-bottom: 25px; }
     .card-lateral { background-color: #1a233a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #2563eb; }
     .card-lateral-titulo { color: #93c5fd; font-size: 11px; font-weight: bold; }
     .card-lateral-valor { color: white; font-size: 28px; font-weight: bold; }
@@ -172,7 +168,7 @@ if 'contador_reset' not in st.session_state: st.session_state.contador_reset = 0
 def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
 
-# --- CONTROLE DE ACESSO ---
+# --- SISTEMA DE ACESSO ---
 if not st.session_state.logged_in:
     conn = conectar_banco()
     if st.session_state.tela_acesso == "login":
@@ -224,30 +220,34 @@ if not st.session_state.logged_in:
             st.rerun()
     conn.close()
 
+# --- PAINEL LOGADO ---
 else:
     conn = conectar_banco()
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn)
-    eh_supervisor = any(x in st.session_state.operador.lower() for x in ["administrador", "admin", "supervisor"])
+    eh_supervisor = any(x in st.session_state.operador.lower() for x in ["administrador", "admin", "supervisor", "tel"])
     
-    # --- SIDEBAR OPERACIONAL ---
+    # --- BARRA LATERAL FIXA DE CONTROLE UNIFICADO ---
     with st.sidebar:
-        st.write(f"👤 **Operador:** {st.session_state.operador}")
-        if st.button("🚪 Sair da Conta", use_container_width=True):
-            st.session_state.logged_in = False
-            st.session_state.operador = ""
-            st.session_state.tela_acesso = "login"
-            st.rerun()
+        st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
+        c_side_u1, c_side_u2 = st.columns(2)
+        with c_side_u1:
+            if st.button("🔄 Atualizar", use_container_width=True): st.rerun()
+        with c_side_u2:
+            if st.button("🚪 Sair", use_container_width=True):
+                st.session_state.logged_in = False
+                st.session_state.operador = ""
+                st.session_state.tela_acesso = "login"
+                st.rerun()
             
         st.markdown("---")
-        with st.expander("➕ Novo Inventário"):
+        with st.expander("➕ Criar Novo Inventário"):
             with st.form("form_novo", clear_on_submit=True):
                 novo_nome = st.text_input("Nome do Inventário")
-                if st.form_submit_button("Criar", type="primary") and novo_nome:
+                if st.form_submit_button("Criar Pasta", type="primary") and novo_nome:
                     maior_id = 0
                     if not df_inventarios.empty:
                         ids_nums = df_inventarios['id'].astype(str).str.extract(r'(\d+)').dropna().astype(int)
-                        if not ids_nums.empty:
-                            maior_id = ids_nums.max().iloc[0]
+                        if not ids_nums.empty: maior_id = ids_nums.max().iloc[0]
                     novo_id = f"#{maior_id + 1}"
                     cursor = conn.cursor()
                     cursor.execute("INSERT INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (novo_id, novo_nome, datetime.date.today().strftime("%Y-%m-%d")))
@@ -256,12 +256,13 @@ else:
 
         st.write("📁 **Selecione o Inventário Ativo**")
         if df_inventarios.empty:
-            st.info("Crie um inventário.")
+            st.info("Nenhum inventário aberto.")
             id_inventario_atual = None
             inventario_selected_obj = None
         else:
             lista_inv = [f"{row['id']} – {row['nome']} ({row['status']})" for idx, row in df_inventarios.iterrows()]
             inventario_selected = st.selectbox("Selecione", lista_inv, label_visibility="collapsed")
+            
             match_id_num = re.search(r'#(\d+)', inventario_selected)
             id_inventario_atual = match_id_num.group(1) if match_id_num else None
             inventario_selected_obj = df_inventarios[df_inventarios['id'].str.replace('#', '', regex=False) == id_inventario_atual].iloc[0] if id_inventario_atual else None
@@ -273,8 +274,8 @@ else:
             else:
                 st.session_state.base_sistema = None
 
-        st.write("📂 **Carregar Base de Dados**")
-        arquivo_excel = st.file_uploader("Suba a planilha (.xlsx)", type=["xlsx"], label_visibility="collapsed")
+        st.write("📂 **Carregar Planilha Base**")
+        arquivo_excel = st.file_uploader("Suba o arquivo (.xlsx)", type=["xlsx"], label_visibility="collapsed")
         if arquivo_excel is not None and id_inventario_atual:
             df_upload_temp = pd.read_excel(arquivo_excel)
             cursor_db = conn.cursor()
@@ -294,19 +295,63 @@ else:
             conn.commit()
             st.rerun()
 
+        # METRICAS LATERAIS
+        total_itens_base, total_contados, total_pendentes, progresso = 0, 0, 0, 0.0
+        pode_fechar_sozinho = False
+        if st.session_state.base_sistema is not None and id_inventario_atual:
+            total_itens_base = len(st.session_state.base_sistema)
+            df_contagens_atuais_side = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual,))
+            total_contados = len(df_contagens_atuais_side)
+            
+            if not df_contagens_atuais_side.empty:
+                contados_set = set(df_contagens_atuais_side.apply(lambda r: f"{str(r['cod_produto']).strip().upper()}|{str(r['lote']).strip().upper()}|{str(r['ativo']).strip().upper()}", axis=1))
+                base_set = set(st.session_state.base_sistema.apply(lambda r: f"{str(r['cod_produto']).strip().upper()}|{str(r['lote']).strip().upper()}|{str(r['ativo']).strip().upper()}", axis=1))
+                total_pendentes = len(base_set - contados_set)
+                if len(base_set) > 0: progresso = min(1.0, len(contados_set & base_set) / len(base_set))
+            else:
+                total_pendentes = total_itens_base
+            if total_pendentes == 0 and total_itens_base > 0: pode_fechar_sozinho = True
+
+        st.markdown("---")
+        st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">📋 ITENS NA BASE</div><div class="card-lateral-valor">{total_itens_base}</div></div>', unsafe_allow_html=True)
+        st.markdown(f'<div class="card-lateral"><div class="card-lateral-titulo">✅ LANÇAMENTOS GERAIS</div><div class="card-lateral-valor">{total_contados}</div></div>', unsafe_allow_html=True)
+        st.write(f"**PENDÊNCIAS RESTANTES:** {total_pendentes}")
+        st.progress(progresso)
+
+        # --- BOTÃO FIXO DE FECHAMENTO DISPONIBILIZADO NA INTERFACE LATERAL ---
+        if inventario_selected_obj is not None and inventario_selected_obj['status'] in ["Aberto", "2a Contagem"]:
+            st.markdown("---")
+            if pode_fechar_sozinho:
+                if st.button("🔒 Fechar Inventário e Finalizar", use_container_width=True, type="primary"):
+                    cursor = conn.cursor()
+                    cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (f"#{id_inventario_atual}",))
+                    conn.commit()
+                    st.success("✅ Inventário encerrado com sucesso!")
+                    st.rerun()
+            else:
+                st.error(f"❌ Bloqueado: Faltam {total_pendentes} itens.")
+                if eh_supervisor:
+                    st.warning("⚠️ Forçar Encerramento Incompleto?")
+                    if st.button("🚨 Confirmar Fechamento (ADMIN)", use_container_width=True, type="primary"):
+                        cursor = conn.cursor()
+                        cursor.execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ? OR id = ?", (id_inventario_atual, f"#{id_inventario_atual}"))
+                        conn.commit()
+                        st.success("✅ Forçado com sucesso!")
+                        st.rerun()
+
     st.markdown("---")
     aba_contar, aba_atual, aba_supervisor, aba_historico, aba_status_estoques = st.tabs(["🔍 Contar Item", "📊 Contagem Atual", "🔬 Painel Supervisor", "📁 Histórico Geral", "📊 Status dos Estoques"])
     
-    # --- ABA 1: CONTAR ITEM (VALIDAÇÃO CONDICIONAL DE ATIVO) ---
+    # --- ABA 1: CONTAR ITEM (FILTRAGEM CONDICIONAL E ENTRADA LIMPA) ---
     with aba_contar:
-        if id_inventario_atual is None or st.session_state.base_sistema is None:
-            st.warning("⚠️ Mapeie o inventário e faça o upload da base na barra lateral.")
+        if id_inventario_atual is None or st.session_state.base_sistema is None or total_itens_base == 0:
+            st.warning("⚠️ Mapeie o inventário e faça o upload da base na barra lateral para liberar a digitação.")
         elif inventario_selected_obj is not None and inventario_selected_obj['status'] == "Fechado":
-            st.error("🔒 Este inventário operacional está Fechado pelo supervisor.")
+            st.error("🔒 Este inventário operacional está Fechado.")
         else:
             c_busca, c_limpar = st.columns([8, 2])
             with c_busca:
-                codigo_input = st.text_input("💻 Digite/Bipe o Código do Produto ou número do Ativo", value="", placeholder="Bipe aqui...", key=f"bip_{st.session_state.contador_reset}")
+                codigo_input = st.text_input("💻 Digite/Bipe o Código do Produto ou o número do Ativo", value="", placeholder="Bipe aqui...", key=f"bip_{st.session_state.contador_reset}")
             with c_limpar:
                 st.write("")
                 if st.button("🗑️ Limpar Tela", use_container_width=True):
@@ -315,9 +360,11 @@ else:
                     
             if codigo_input:
                 busca_limpa = str(codigo_input).upper().strip()
-                df_ja_contados = pd.read_sql_query("SELECT lote, ativo, cod_produto FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual,))
+                id_pasta_limpo = id_inventario_atual
                 
+                df_ja_contados = pd.read_sql_query("SELECT lote, ativo, cod_produto FROM contagens WHERE inventario_id = ?", conn, params=(id_pasta_limpo,))
                 df_busca_por_ativo = st.session_state.base_sistema[st.session_state.base_sistema['ativo'].astype(str).str.upper().str.strip() == busca_limpa]
+                
                 if not df_busca_por_ativo.empty:
                     codigo_produto_alvo = str(df_busca_por_ativo.iloc[0]['cod_produto']).upper().strip()
                     itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
@@ -326,7 +373,6 @@ else:
                     itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
                 
                 if not itens_filtrados.empty:
-                    # VERIFICA SE O MATERIAL REALMENTE POSSUI ATIVO NA BASE ORIGINAL
                     possui_ativo_na_base = itens_filtrados['ativo'].dropna().astype(str).str.strip().any() and any(str(x).strip() != "" for x in itens_filtrados['ativo'].unique())
                     
                     lotes_validos_restantes = []
@@ -350,25 +396,22 @@ else:
                     if not lotes_validos_restantes:
                         st.success("🎉 Todos os lotes e ativos vinculados a este produto já foram contados!")
                     else:
-                        lote_selecionado = st.selectbox("👇 SELECIONE O LOTE PARA CONTAGEM:", lotes_validos_restantes)
+                        lote_selecionado = st.selectbox("👇 SELECIONE O LOTE PARA CONTAGEM (Apenas pendentes):", lotes_validos_restantes)
                         
                         ativo_selecionado = ""
-                        # REGRA ATIVO: Se o material NÃO possui ativo cadastrado na base, pula a seleção/exibição de ativo.
                         if possui_ativo_na_base:
                             ativos_disponiveis = [a for a in ativos_por_lote_restantes.get(lote_selecionado, []) if str(a).strip() != ""]
-                            if not df_busca_por_ativo.empty:
-                                ativo_selecionado = busca_limpa
-                            elif ativos_disponiveis:
-                                ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM (Apenas pendentes):", ativos_disponiveis)
+                            if not df_busca_por_ativo.empty: ativo_selecionado = busca_limpa
+                            elif list(ativos_disponiveis): ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM (Apenas pendentes):", ativos_disponiveis)
                         
                         item_especifico = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == lote_selecionado].iloc[0]
                         
                         b1, b2, b3 = st.columns(3)
                         b1.markdown(f'<div class="bloco-info"><div class="bloco-titulo">CÓD. PRODUTO</div><div class="bloco-valor">{codigo_produto_alvo}</div></div>', unsafe_allow_html=True)
                         b2.markdown(f'<div class="bloco-info"><div class="bloco-titulo">ESTOQUE</div><div class="bloco-valor">{item_especifico["descestoquefisico"]}</div></div>', unsafe_allow_html=True)
-                        b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">LOTE</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
+                        b3.markdown(f'<div class="bloco-info"><div class="bloco-titulo">LOTE EM CONTAGEM</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
                         
-                        st.write(f"**Descrição:** {item_especifico['desc_produto']}")
+                        st.write(f"**Descrição do Material:** {item_especifico['desc_produto']}")
                         
                         with st.form("confirmar_contagem_form"):
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente", min_value=1, step=1, value=1)
@@ -393,46 +436,22 @@ else:
             df_contagens = pd.read_sql_query("SELECT id, lote, ativo, cod_produto, desc_produto, qtd_contada, operador, data_hora FROM contagens WHERE inventario_id = ? ORDER BY id DESC", conn, params=(id_inventario_atual,))
             st.dataframe(df_contagens, use_container_width=True, hide_index=True)
 
-    # --- ABA 3: PAINEL SUPERVISOR (OPÇÕES DE FECHAMENTO + DELETAR + RECUPERAR PASTAS ANTERIORES) ---
+    # --- ABA 3: PAINEL SUPERVISOR (MODO REVERSO E EXPORTAÇÕES FIXADAS) ---
     with aba_supervisor:
         if not eh_supervisor:
             st.error("🚫 Painel exclusivo para o Supervisor.")
         else:
-            if inventario_selected_obj is not None:
-                st.subheader(f"Gerenciamento da Pasta #{id_inventario_atual} - Status: **{inventario_selected_obj['status']}**")
+            st.subheader("📊 Lançamentos Consolidados da Pasta Ativa")
+            df_painel_adm = pd.read_sql_query("SELECT id, inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, lote, ativo, operador, qtd_sistema, qtd_contada, diferenca, fase_contagem, data_hora, observacao FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual,))
+            
+            if not df_painel_adm.empty:
+                st.dataframe(df_painel_adm, use_container_width=True, hide_index=True)
+                st.download_button(label="📥 Exportar Dados desta Pasta para Excel", data=converter_para_excel(df_painel_adm), file_name=f"Inventario_Pasta_{id_inventario_atual}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+            else:
+                st.info("Nenhum lançamento registrado nesta pasta.")
                 
-                # OPÇÕES DE FECHAMENTO DO INVENTÁRIO
-                c1, c2, c3 = st.columns(3)
-                with c1:
-                    if inventario_selected_obj['status'] == "Aberto":
-                        if st.button("🔒 Congelar para 2ª Contagem", use_container_width=True):
-                            conn.cursor().execute("UPDATE inventarios SET status = '2ª Contagem' WHERE id = ?", (f"#{id_inventario_atual}",))
-                            conn.commit()
-                            st.rerun()
-                with c2:
-                    if inventario_selected_obj['status'] == "2ª Contagem":
-                        if st.button("🚫 Encerrar Totalmente", use_container_width=True):
-                            conn.cursor().execute("UPDATE inventarios SET status = 'Fechado' WHERE id = ?", (f"#{id_inventario_atual}",))
-                            conn.commit()
-                            st.rerun()
-                with c3:
-                    if inventario_selected_obj['status'] in ["2ª Contagem", "Fechado"]:
-                        if st.button("🔓 Reabrir Pasta", use_container_width=True):
-                            conn.cursor().execute("UPDATE inventarios SET status = 'Aberto' WHERE id = ?", (f"#{id_inventario_atual}",))
-                            conn.commit()
-                            st.rerun()
-
-                if st.button("🗑️ DELETAR ESTA PASTA OPERACIONAL DO SISTEMA", type="secondary", use_container_width=True):
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM inventarios WHERE id = ?", (f"#{id_inventario_atual}",))
-                    cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (id_inventario_atual,))
-                    cursor.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (id_inventario_atual,))
-                    conn.commit()
-                    st.success("Pasta deletada com sucesso.")
-                    st.rerun()
-
             st.markdown("---")
-            st.subheader("📥 Upload e Recuperação de Pastas Passadas/Semana Anterior")
+            st.subheader("📥 Resgatar/Importar Pasta Gravada no Passado")
             arquivo_resgate = st.file_uploader("Suba a planilha Excel exportada antigamente para restaurar a pasta de contagens", type=["xlsx"])
             if arquivo_resgate is not None:
                 try:
@@ -451,70 +470,62 @@ else:
                         conn.commit()
                         st.success(f"✅ Pasta #{id_resgatado} restaurada com sucesso com todos os lançamentos!")
                         st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao processar arquivo: {e}")
+                except Exception as e: st.error(f"Erro no resgate: {e}")
 
-    # --- ABA 4: HISTÓRICO GERAL (COM EXPORTAÇÃO EXCEL) ---
+    # --- ABA 4: HISTÓRICO GERAL (VITALÍCIO COM OPÇÃO DE DELETAR) ---
     with aba_historico:
         st.title("📁 Arquivo Geral de Movimentações")
         df_pastas = pd.read_sql_query("SELECT DISTINCT inventario_id FROM contagens", conn)
-        for _, r in df_pastas.iterrows():
-            id_p = str(r['inventario_id'])
-            df_p = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_p,))
-            with st.expander(f"📁 Pasta Operacional #{id_p} ({len(df_p)} lançamentos)"):
-                st.dataframe(df_p, use_container_width=True, hide_index=True)
-                st.download_button(label="📥 Exportar Pasta para Excel", data=converter_para_excel(df_p), file_name=f"Backup_Pasta_{id_p}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"btn_{id_p}")
+        if df_pastas.empty:
+            st.info("Nenhum histórico registrado encontrado.")
+        else:
+            for _, r in df_pastas.iterrows():
+                id_p = str(r['inventario_id'])
+                df_p = pd.read_sql_query("SELECT * FROM contagens WHERE inventario_id = ?", conn, params=(id_p,))
+                
+                c_exp, c_del = st.columns([8, 2])
+                with c_exp:
+                    with st.expander(f"📁 Pasta Operacional #{id_p} ({len(df_p)} lançamentos permanentemente salvos)"):
+                        st.dataframe(df_p, use_container_width=True, hide_index=True)
+                        st.download_button(label="📥 Baixar Planilha em Excel", data=converter_para_excel(df_p), file_name=f"Backup_Pasta_{id_p}.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", key=f"btn_{id_p}")
+                with c_del:
+                    if eh_supervisor:
+                        if st.button("🗑️ Deletar Pasta", key=f"del_{id_p}", use_container_width=True):
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM inventarios WHERE id = ? OR id = ?", (id_p, f"#{id_p}"))
+                            cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (id_p,))
+                            cursor.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (id_p,))
+                            conn.commit()
+                            st.success("Deletado!")
+                            st.rerun()
 
-    # --- ABA 5: STATUS CRÍTICO DOS ESTOQUES (MÁXIMO 5 DIAS, 1 SEMANA, 2 SEMANAS) ---
+    # --- ABA 5: STATUS E PRAZOS DOS ESTOQUES JBA ---
     with aba_status_estoques:
         st.title("📊 Painel de Controle e Auditoria de Prazos")
-        st.write("Acompanhe o tempo decorrido desde a última contagem de cada um dos estoques JBA:")
-        
-        dados_status = []
         df_ultimas = pd.read_sql_query("SELECT id_estoque, max(data_hora) as ultima_data FROM contagens GROUP BY id_estoque", conn)
         dict_ultimas = dict(zip(df_ultimas['id_estoque'].astype(str), df_ultimas['ultima_data']))
+        hoje_dt = datetime.datetime.now()
         
-        hoje = datetime.datetime.now()
-        
+        dados_status = []
         for est in ESTOQUES_JBA:
             id_est = est["id"]
-            desc_est = est["desc"]
             ultima_v = dict_ultimas.get(id_est, None)
-            
             if ultima_v:
                 try:
                     dt_objeto = datetime.datetime.strptime(str(ultima_v)[:19], "%Y-%m-%d %H:%M:%S")
-                    dias_passados = (hoje - dt_objeto).days
+                    dias_passados = (hoje_dt - dt_objeto).days
                     texto_ultima = dt_objeto.strftime("%d/%m/%Y %H:%M")
-                except:
-                    dias_passados = 999
-                    texto_ultima = "Sem registros válidos"
-            else:
-                dias_passados = 999
-                texto_ultima = "Nunca Contado pelo Sistema"
-                
-            # Regra de criticidade
-            if dias_passados <= 5:
-                status_texto = "🟢 Bom (Atualizado)"
-            elif dias_passados <= 14:
-                status_texto = "🟡 Atenção (Aviso: +1 semana)"
-            else:
-                status_texto = "🔴 CRÍTICO (Necessita contar urgente: +2 semanas)"
-                
-            dados_status.append({
-                "Id. Estoque": id_est,
-                "Descrição do Estoque Físico": desc_est,
-                "Última Contagem Realizada": texto_ultima,
-                "Dias desde a Última Contagem": dias_passados if dias_passados != 999 else "N/A",
-                "Status de Criticidade": status_texto
-            })
+                except: dias_passados, texto_ultima = 999, "Sem registros"
+            else: dias_passados, texto_ultima = 999, "Nunca Contado pelo Sistema"
+            
+            if dias_passados <= 5: status_texto = "🟢 Bom (Atualizado)"
+            elif dias_passados <= 14: status_texto = "🟡 Atenção (Aviso: +1 semana)"
+            else: status_texto = "🔴 CRÍTICO (Necessita contar urgente: +2 semanas)"
+            
+            dados_status.append({"Id. Estoque": id_est, "Descrição do Estoque Físico": est["desc"], "Última Contagem Realizada": texto_ultima, "Dias desde a Última Contagem": dias_passados if dias_passados != 999 else "N/A", "Status de Criticidade": status_texto})
             
         df_painel_final = pd.DataFrame(dados_status)
-        
-        # Filtros de visualização rápida
         filtro_status = st.multiselect("Filtrar por Status", ["🟢 Bom (Atualizado)", "🟡 Atenção (Aviso: +1 semana)", "🔴 CRÍTICO (Necessita contar urgente: +2 semanas)"], default=["🟢 Bom (Atualizado)", "🟡 Atenção (Aviso: +1 semana)", "🔴 CRÍTICO (Necessita contar urgente: +2 semanas)"])
-        df_painel_filtrado = df_painel_final[df_painel_final["Status de Criticidade"].isin(filtro_status)]
-        
-        st.dataframe(df_painel_filtrado, use_container_width=True, hide_index=True)
+        st.dataframe(df_painel_final[df_painel_final["Status de Criticidade"].isin(filtro_status)], use_container_width=True, hide_index=True)
 
     conn.close()
