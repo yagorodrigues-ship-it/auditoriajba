@@ -408,11 +408,12 @@ else:
                     for l in lotes_totais:
                         df_ativos_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == l]
                         
-                        # --- SOLUÇÃO DEFINITIVA DO ATTRIBUTERROR DA LINHA 414 ---
-                        # Busca o nome exato da coluna de ativo e valida sua existência no DataFrame do lote para evitar NoneType
+                        # --- SAFE ROBUSTA TRAVA CORRIGIDA CONTRA ATTRIBUTERROR DA LINHA 414/415 ---
+                        # Evita erros de processamento limpando a série com dropna() antes de executar conversões de strings
                         col_verif_ativo = next((c for c in df_ativos_do_lote.columns if str(c).strip().lower() in ['ativo', 'nº ativo', 'numero ativo']), None)
                         if col_verif_ativo is not None and col_verif_ativo in df_ativos_do_lote.columns and not df_ativos_do_lote.empty:
-                            ativos_lote_set = set(df_ativos_do_lote[col_verif_ativo].dropna().astype(str).str.strip().upper().tolist())
+                            serie_limpa = df_ativos_do_lote[col_verif_ativo].dropna()
+                            ativos_lote_set = set(serie_limpa.astype(str).str.strip().upper().tolist())
                         else:
                             ativos_lote_set = set()
                             
