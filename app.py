@@ -115,19 +115,6 @@ def converter_para_excel(df):
         df.to_excel(writer, index=False, sheet_name='Relatorio')
     return output.getvalue()
 
-def obter_ativos_lancados_com_seguranca(conn, inventario_id, cod_produto, lote=None):
-    try:
-        id_limpo = str(inventario_id).replace('#', '').strip()
-        if lote:
-            df = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND lote = ?", conn, params=(id_limpo, cod_produto, lote))
-        else:
-            df = pd.read_sql_query("SELECT ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ?", conn, params=(id_limpo, cod_produto))
-        if not df.empty and 'ativo' in df.columns:
-            return set(df['ativo'].dropna().astype(str).str.strip().upper().tolist())
-    except:
-        pass
-    return set()
-
 # --- ESTILIZAÇÃO ---
 st.markdown("""
     <style>
@@ -340,7 +327,8 @@ else:
                         st.rerun()
 
     st.markdown("---")
-    aba_contar, aba_atual, aba_supervisor, aba_historico, aba_status_estoques = st.tabs(["🔍 Contar Item", "📊 Contagem AtuaL", "🔬 Painel Supervisor", "📁 Histórico Geral", "📊 Status dos Estoques"])
+    # ABA DE BASE DE ESTOQUE FOI ADICIONADA DE VOLTA COM SUCESSO AQUI
+    aba_contar, aba_atual, aba_supervisor, aba_historico, aba_status_estoques, aba_base_estoque = st.tabs(["🔍 Contar Item", "📊 Contagem AtuaL", "🔬 Painel Supervisor", "📁 Histórico Geral", "📊 Status dos Estoques", "📄 Base de Estoque"])
     
     # --- ABA 1: CONTAR ITEM (FILTRAGEM CONDICIONAL RESTRITA DE ATIVO) ---
     with aba_contar:
@@ -368,12 +356,12 @@ else:
                 
                 if not df_busca_por_ativo.empty:
                     codigo_produto_alvo = str(df_busca_por_ativo.iloc[0]['cod_produto']).upper().strip()
-                    itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
                 else:
                     codigo_produto_alvo = codigo_produto_alvo
-                    # --- TRAVA PATRIMONIAL DO CAPACETE FIXADA ---
-                    if str(codigo_produto_alvo).upper().strip() == "TECA0227Z":
-                        df_busca_por_ativo = pd.DataFrame()
+                
+                # --- TRAVA ABSOLUTA DE ATIVOS FALSOS (ZERA O ATIVO 1864380 DO CAPACETE) ---
+                if str(codigo_produto_alvo).upper().strip() == "TECA0227Z":
+                    df_busca_por_ativo = pd.DataFrame()
 
                 itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
                 
@@ -382,7 +370,7 @@ else:
                         if str(prod_cod).upper().strip() == "TECA0227Z":
                             return False
                         s = str(val).strip()
-                        if not s or s.lower() in ['nan', '0', '', '-', 'n/a', 'sem ativo']:
+                        if not s or s.lower() in ['nan', '0', '', '-', 'n/a', 'sem ativo', '1864380']:
                             return False
                         return bool(re.match(r'^\d+$', s))
 
@@ -395,7 +383,6 @@ else:
                         linhas_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == lote_item]
                         ativos_do_lote = [a for a in linhas_do_lote['ativo'].dropna().astype(str).str.strip().tolist() if checar_ativo_real(a, codigo_produto_alvo)]
                         
-                        # --- SOLUÇÃO PYTHON PURO DO NAMEERROR DA LINHA 398 ---
                         # Elimina o lote se ele já constar como contabilizado na tabela de contagens
                         if not possui_ativo_na_base:
                             if not ((df_ja_contados['cod_produto'].astype(str).str.strip().str.upper() == codigo_produto_alvo) & 
@@ -574,5 +561,13 @@ else:
         df_painel_final = pd.DataFrame(dados_status)
         filtro_status = st.multiselect("Filtrar por Status", ["🟢 Bom (Atualizado)", "🟡 Atenção (Aviso: +1 semana)", "🔴 CRÍTICO (Necessita contar urgente: +2 semanas)"], default=["🟢 Bom (Atualizado)", "🟡 Atenção (Aviso: +1 semana)", "🔴 CRÍTICO (Necessita contar urgente: +2 semanas)"])
         st.dataframe(df_painel_final[df_painel_final["Status de Criticidade"].isin(filtro_status)], use_container_width=True, hide_index=True)
+
+    # --- ABA 6: PLANILHA DA BASE DE ESTOQUE (REATIVADA) ---
+    with aba_base_estoque:
+        st.title("📄 Base de Dados Importada do Inventário")
+        if st.session_state.base_sistema is not None:
+            st.dataframe(st.session_state.base_sistema, use_container_width=True, hide_index=True)
+        else:
+            st.info("Nenhuma planilha base foi importada para esta pasta operacional até o momento.")
 
     conn.close()
