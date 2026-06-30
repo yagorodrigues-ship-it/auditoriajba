@@ -186,8 +186,7 @@ if not st.session_state.logged_in:
             novo_email = st.text_input("E-mail")
             nova_senha = st.text_input("Senha", type="password")
             confirma_senha = st.text_input("Confirme a Senha", type="password")
-            btn_cad = st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True)
-            if btn_cad:
+            if st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True):
                 cpf_l = limpar_documento(novo_cpf)
                 if not novo_nome or not cpf_l or not novo_email or not nova_senha:
                     st.error("⚠️ Preencha todos os campos!")
@@ -269,35 +268,36 @@ else:
             cursor_db = conn.cursor()
             cursor_db.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (id_inventario_atual,))
             
-            # --- MAPEAMENTO DE COLUNAS AMPLIADO PARA PREVENIR ERROS ---
-            def encontrar_col_nome_avancado(opcoes, default_idx):
-                for opcao in opcoes:
+            # --- NOVO MOTOR DE MAPEAMENTO INTELIGENTE POR ÍNDICE FILTRADO ---
+            def obter_coluna_por_procura(termos, index_padrao):
+                for t in termos:
                     for col in df_upload_temp.columns:
-                        if opcao.lower().replace(" ", "").replace(".", "") in str(col).lower().replace(" ", "").replace(".", ""):
+                        if t.lower() in str(col).lower().replace(" ", "").replace(".", "").replace("_", ""):
                             return col
-                return df_upload_temp.columns[default_idx] if default_idx < len(df_upload_temp.columns) else df_upload_temp.columns[0]
+                if index_padrao < len(df_upload_temp.columns):
+                    return df_upload_temp.columns[index_padrao]
+                return df_upload_temp.columns[0]
 
-            c_cod_u = encontrar_col_nome_avancado(['codproduto', 'códproduto', 'material', 'codigo', 'código', 'sap', 'item'], 0)
-            c_desc_u = encontrar_col_nome_avancado(['descproduto', 'descricao', 'descrição', 'texto', 'nome'], 1)
-            c_local_u = encontrar_col_nome_avancado(['descestoquefisico', 'localizacao', 'localização', 'estoque', 'depósito', 'deposito'], 2)
-            c_unid_u = encontrar_col_nome_avancado(['unidmedida', 'unidade', 'unid', 'umb', 'un'], 3)
-            c_qtd_u = encontrar_col_nome_avancado(['qtdestoque', 'quantidade', 'saldo', 'atual', 'disponivel', 'total'], -1)
-            c_id_est_u = encontrar_col_nome_avancado(['idestoquefísico', 'idestoque', 'codestoque', 'centro'], 0)
-            c_lote_u = encontrar_col_nome_avancado(['lote', 'batch'], 0)
-            c_ativo_u = encontrar_col_nome_avancado(['ativo', 'patrimonio', 'nº ativo', 'numero ativo'], 0)
+            c_cod = obter_coluna_por_procura(['codproduto', 'códproduto', 'material', 'codigo', 'código', 'sap', 'item', 'idproduto'], 0)
+            c_desc = obter_coluna_por_procura(['descproduto', 'descricao', 'descrição', 'texto', 'nome', 'desc'], 1)
+            c_local = obter_coluna_por_procura(['descestoquefisico', 'localizacao', 'localização', 'estoque', 'depósito', 'deposito', 'arm'], 2)
+            c_unid = obter_coluna_por_procura(['unidmedida', 'unidade', 'unid', 'umb', 'un', 'uni'], 3)
+            c_qtd = obter_coluna_por_procura(['qtdestoque', 'quantidade', 'saldo', 'atual', 'disponivel', 'total', 'qtd'], -1)
+            c_id_est = obter_coluna_por_procura(['idestoquefísico', 'idestoque', 'codestoque', 'centro', 'idest'], 0)
+            c_lote = obter_coluna_por_procura(['lote', 'batch', 'lot'], 0)
+            c_ativo = obter_coluna_por_procura(['ativo', 'patrimonio', 'nºativo', 'numeroativo', 'asset'], 0)
             
             for _, r in df_upload_temp.iterrows():
-                lote_item_v = str(r[c_lote_u]).strip() if c_lote_u in df_upload_temp.columns and pd.notna(r[c_lote_u]) else ""
-                ativo_item_v = str(r[c_ativo_u]).strip() if c_ativo_u in df_upload_temp.columns and pd.notna(r[c_ativo_u]) else ""
-                
-                cod_final = str(r[c_cod_u]).strip().upper() if c_cod_u in df_upload_temp.columns else ""
-                desc_final = str(r[c_desc_u]).strip() if c_desc_u in df_upload_temp.columns else "Sem Descrição"
-                local_final = str(r[c_local_u]).strip() if c_local_u in df_upload_temp.columns else "Geral"
-                unid_final = str(r[c_unid_u]).strip() if c_unid_u in df_upload_temp.columns else "UN"
-                qtd_final = int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0) if c_qtd_u in df_upload_temp.columns else 0
-                id_est_final = str(r[c_id_est_u]).strip() if c_id_est_u in df_upload_temp.columns else "1"
+                cod_final = str(r[c_cod]).strip().upper() if c_cod in df_upload_temp.columns and pd.notna(r[c_cod]) else ""
+                desc_final = str(r[c_desc]).strip() if c_desc in df_upload_temp.columns and pd.notna(r[c_desc]) else "Sem Descrição"
+                local_final = str(r[c_local]).strip() if c_local in df_upload_temp.columns and pd.notna(r[c_local]) else "Geral"
+                unid_final = str(r[c_unid]).strip() if c_unid in df_upload_temp.columns and pd.notna(r[c_unid]) else "UN"
+                qtd_final = int(pd.to_numeric(r[c_qtd], errors='coerce') or 0) if c_qtd in df_upload_temp.columns and pd.notna(r[c_qtd]) else 0
+                id_est_final = str(r[c_id_est]).strip() if c_id_est in df_upload_temp.columns and pd.notna(r[c_id_est]) else "1"
+                lote_item_v = str(r[c_lote]).strip() if c_lote in df_upload_temp.columns and pd.notna(r[c_lote]) else ""
+                ativo_item_v = str(r[c_ativo]).strip() if c_ativo in df_upload_temp.columns and pd.notna(r[c_ativo]) else ""
 
-                if cod_final != "":
+                if cod_final != "" and cod_final.lower() != 'nan':
                     cursor_db.execute("""
                         INSERT INTO itens_base_inventario (inventario_id, cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote, ativo)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -353,7 +353,7 @@ else:
     st.markdown("---")
     aba_contar, aba_atual, aba_supervisor, aba_historico, aba_status_estoques, aba_base_estoque = st.tabs(["🔍 Contar Item", "📊 Contagem AtuaL", "🔬 Painel Supervisor", "📁 Histórico Geral", "📊 Status dos Estoques", "📄 Base de Estoque"])
     
-    # --- ABA 1: CONTAR ITEM (FILTRAGEM CONDICIONAL RESTRITA DE ATIVO) ---
+    # --- ABA 1: CONTAR ITEM ---
     with aba_contar:
         if id_inventario_atual is None or st.session_state.base_sistema is None or total_itens_base == 0:
             st.warning("⚠️ Mapeie o inventário e faça o upload da base na barra lateral para liberar a digitação.")
@@ -379,10 +379,8 @@ else:
                 
                 if not df_busca_por_ativo.empty:
                     codigo_produto_alvo = str(df_busca_por_ativo.iloc[0]['cod_produto']).upper().strip()
-                else:
-                    codigo_produto_alvo = codigo_produto_alvo
                 
-                # --- TRAVA ABSOLUTA DE ATIVOS FALSOS ---
+                # --- FORÇADOR BI-PARTIDÁRIO DE ATIVO INEXISTENTE (EX: PATRIMÔNIO RESIDUAL DO CAPACETE) ---
                 if str(codigo_produto_alvo).upper().strip() == "TECA0227Z":
                     df_busca_por_ativo = pd.DataFrame()
 
@@ -466,7 +464,7 @@ else:
                                 st.session_state.contador_reset += 1
                                 st.rerun()
                 else:
-                    st.error("⚠️ Código ou Ativo não localizado na base deste inventário. Verifique se a planilha base correta foi carregada.")
+                    st.error("⚠️ Código ou Ativo não localizado na base deste inventário. Se acabou de carregar a base, tente criar um novo inventário para ler as colunas corretamente.")
 
     # --- ABA 2: CONTAGEM ATUAL ---
     with aba_atual:
