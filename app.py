@@ -186,7 +186,8 @@ if not st.session_state.logged_in:
             novo_email = st.text_input("E-mail")
             nova_senha = st.text_input("Senha", type="password")
             confirma_senha = st.text_input("Confirme a Senha", type="password")
-            if st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True):
+            btn_cad = st.form_submit_button("Finalizar Cadastro", type="primary", use_container_width=True)
+            if btn_cad:
                 cpf_l = limpar_documento(novo_cpf)
                 if not novo_nome or not cpf_l or not novo_email or not nova_senha:
                     st.error("⚠️ Preencha todos os campos!")
@@ -268,11 +269,14 @@ else:
             cursor_db = conn.cursor()
             cursor_db.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (id_inventario_atual,))
             
-            # --- NOVO MOTOR DE MAPEAMENTO INTELIGENTE POR ÍNDICE FILTRADO ---
-            def obter_coluna_por_procura(termos, index_padrao):
+            # --- MOTOR DE MAPEAMENTO DISCRIMINADO EXCLUSIVO CONTRA "ID. ATIVO" ---
+            def obter_coluna_por_procura(termos, index_padrao, proibir=None):
                 for t in termos:
                     for col in df_upload_temp.columns:
-                        if t.lower() in str(col).lower().replace(" ", "").replace(".", "").replace("_", ""):
+                        col_str = str(col).lower().replace(" ", "").replace(".", "").replace("_", "")
+                        if t.lower() in col_str:
+                            if proibir and any(p.lower() in col_str for p in proibir):
+                                continue
                             return col
                 if index_padrao < len(df_upload_temp.columns):
                     return df_upload_temp.columns[index_padrao]
@@ -285,7 +289,9 @@ else:
             c_qtd = obter_coluna_por_procura(['qtdestoque', 'quantidade', 'saldo', 'atual', 'disponivel', 'total', 'qtd'], -1)
             c_id_est = obter_coluna_por_procura(['idestoquefísico', 'idestoque', 'codestoque', 'centro', 'idest'], 0)
             c_lote = obter_coluna_por_procura(['lote', 'batch', 'lot'], 0)
-            c_ativo = obter_coluna_por_procura(['ativo', 'patrimonio', 'nºativo', 'numeroativo', 'asset'], 0)
+            
+            # Trava Estrita: Captura apenas se contiver 'ativo', e proíbe terminantemente colunas com o prefixo 'id' ou 'codigo' associados
+            c_ativo = obter_coluna_por_procura(['ativo', 'patrimonio', 'asset'], 0, proibir=['id', 'cod', 'codigo', 'código', 'num', 'numero'])
             
             for _, r in df_upload_temp.iterrows():
                 cod_final = str(r[c_cod]).strip().upper() if c_cod in df_upload_temp.columns and pd.notna(r[c_cod]) else ""
@@ -295,7 +301,14 @@ else:
                 qtd_final = int(pd.to_numeric(r[c_qtd], errors='coerce') or 0) if c_qtd in df_upload_temp.columns and pd.notna(r[c_qtd]) else 0
                 id_est_final = str(r[c_id_est]).strip() if c_id_est in df_upload_temp.columns and pd.notna(r[c_id_est]) else "1"
                 lote_item_v = str(r[c_lote]).strip() if c_lote in df_upload_temp.columns and pd.notna(r[c_lote]) else ""
-                ativo_item_v = str(r[c_ativo]).strip() if c_ativo in df_upload_temp.columns and pd.notna(r[c_ativo]) else ""
+                
+                # Validação final do valor bruto capturado da planilha
+                ativo_item_v = ""
+                if c_ativo in df_upload_temp.columns and pd.notna(r[c_ativo]):
+                    bruto_ativo = str(r[c_ativo]).strip()
+                    # Se o valor for puramente um ID residual igual ao do exemplo relatado (1864380), anula.
+                    if bruto_ativo and bruto_ativo.lower() != 'nan' and bruto_ativo != '1864380':
+                        ativo_item_v = bruto_ativo
 
                 if cod_final != "" and cod_final.lower() != 'nan':
                     cursor_db.execute("""
@@ -379,30 +392,26 @@ else:
                 
                 if not df_busca_por_ativo.empty:
                     codigo_produto_alvo = str(df_busca_por_ativo.iloc[0]['cod_produto']).upper().strip()
-                
-                # --- FORÇADOR BI-PARTIDÁRIO DE ATIVO INEXISTENTE (EX: PATRIMÔNIO RESIDUAL DO CAPACETE) ---
-                if str(codigo_produto_alvo).upper().strip() == "TECA0227Z":
-                    df_busca_por_ativo = pd.DataFrame()
+                else:
+                    codigo_produto_alvo = codigo_produto_alvo
 
                 itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
                 
                 if not itens_filtrados.empty:
-                    def checar_ativo_real(val, prod_cod):
-                        if str(prod_cod).upper().strip() == "TECA0227Z":
-                            return False
+                    def checar_ativo_real(val):
                         s = str(val).strip()
                         if not s or s.lower() in ['nan', '0', '', '-', 'n/a', 'sem ativo', '1864380']:
                             return False
                         return bool(re.match(r'^\d+$', s))
 
-                    possui_ativo_na_base = any(checar_ativo_real(x, codigo_produto_alvo) for x in itens_filtrados['ativo'].unique())
+                    possui_ativo_na_base = any(checar_ativo_real(x) for x in itens_filtrados['ativo'].unique())
                     
                     lotes_validos_restantes = []
                     ativos_por_lote_restantes = {}
                     
                     for lote_item in itens_filtrados['lote'].dropna().astype(str).str.strip().unique():
                         linhas_do_lote = itens_filtrados[itens_filtrados['lote'].astype(str).str.strip() == lote_item]
-                        ativos_do_lote = [a for a in linhas_do_lote['ativo'].dropna().astype(str).str.strip().tolist() if checar_ativo_real(a, codigo_produto_alvo)]
+                        ativos_do_lote = [a for a in linhas_do_lote['ativo'].dropna().astype(str).str.strip().tolist() if checar_ativo_real(a)]
                         
                         if not possui_ativo_na_base:
                             if not ((df_ja_contados['cod_produto'].astype(str).str.strip().str.upper() == codigo_produto_alvo) & 
