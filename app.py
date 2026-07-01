@@ -29,16 +29,22 @@ def salvar_inventarios(dados):
     with open(DB_INVENTARIOS, 'w') as f: json.dump(dados, f, indent=4)
 
 def carregar_contagens():
-    if os.path.exists(DB_CONTAGENS): 
-        df = pd.read_csv(DB_CONTAGENS)
-        for col in ['Supervisor_Qtd', 'Supervisor_Etiqueta', 'Supervisor_Endereco', 'Origem_Contagem']:
-            if col not in df.columns: df[col] = None
-        return df
-    return pd.DataFrame(columns=[
+    colunas_obrigatorias = [
         'Inventario', 'Cód. Produto', 'Desc. Produto', 'Id. Estoq. Físico', 'Desc. Estoque Físico',
         'Lote', 'Serial', 'Dt_Vencto', 'Complemento', 'Ativo', 'Quantidade_Contada', 'Saldo_Sistemico', 'Status',
         'Supervisor_Qtd', 'Supervisor_Etiqueta', 'Supervisor_Endereco', 'Origem_Contagem'
-    ])
+    ]
+    if os.path.exists(DB_CONTAGENS): 
+        try:
+            df = pd.read_csv(DB_CONTAGENS)
+            # 🔥 CORREÇÃO DEFINITIVA: Forçar a criação de QUALQUER coluna ausente antes de retornar o DataFrame
+            for col in colunas_obrigatorias:
+                if col not in df.columns:
+                    df[col] = None
+            return df
+        except:
+            pass
+    return pd.DataFrame(columns=colunas_obrigatorias)
 
 def salvar_contagens(df): df.to_csv(DB_CONTAGENS, index=False)
 
@@ -62,7 +68,7 @@ def carregar_estoques_master():
 def salvar_estoques_master(dados):
     with open(DB_ESTOQUES_MASTER, 'w') as f: json.dump(dados, f, indent=4)
 
-# Inicializações do Session State
+# Inicializações controladas no Session State
 if 'inventarios' not in st.session_state: st.session_state.inventarios = carregar_inventarios()
 if 'base_produtos' not in st.session_state: st.session_state.base_produtos = pd.DataFrame()
 if 'contagens' not in st.session_state: st.session_state.contagens = carregar_contagens()
@@ -98,7 +104,7 @@ def normalizar_valor(val):
     return v_str
 
 # -----------------------------------------------------------------------------
-# BARRA LATERAL (Sidebar com Opção de Fechar Inventário de Rotina)
+# BARRA LATERAL (Sidebar - Com Fechamento para Almoxarife)
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.subheader("👤 Operador Ativo")
@@ -106,7 +112,7 @@ with st.sidebar:
     st.markdown(f"**{operador_atual}**")
     
     col_btn1, col_btn2 = st.columns(2)
-    with col_btn1: st.button("🔄 Actualizar", use_container_width=True)
+    with col_btn1: st.button("🔄 Atualizar", use_container_width=True)
     with col_btn2: st.button("🚪 Sair", use_container_width=True)
     
     st.write("---")
@@ -130,7 +136,13 @@ with st.sidebar:
     lista_invs_nomes = [item[0] for item in inventarios_ordenados]
     inv_ativo = st.selectbox("Inventário em andamento:", lista_invs_nomes, index=0) if lista_invs_nomes else None
 
-    contagens_atuais = st.session_state.contagens[(st.session_state.contagens['Inventario'] == inv_ativo) & (st.session_state.contagens['Origem_Contagem'] != 'Auditoria_Supervisor')] if inv_ativo else pd.DataFrame()
+    # Filtra as contagens ocultando as linhas geradas pelo módulo do supervisor
+    contagens_atuais = pd.DataFrame()
+    if inv_ativo and not st.session_state.contagens.empty:
+        contagens_atuais = st.session_state.contagens[
+            (st.session_state.contagens['Inventario'] == inv_ativo) & 
+            (st.session_state.contagens['Origem_Contagem'] != 'Auditoria_Supervisor')
+        ]
 
     total_linhas_base = len(st.session_state.base_produtos)
     it_contados = 0
@@ -145,7 +157,7 @@ with st.sidebar:
         it_contados = sum(1 for _, row in st.session_state.base_produtos.iterrows() if (normalizar_valor(row['Cód. Produto']), normalizar_valor(row['Lote']), normalizar_valor(row['Ativo'])) in linhas_contadas_set)
         pendencias_reais = max(0, total_linhas_base - it_contados)
     
-    # 🔒 RETORNOU PARA A LATERAL: FECHAMENTO PARA OS ALMOXARIFES
+    # 🔒 OPÇÃO DE FECHAMENTO DISPONÍVEL NA ABA LATERAL PARA OS ALMOXARIFES
     if inv_ativo:
         st.write("---")
         st.caption("🔒 Fechamento de Inventário (Almoxarife)")
@@ -196,7 +208,7 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# 3. PAINEL PRINCIPAL
+# 3. PAINEL PRINCIPAL (Abas)
 # -----------------------------------------------------------------------------
 aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
     "🔍 Contar Item", "📄 Base de Estoque", "📊 Painel Supervisor", "📈 Acuracidade", "🕒 Frequência", "🗄️ Histórico Geral"
@@ -335,7 +347,7 @@ with aba2:
         st.dataframe(df_visualizacao, use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------------
-# ABA 3: PAINEL SUPERVISOR (2ª CONTAGEM + INVENTÁRIO ESPECÍFICO DE ACURACIDADE)
+# ABA 3: PAINEL SUPERVISOR (2ª CONTAGEM + INVENTÁRIO EXCLUSIVO DE ACURACIDADE)
 # -----------------------------------------------------------------------------
 with aba3:
     st.header("🕵️‍♂️ Painel de Auditoria e Controle do Supervisor")
@@ -343,7 +355,6 @@ with aba3:
     if operador_atual != "Administrador Tel":
         st.error("🔒 Acesso restrito apenas ao Perfil de Supervisor/Administrador.")
     else:
-        # Layout dividido
         col_dados, col_inventario_acuracidade = st.columns([1.8, 1.4])
         
         with col_dados:
@@ -373,7 +384,7 @@ with aba3:
             st.markdown("""
                 <div class="fechamento-card" style="border-left: 5px solid #2ed573;">
                     <h4>Módulo Independente de Auditoria</h4>
-                    <p style='font-size:12px; color:#555;'>Lance os dados aqui para **alterar e homologar em tempo real** a nota da tela de Acuracidade, independente dos lançamentos normais.</p>
+                    <p style='font-size:12px; color:#555;'>Lance os dados aqui para **alterar e homologar em tempo real** a nota da tela de Acuracidade, independente dos lançamentos normais do almoxarife.</p>
                 </div>
             """, unsafe_allow_html=True)
             st.write("")
@@ -392,14 +403,11 @@ with aba3:
                         id_estoque_alvo = int(linha_original.get('Id. Estoq. Físico', 0))
                         dt_atual_str = datetime.now().strftime('%d/%m/%Y')
                         
-                        # Cálculo de acuracidade estrito da auditoria
                         v_sis = linha_original.get('Qtd Estoque', 0)
                         if pd.isna(v_sis): v_sis = 0
                         
-                        # Critério: Bateu quantidade + etiqueta ok + endereço ok = 100% senão 0% por amostragem
                         acuracidade_item = 100.0 if (int(qtd_auditoria) == int(v_sis) and etiqueta_auditoria == "Sim" and endereco_auditoria == "Sim") else 0.0
                         
-                        # Grava o histórico de auditoria do supervisor separado
                         nova_auditoria_log = {
                             'Inventario': f"Auditoria_Supervisor_{dt_atual_str}", 'Cód. Produto': linha_original['Cód. Produto'], 'Desc. Produto': produto_auditoria,
                             'Id. Estoq. Físico': id_estoque_alvo, 'Desc. Estoque Físico': linha_original['Desc. Estoque Físico'],
@@ -411,7 +419,6 @@ with aba3:
                         st.session_state.contagens = pd.concat([st.session_state.contagens, pd.DataFrame([nova_auditoria_log])], ignore_index=True)
                         salvar_contagens(st.session_state.contagens)
                         
-                        # 🔥 ALIMENTA DIRETAMENTE A TELA DE ACURACIDADE MASTER
                         if id_estoque_alvo:
                             for est in st.session_state.lista_estoques_fixos:
                                 if int(est['Id. Estoq. Físico']) == id_estoque_alvo:
