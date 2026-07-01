@@ -5,14 +5,20 @@ import sqlite3
 import io
 import base64
 import os
+from pathlib import Path
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(page_title="Contagem de Estoque Físico - JBA", layout="wide")
 
 # --- BANCO DE DADOS PERMANENTE E FIXO (SQLITE) ---
 def conectar_banco():
-    caminho_banco = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'banco_inventario.db') if '__file__' in locals() else 'banco_inventario.db'
-    conn = sqlite3.connect(caminho_banco, check_same_thread=False)
+    # Definição de um caminho global e imutável no sistema de arquivos do servidor
+    # Isso impede que reinicializações do Streamlit criem bancos fantasmas e apaguem o histórico
+    diretorio_permanente = Path.home() / ".streamlit_jba_data"
+    diretorio_permanente.mkdir(parents=True, exist_ok=True)
+    caminho_banco = diretorio_permanente / "banco_inventario_fixo.db"
+    
+    conn = sqlite3.connect(str(caminho_banco), check_same_thread=False)
     return conn
 
 def inicializar_banco():
@@ -471,11 +477,12 @@ else:
             with st.form("form_novo", clear_on_submit=True):
                 novo_nome = st.text_input("Nome do Inventário")
                 if st.form_submit_button("Criar", type="primary") and novo_nome:
+                    # CORREÇÃO: Começar a contagem em 0 para gerar a primeira pasta como #1
                     if not df_inventarios.empty:
                         df_limpo_calc = df_inventarios['id'].str.replace('#', '', regex=False).astype(int)
                         maior_id = df_limpo_calc.max()
                     else:
-                        maior_id = 38
+                        maior_id = 0
                     novo_id = f"#{maior_id + 1}"
                     hoje = datetime.date.today().strftime("%Y-%m-%d")
                     cursor = conn.cursor()
@@ -596,11 +603,9 @@ else:
                     itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_rastreio]
                     
                     if not itens_filtrados.empty:
-                        # Obter lançamentos completos de Lote e Ativo já salvos para este código específico
                         df_ja_contados = pd.read_sql_query("SELECT lote, ativo FROM contagens WHERE inventario_id = ? AND cod_produto = ?", conn, params=(id_pasta_limpo, codigo_rastreio))
                         conjunto_contados = set(zip(df_ja_contados['lote'].astype(str).str.strip().str.upper(), df_ja_contados['ativo'].astype(str).str.strip().str.upper()))
 
-                        # Filtrar as linhas da base removendo as combinações exatas que já foram contadas
                         linhas_disponiveis_reais = []
                         for _, row_b in itens_filtrados.iterrows():
                             l_b = str(row_b['lote']).strip().upper() if pd.notna(row_b['lote']) else ""
@@ -613,7 +618,6 @@ else:
                         else:
                             df_disponiveis = pd.DataFrame(linhas_disponiveis_reais)
 
-                            # Listagem dinâmica de Lotes livres
                             lotes_disponiveis = df_disponiveis['lote'].dropna().astype(str).str.strip().unique().tolist()
                             lotes_disponiveis = [l for l in lotes_disponiveis if l != "" and l.lower() != "nan"]
 
@@ -626,7 +630,6 @@ else:
                                 lote_selecionado = lotes_disponiveis[0] if len(lotes_disponiveis) == 1 else ""
                                 df_filtrado_final = df_disponiveis
 
-                            # Listagem dinâmica de Ativos livres pertencentes ao lote
                             ativos_disponiveis = df_filtrado_final['ativo'].dropna().astype(str).str.strip().unique().tolist()
                             ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
 
