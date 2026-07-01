@@ -69,10 +69,10 @@ with st.sidebar:
             else:
                 df_upload = pd.read_excel(uploaded_file)
             
-            # Padronizar nomes de colunas
+            # Padronizar nomes de colunas eliminando espaços extras
             df_upload.columns = [str(c).strip() for c in df_upload.columns]
             
-            # Garantir colunas críticas
+            # Garantir existência das colunas críticas para o motor de busca funcionar
             for col_obrigatoria in ['Lote', 'Ativo', 'Qtd Estoque', 'Codigo', 'Descricao']:
                 if col_obrigatoria not in df_upload.columns:
                     df_upload[col_obrigatoria] = None
@@ -84,33 +84,47 @@ with st.sidebar:
 
     st.write("---")
     
-    # Definição Global de Contagens Atuais (Resolve o NameError de Escopo)
+    # FILTRAGEM GLOBAL DE CONTAGENS (Evita o NameError entre as abas)
     contagens_atuais = st.session_state.contagens[st.session_state.contagens['Inventario'] == inv_ativo]
     
-    # Métricas da Lateral
-    qtd_itens_base = len(st.session_state.base_produtos)
-    qtd_lancamentos = len(contagens_atuais)
+    # Contagem de pendências dinâmicas baseadas na regra de chaves únicas
+    linhas_contadas_set = set()
+    if not contagens_atuais.empty:
+        for idx, r in contagens_atuais.iterrows():
+            linhas_contadas_set.add((str(r['Codigo']), str(r['Lote']), str(r['Ativo'])))
+            
+    total_linhas_base = len(st.session_state.base_produtos)
+    it_contados = len(linhas_contadas_set)
+    pendencias_reais = max(0, total_linhas_base - it_contados)
     
+    # Métricas Visuais da Lateral
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-title">📋 Linhas Totais na Base</div>
-        <div class="metric-value">{qtd_itens_base}</div>
+        <div class="metric-value">{total_linhas_base}</div>
     </div>
     <div class="metric-card" style="border-left-color: #2ed573;">
         <div class="metric-title">✅ Itens Já Contados</div>
-        <div class="metric-value">{qtd_lancamentos}</div>
+        <div class="metric-value">{it_contados}</div>
     </div>
     """, unsafe_allow_html=True)
+    
+    st.markdown(f"**PENDÊNCIAS RESTANTES:** `{pendencias_reais}`")
 
 # -----------------------------------------------------------------------------
-# 3. PAINEL PRINCIPAL (Abas de Navegação)
+# 3. PAINEL PRINCIPAL (Abas de Navegação conforme seu Layout)
 # -----------------------------------------------------------------------------
-aba1, aba2, aba3, aba4, aba5 = st.tabs([
-    "🔍 Contar Item", "📊 Painel Supervisor", "📈 Acuracidade", "🕒 Frequência", "🗄️ Histórico"
+aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
+    "🔍 Contar Item", 
+    "📄 Base de Estoque (Tempo Real)", 
+    "📊 Painel Supervisor", 
+    "📈 Acuracidade", 
+    "🕒 Frequência", 
+    "🗄️ Histórico"
 ])
 
 # -----------------------------------------------------------------------------
-# ABA 1: CONTAGEM COM VALIDAÇÃO DE ATIVO E LOTE
+# ABA 1: TELA DE BIPAGEM E VALIDAÇÃO
 # -----------------------------------------------------------------------------
 with aba1:
     if st.session_state.base_produtos.empty:
@@ -127,7 +141,7 @@ with aba1:
                 descricao_item = linhas_produto.iloc[0]['Descricao']
                 st.info(f"📦 **Item Identificado:** {descricao_item} (Código: {codigo_bipado})")
                 
-                # Filtrar as opções que ainda estão PENDENTES de contagem
+                # Filtrar sub-itens pendentes
                 linhas_pendentes = []
                 for idx, row in linhas_produto.iterrows():
                     foi_contado = False
@@ -206,9 +220,67 @@ with aba1:
         st.dataframe(contagens_atuais, use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# ABA 2: PAINEL DO SUPERVISOR
+# ABA 2: BASE DE ESTOQUE COMPLETA EM TEMPO REAL (NOVA ABA SOLICITADA)
 # -----------------------------------------------------------------------------
 with aba2:
+    st.header("📄 Base de Estoque Carregada")
+    st.write("Abaixo consta a lista completa dos itens da sua planilha. As colunas atualizam em tempo real conforme as bipagens acontecem.")
+    
+    if st.session_state.base_produtos.empty:
+        st.info("Aguardando upload da planilha base na barra lateral para exibir a lista completa de estoque.")
+    else:
+        # Fazer uma cópia para não mexer na planilha original bruta
+        df_visualizacao = st.session_state.base_produtos.copy()
+        
+        status_contagem_lista = []
+        qtd_contada_lista = []
+        
+        # Varre linha por linha da planilha importada e verifica se já consta na aba de contados
+        for idx, row in df_visualizacao.iterrows():
+            codigo_row = str(row['Codigo'])
+            lote_row = str(row['Lote'])
+            ativo_row = str(row['Ativo'])
+            
+            match = pd.DataFrame()
+            if not contagens_atuais.empty:
+                match = contagens_atuais[
+                    (contagens_atuais['Codigo'].astype(str) == codigo_row) & 
+                    (contagens_atuais['Lote'].astype(str) == lote_row) & 
+                    (contagens_atuais['Ativo'].astype(str) == ativo_row)
+                ]
+            
+            if not match.empty:
+                status_contagem_lista.append("🟢 Contado")
+                # Soma caso tenha mais de um lançamento do mesmo item
+                qtd_contada_lista.append(int(match['Quantidade_Contada'].sum()))
+            else:
+                status_contagem_lista.append("🔴 Pendente")
+                qtd_contada_lista.append(0)
+        
+        # Insere as duas novas colunas de controle no início do dataframe visual
+        df_visualizacao.insert(0, "Status Contagem", status_contagem_lista)
+        df_visualizacao.insert(1, "Qtd Física Contada", qtd_contada_lista)
+        
+        # Filtros Rápidos no topo da tabela
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            filtro_status = st.multiselect("Filtrar por Status de Processamento:", ["🔴 Pendente", "🟢 Contado"], default=["🔴 Pendente", "🟢 Contado"])
+        with col_f2:
+            busca_texto = st.text_input("Filtrar por Nome / Descrição do Material:", placeholder="Digite para buscar...")
+            
+        # Aplicar filtros dinâmicos na tabela
+        if filtro_status:
+            df_visualizacao = df_visualizacao[df_visualizacao['Status Contagem'].isin(filtro_status)]
+        if busca_texto:
+            df_visualizacao = df_visualizacao[df_visualizacao['Descricao'].astype(str).str.contains(busca_texto, case=False, na=False)]
+            
+        # Exibe a planilha formatada
+        st.dataframe(df_visualizacao, use_container_width=True, hide_index=True)
+
+# -----------------------------------------------------------------------------
+# ABA 3: PAINEL DO SUPERVISOR
+# -----------------------------------------------------------------------------
+with aba3:
     st.header("🕵️‍♂️ Painel de Auditoria do Supervisor")
     df_divergentes = st.session_state.contagens[
         (st.session_state.contagens['Inventario'] == inv_ativo) & 
@@ -221,9 +293,9 @@ with aba2:
         st.dataframe(df_divergentes[['Codigo', 'Descricao', 'Lote', 'Ativo', 'Saldo_Sistemico', 'Quantidade_Contada', 'Status']], use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# ABA 3: ACURACIDADE
+# ABA 4: ACURACIDADE
 # -----------------------------------------------------------------------------
-with aba3:
+with aba4:
     st.header("📈 Relatório de Acuracidade Geral")
     if not contagens_atuais.empty:
         corretos = (contagens_atuais['Quantidade_Contada'] == contagens_atuais['Saldo_Sistemico']).sum()
@@ -234,16 +306,16 @@ with aba3:
         st.info("Nenhum dado lançado para calcular acuracidade.")
 
 # -----------------------------------------------------------------------------
-# ABA 4: FREQUÊNCIA
+# ABA 5: FREQUÊNCIA
 # -----------------------------------------------------------------------------
-with aba4:
+with aba5:
     st.header("🕒 Status e Frequência por Setor")
     st.dataframe(st.session_state.frequencia_estoques, use_container_width=True)
 
 # -----------------------------------------------------------------------------
-# ABA 5: HISTÓRICO
+# ABA 6: HISTÓRICO
 # -----------------------------------------------------------------------------
-with aba5:
+with aba6:
     st.header("🗄️ Histórico e Exportação")
     if not contagens_atuais.empty:
         csv_data = contagens_atuais.to_csv(index=False).encode('utf-8')
