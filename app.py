@@ -17,7 +17,14 @@ DB_ESTOQUES_MASTER = "db_estoques_master.json"
 
 def carregar_inventarios():
     if os.path.exists(DB_INVENTARIOS):
-        with open(DB_INVENTARIOS, 'r') as f: return json.load(f)
+        with open(DB_INVENTARIOS, 'r') as f: 
+            dados = json.load(f)
+            # Normalização corretiva para bases antigas que continham "(Aberto)" na chave principal
+            dados_limpos = {}
+            for k, v in dados.items():
+                chave_limpa = k.split(" (")[0].strip()
+                dados_limpos[chave_limpa] = v
+            return dados_limpos
     return {
         '#2 - 2194 teste': {
             'status': 'Aberto', 'data_fechamento': None, 'acuracidade': 0.0, 'obs': 'Teste de bipagem dinâmica',
@@ -73,7 +80,7 @@ if 'pagina_atual_hist' not in st.session_state: st.session_state.pagina_atual_hi
 if 'limpar_bipe' not in st.session_state: st.session_state.limpar_bipe = False
 if 'modo_auditoria_ativo' not in st.session_state: st.session_state.modo_auditoria_ativo = False
 
-# Ajuste corretivo de colunas novas na memória ativa
+# Forçar a criação das colunas novas no cache ativo
 for col_nova in ['Supervisor_Qtd', 'Supervisor_Etiqueta', 'Supervisor_Endereco', 'Origem_Contagem']:
     if col_nova not in st.session_state.contagens.columns:
         st.session_state.contagens[col_nova] = None
@@ -123,7 +130,7 @@ with st.sidebar:
         nova_obs = st.text_area("Observações Iniciais")
         if st.button("Salvar Novo Inventário", use_container_width=True):
             if novo_id:
-                chave_nova = f"{novo_id}"
+                chave_nova = f"{novo_id}".strip()
                 st.session_state.inventarios[chave_nova] = {
                     'status': 'Aberto', 'data_fechamento': None, 'acuracidade': 100.0, 'obs': nova_obs,
                     'timestamp_criacao': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -138,8 +145,8 @@ with st.sidebar:
     lista_invs_nomes = [f"{item[0]} ({item[1]['status']})" for item in inventarios_ordenados]
     inv_ativo_bruto = st.selectbox("Inventário em andamento:", lista_invs_nomes, index=0) if lista_invs_nomes else None
     
-    # 🔥 RESOLUÇÃO DO KEYERROR: Isola e limpa o nome real antes de qualquer chamada interna do script
-    inv_ativo = inv_ativo_bruto.split(" (")[0] if inv_ativo_bruto else None
+    # Isola o nome real limpo correspondente à chave correta mapeada
+    inv_ativo = inv_ativo_bruto.split(" (")[0].strip() if inv_ativo_bruto else None
 
     # Filtra contagens da rotina do almoxarife
     contagens_atuais = pd.DataFrame()
@@ -162,7 +169,7 @@ with st.sidebar:
         it_contados = sum(1 for _, row in st.session_state.base_produtos.iterrows() if (normalizar_valor(row['Cód. Produto']), normalizar_valor(row['Lote']), normalizar_valor(row['Ativo'])) in linhas_contadas_set)
         pendencias_reais = max(0, total_linhas_base - it_contados)
     
-    # 🔒 OPÇÃO DE FECHAMENTO DINÂMICO NA BARRA LATERAL
+    # 🔒 OPÇÃO DE FECHAMENTO DISPONÍVEL NA ABA LATERAL PARA OS ALMOXARIFES
     if inv_ativo:
         st.write("---")
         st.caption("🔒 Fechamento de Inventário (Almoxarife)")
