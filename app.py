@@ -11,7 +11,8 @@ st.set_page_config(page_title="Contagem de Estoque Físico - JBA", layout="wide"
 
 # --- BANCO DE DADOS PERMANENTE E FIXO (SQLITE) ---
 def conectar_banco():
-    caminho_banco = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'banco_inventario.db') if '__file__' in locals() else 'banco_inventario.db'
+    # Garantia de caminho absoluto persistente para evitar perda de dados no ambiente de nuvem
+    caminho_banco = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'banco_inventario.db') if '__file__' in locals() else 'banco_inventario.db'
     conn = sqlite3.connect(caminho_banco, check_same_thread=False)
     return conn
 
@@ -51,7 +52,8 @@ def inicializar_banco():
             unid_medida TEXT,
             qtd_estoque INTEGER,
             id_estoque_fisico TEXT,
-            lote TEXT DEFAULT ''
+            lote TEXT DEFAULT '',
+            ativo TEXT DEFAULT ''
         )
     """)
     
@@ -116,6 +118,12 @@ def inicializar_banco():
             cursor.execute("ALTER TABLE contagens ADD COLUMN lote TEXT DEFAULT ''")
         if 'fase_contagem' not in colunas_existentes:
             cursor.execute("ALTER TABLE contagens ADD COLUMN fase_contagem TEXT DEFAULT '1a Contagem'")
+        
+        cursor.execute("PRAGMA table_info(itens_base_inventario)")
+        colunas_base = [coluna[1] for coluna in cursor.fetchall()]
+        if 'ativo' not in colunas_base:
+            cursor.execute("ALTER TABLE itens_base_inventario ADD COLUMN ativo TEXT DEFAULT ''")
+            
         conn.commit()
     except Exception as e:
         pass
@@ -427,7 +435,7 @@ else:
         # RECONSTRUÇÃO DA BASE DE SALDO PERSISTENTE VINCULADA AO BANCO DE DADOS E À PASTA ATUAL
         if id_inventario_atual:
             id_pasta_limpo_base = id_inventario_atual.replace("#", "")
-            df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
+            df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote, ativo FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
             if not df_base_persistida.empty:
                 st.session_state.base_sistema = df_base_persistida
             else:
@@ -459,15 +467,22 @@ else:
                     c_lote_u = col_l
                     break
 
+            c_ativo_u = None
+            for col_a in df_upload_temp.columns:
+                if str(col_a).strip().upper() in ["ATIVO", "Nº ATIVO", "NUMERO ATIVO", "COD ATIVO"]:
+                    c_ativo_u = col_a
+                    break
+
             cursor_db = conn.cursor()
             cursor_db.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (id_pasta_limpo_base,))
             
             for _, r in df_upload_temp.iterrows():
                 lote_item_v = str(r[c_lote_u]).strip() if c_lote_u and pd.notna(r[c_lote_u]) else ""
+                ativo_item_v = str(r[c_ativo_u]).strip() if c_ativo_u and pd.notna(r[c_ativo_u]) else ""
                 cursor_db.execute("""
-                    INSERT INTO itens_base_inventario (inventario_id, cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (id_pasta_limpo_base, str(r[c_cod_u]).strip(), str(r[c_desc_u]), str(r[c_local_u]), str(r[c_unid_u]), int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0), str(r[c_id_est_u]).strip(), lote_item_v))
+                    INSERT INTO itens_base_inventario (inventario_id, cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote, ativo)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (id_pasta_limpo_base, str(r[c_cod_u]).strip(), str(r[c_desc_u]), str(r[c_local_u]), str(r[c_unid_u]), int(pd.to_numeric(r[c_qtd_u], errors='coerce') or 0), str(r[c_id_est_u]).strip(), lote_item_v, ativo_item_v))
             conn.commit()
             st.rerun()
 
@@ -597,11 +612,16 @@ else:
                     itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_rastreio]
                     
                     if not itens_filtrados.empty:
+                        # Puxar lançamentos já existentes para este material na pasta para remover duplicidades de seleção
+                        df_ja_contados = pd.read_sql_query("SELECT lote, ativo FROM contagens WHERE inventario_id = ?", conn, params=(id_pasta_limpo,))
+                        lotes_ja_contados = set(df_ja_contados['lote'].astype(str).str.strip().tolist())
+                        ativos_ja_contados = set(df_ja_contados['ativo'].astype(str).str.strip().tolist())
+
                         lotes_disponiveis = itens_filtrados['lote'].dropna().astype(str).str.strip().unique().tolist()
-                        lotes_disponiveis = [l for l in lotes_disponiveis if l != "" and l.lower() != "nan"]
+                        lotes_disponiveis = [l for l in lotes_disponiveis if l != "" and l.lower() != "nan" and l not in lotes_ja_contados]
 
                         ativos_disponiveis = itens_filtrados['ativo'].dropna().astype(str).str.strip().unique().tolist() if 'ativo' in itens_filtrados.columns else []
-                        ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan"]
+                        ativos_disponiveis = [a for a in ativos_disponiveis if a != "" and a.lower() != "nan" and a not in ativos_ja_contados]
 
                         lote_selecionado = ""
                         if lotes_disponiveis:
@@ -617,8 +637,13 @@ else:
                             ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM:", ativos_disponiveis, key="ativo_selector_bip")
                             item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote['ativo'].astype(str).str.strip() == ativo_selecionado].iloc[0]
                         else:
-                            item_especifico = linhas_filtradas_por_lote.iloc[0]
-                            ativo_selecionado = ativos_disponiveis[0] if len(ativos_disponiveis) == 1 else ""
+                            if not linhas_filtradas_por_lote.empty:
+                                item_especifico = linhas_filtradas_por_lote.iloc[0]
+                                # Captura e preenche automaticamente a numeração do ativo cadastrado no material
+                                ativo_selecionado = str(item_especifico['ativo']).strip() if 'ativo' in item_especifico and pd.notna(item_especifico['ativo']) and str(item_especifico['ativo']).lower() != 'nan' else ""
+                            else:
+                                item_especifico = itens_filtrados.iloc[0]
+                                ativo_selecionado = ""
 
                         unid_val = item_especifico['unid_medida']
                         desc_val = item_especifico['desc_produto']
@@ -637,7 +662,7 @@ else:
                         b4.markdown(f'<div class="bloco-info"><div class="bloco-titulo">LOTE EM CONTAGEM</div><div class="bloco-valor" style="color:#d35400;">{lote_selecionado if lote_selecionado else "Padrão"}</div></div>', unsafe_allow_html=True)
                         
                         st.markdown(f"**Descrição do Material:** {desc_val}")
-                        st.info(f"📋 **Lote Selecionado:** {lote_selecionado if lote_selecionado else 'Não se aplica'} | **Ativo Selecionado:** {ativo_selecionado if ativo_selecionado else 'Padrão / Manual'}")
+                        st.info(f"📋 **Lote Selecionado:** {lote_selecionado if lote_selecionado else 'Não se aplica'} | **Ativo Encontrado:** {ativo_selecionado if ativo_selecionado else 'Padrão / Manual'}")
                         
                         with st.form("confirmar_form", clear_on_submit=True):
                             qtd_fisica = st.number_input("📦 Quantidade contada fisicamente (Obrigatório)", min_value=0, step=1, value=0)
@@ -645,7 +670,7 @@ else:
                             if len(ativos_disponiveis) > 1:
                                 ativo_final_input = ativo_selecionado
                             else:
-                                ativo_final_input = st.text_input("🔢 Número do Ativo (Opcional)", value=ativo_selecionado)
+                                ativo_final_input = st.text_input("🔢 Número do Ativo (Preenchido Automaticamente)", value=ativo_selecionado)
                                 
                             observacao = st.text_input("📝 Observação (opcional)")
                             
@@ -672,7 +697,7 @@ else:
                                     st.session_state.contador_reset += 1
                                     st.rerun()
                     else:
-                        st.error("❌ Código não localizado.")
+                        st.error("❌ Código não localizado ou todos os lotes/ativos deste item já foram contabilizados nesta pasta.")
 
     # --- ABA 2: CONTAGEM ATUAL ---
     with aba_atual:
