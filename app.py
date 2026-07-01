@@ -37,10 +37,6 @@ def carregar_contagens():
     if os.path.exists(DB_CONTAGENS): 
         try:
             df = pd.read_csv(DB_CONTAGENS)
-            # 🔥 CORREÇÃO DEFINITIVA: Forçar a criação de QUALQUER coluna ausente antes de retornar o DataFrame
-            for col in colunas_obrigatorias:
-                if col not in df.columns:
-                    df[col] = None
             return df
         except:
             pass
@@ -76,6 +72,11 @@ if 'lista_estoques_fixos' not in st.session_state: st.session_state.lista_estoqu
 if 'pagina_atual_hist' not in st.session_state: st.session_state.pagina_atual_hist = 1
 if 'limpar_bipe' not in st.session_state: st.session_state.limpar_bipe = False
 if 'modo_auditoria_ativo' not in st.session_state: st.session_state.modo_auditoria_ativo = False
+
+# 🔥 CORREÇÃO FORÇADA DE SEGURO CONTRA O KEYERROR DA PLANILHA ANTIGA:
+for col_nova in ['Supervisor_Qtd', 'Supervisor_Etiqueta', 'Supervisor_Endereco', 'Origem_Contagem']:
+    if col_nova not in st.session_state.contagens.columns:
+        st.session_state.contagens[col_nova] = None
 
 # Estilos CSS Customizados
 st.markdown("""
@@ -136,7 +137,7 @@ with st.sidebar:
     lista_invs_nomes = [item[0] for item in inventarios_ordenados]
     inv_ativo = st.selectbox("Inventário em andamento:", lista_invs_nomes, index=0) if lista_invs_nomes else None
 
-    # Filtra as contagens ocultando as linhas geradas pelo módulo do supervisor
+    # Filtra as contagens ocultando as linhas geradas pelo módulo de acuracidade do supervisor
     contagens_atuais = pd.DataFrame()
     if inv_ativo and not st.session_state.contagens.empty:
         contagens_atuais = st.session_state.contagens[
