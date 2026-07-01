@@ -108,7 +108,6 @@ ESTOQUES_JBA = [
     {"id": "3484", "desc": "JBA - CELULARES DEFEITO"}, {"id": "3546", "desc": "JBA - CELULARES"}
 ]
 
-# --- FUNÇÃO AUXILIAR PARA EXPORTAR EXCEL ---
 def converter_para_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
@@ -139,7 +138,6 @@ st.markdown("""
     }
     .bloco-titulo { color: #7f8c8d; font-size: 11px; font-weight: bold; letter-spacing: 0.5px; }
     .bloco-valor { color: #1b4f72; font-size: 24px; font-weight: bold; }
-    .card-sistema { background-color: #ebf5fb; padding: 20px; border-radius: 8px; border: 1px solid #d4e6f1; margin-top: 15px; margin-bottom: 25px; }
     .card-lateral { background-color: #1a233a; padding: 12px; border-radius: 8px; margin-bottom: 12px; border-left: 4px solid #2563eb; }
     .card-lateral-titulo { color: #93c5fd; font-size: 11px; font-weight: bold; }
     .card-lateral-valor { color: white; font-size: 28px; font-weight: bold; }
@@ -269,8 +267,8 @@ else:
             cursor_db = conn.cursor()
             cursor_db.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (id_inventario_atual,))
             
-            # --- MOTOR DE PROCURA INTELIGENTE REVISADO COM FALLBACK SEGURO ---
-            def obter_coluna_por_procura(termos, index_padrao, proibir=None, estrito=False):
+            # --- NOVO DETECTOR BLINDADO SEM QUEBRA DE ÍNDICES ---
+            def obter_coluna_por_procura(termos, proibir=None, estrito=False):
                 for t in termos:
                     for col in df_upload_temp.columns:
                         col_str = str(col).lower().replace(" ", "").replace(".", "").replace("_", "")
@@ -280,27 +278,24 @@ else:
                             if proibir and any(p.lower() in col_str for p in proibir):
                                 continue
                             return col
-                if index_padrao < len(df_upload_temp.columns):
-                    return df_upload_temp.columns[index_padrao]
                 return None
 
-            c_cod = obter_coluna_por_procura(['codproduto', 'códproduto', 'material', 'codigo', 'código', 'sap', 'item', 'idproduto'], 0)
-            c_desc = obter_coluna_por_procura(['descproduto', 'descricao', 'descrição', 'texto', 'nome', 'desc'], 1)
-            c_local = obter_coluna_por_procura(['descestoquefisico', 'localizacao', 'localização', 'estoque', 'depósito', 'deposito', 'arm'], 2)
-            c_unid = obter_coluna_por_procura(['unidmedida', 'unidade', 'unid', 'umb', 'un', 'uni'], 3)
-            c_qtd = obter_coluna_por_procura(['qtdestoque', 'quantidade', 'saldo', 'atual', 'disponivel', 'total', 'qtd'], -1)
-            c_id_est = obter_coluna_por_procura(['idestoquefísico', 'idestoque', 'codestoque', 'centro', 'idest'], 0)
-            c_lote = obter_coluna_por_procura(['lote', 'batch', 'lot'], 0)
+            c_cod = obter_coluna_por_procura(['codproduto', 'códproduto', 'material', 'codigo', 'código', 'sap', 'item', 'idproduto']) or df_upload_temp.columns[0]
+            c_desc = obter_coluna_por_procura(['descproduto', 'descricao', 'descrição', 'texto', 'nome', 'desc']) or (df_upload_temp.columns[1] if len(df_upload_temp.columns) > 1 else df_upload_temp.columns[0])
+            c_local = obter_coluna_por_procura(['descestoquefisico', 'localizacao', 'localização', 'estoque', 'depósito', 'deposito', 'arm'])
+            c_unid = obter_coluna_por_procura(['unidmedida', 'unidade', 'unid', 'umb', 'un', 'uni'])
+            c_qtd = obter_coluna_por_procura(['qtdestoque', 'quantidade', 'saldo', 'atual', 'disponivel', 'total', 'qtd'])
+            c_id_est = obter_coluna_por_procura(['idestoquefísico', 'idestoque', 'codestoque', 'centro', 'idest'])
+            c_lote = obter_coluna_por_procura(['lote', 'batch', 'lot'])
             
-            # Trava estrita para a coluna de Ativo: busca correspondência exata de termos sem misturar ID Ativo
-            c_ativo = obter_coluna_por_procura(['ativo', 'nºativo', 'patrimonio', 'asset'], 0, proibir=['id', 'cod', 'codigo', 'código', 'identificador'], estrito=True)
+            # Localização rígida da coluna Ativo (ignorando totalmente "id ativo")
+            c_ativo = obter_coluna_por_procura(['ativo', 'nºativo', 'patrimonio', 'asset'], proibir=['id', 'cod', 'codigo', 'código', 'identificador'], estrito=True)
             if not c_ativo:
-                # Se não achar por termo estrito, tenta busca secundária sem colunas proibidas
-                c_ativo = obter_coluna_por_procura(['ativo', 'patrimonio', 'asset'], 0, proibir=['id', 'cod', 'codigo', 'código'])
+                c_ativo = obter_coluna_por_procura(['ativo', 'patrimonio', 'asset'], proibir=['id', 'cod', 'codigo', 'código'])
 
             for _, r in df_upload_temp.iterrows():
-                cod_final = str(r[c_cod]).strip().upper() if c_cod and c_cod in df_upload_temp.columns and pd.notna(r[c_cod]) else ""
-                desc_final = str(r[c_desc]).strip() if c_desc and c_desc in df_upload_temp.columns and pd.notna(r[c_desc]) else "Sem Descrição"
+                cod_final = str(r[c_cod]).strip().upper() if c_cod in df_upload_temp.columns and pd.notna(r[c_cod]) else ""
+                desc_final = str(r[c_desc]).strip() if c_desc in df_upload_temp.columns and pd.notna(r[c_desc]) else "Sem Descrição"
                 local_final = str(r[c_local]).strip() if c_local and c_local in df_upload_temp.columns and pd.notna(r[c_local]) else "Geral"
                 unid_final = str(r[c_unid]).strip() if c_unid and c_unid in df_upload_temp.columns and pd.notna(r[c_unid]) else "UN"
                 qtd_final = int(pd.to_numeric(r[c_qtd], errors='coerce') or 0) if c_qtd and c_qtd in df_upload_temp.columns and pd.notna(r[c_qtd]) else 0
@@ -312,7 +307,7 @@ else:
                     col_nome_original = str(c_ativo).lower().replace(" ", "")
                     if "id" not in col_nome_original:
                         bruto_ativo = str(r[c_ativo]).strip()
-                        if bruto_ativo and bruto_ativo.lower() != 'nan' and bruto_ativo != '0' and bruto_ativo != '1864380':
+                        if bruto_ativo and bruto_ativo.lower() != 'nan' and bruto_ativo != '0':
                             ativo_item_v = bruto_ativo
 
                 if cod_final != "" and cod_final.lower() != 'nan':
@@ -347,7 +342,6 @@ else:
         st.write(f"**PENDÊNCIAS RESTANTES:** {total_pendentes}")
         st.progress(progresso)
 
-        # BOTÃO LATERAL FIXO DE FECHAMENTO
         if inventario_selected_obj is not None and inventario_selected_obj['status'] in ["Aberto", "2a Contagem", "2ª Contagem"]:
             st.markdown("---")
             if pode_fechar_sozinho:
@@ -397,18 +391,13 @@ else:
                 
                 if not df_busca_por_ativo.empty:
                     codigo_produto_alvo = str(df_busca_por_ativo.iloc[0]['cod_produto']).upper().strip()
-                else:
-                    codigo_produto_alvo = codigo_produto_alvo
-                
-                if str(codigo_produto_alvo).upper().strip() == "TECA0227Z":
-                    df_busca_por_ativo = pd.DataFrame()
 
                 itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
                 
                 if not itens_filtrados.empty:
                     def checar_ativo_real(val):
                         s = str(val).strip()
-                        if not s or s.lower() in ['nan', '0', '', '-', 'n/a', 'sem ativo', '1864380']:
+                        if not s or s.lower() in ['nan', '0', '', '-', 'n/a', 'sem ativo']:
                             return False
                         return bool(re.match(r'^\d+$', s))
 
@@ -520,28 +509,6 @@ else:
                         st.rerun()
             else:
                 st.info("Nenhum lançamento registrado nesta pasta.")
-                
-            st.markdown("---")
-            st.subheader("📥 Resgatar/Importar Pasta Gravada no Passado")
-            arquivo_resgate = st.file_uploader("Suba a planilha Excel exportada antigamente para restaurar a pasta de contagens", type=["xlsx"])
-            if arquivo_resgate is not None:
-                try:
-                    df_resgate = pd.read_excel(arquivo_resgate)
-                    if 'inventario_id' in df_resgate.columns and 'cod_produto' in df_resgate.columns:
-                        id_resgatado = str(df_resgate.iloc[0]['inventario_id']).replace("#", "").strip()
-                        cursor = conn.cursor()
-                        cursor.execute("INSERT OR IGNORE INTO inventarios (id, nome, data, status) VALUES (?, ?, ?, 'Aberto')", (f"#{id_resgatado}", f"Restaurado #{id_resgatado}", datetime.date.today().strftime("%Y-%m-%d")))
-                        cursor.execute("DELETE FROM contagens WHERE inventario_id = ?", (id_resgatado,))
-                        
-                        for _, row in df_resgate.iterrows():
-                            cursor.execute("""
-                                INSERT INTO contagens (inventario_id, id_estoque, desc_estoque, cod_produto, desc_produto, unid_medida, qtd_sistema, qtd_contada, diferenca, ativo, observacao, operador, data_hora, lote, fase_contagem)
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                            """, (id_resgatado, str(row.get('id_estoque', '1084')), str(row.get('desc_estoque', 'Estoque')), str(row['cod_produto']), str(row.get('desc_produto', 'Prod')), str(row.get('unid_medida', 'UN')), int(row.get('qtd_sistema', 0)), int(row['qtd_contada']), int(row.get('diferenca', 0)), str(row.get('ativo', '')), str(row.get('observacao', '')), str(row.get('operador', 'Restaurador')), str(row.get('data_hora', '')), str(row.get('lote', '')), str(row.get('fase_contagem', '1a Contagem'))))
-                        conn.commit()
-                        st.success(f"✅ Pasta #{id_resgatado} restaurada com sucesso com todos os lançamentos!")
-                        st.rerun()
-                except Exception as e: st.error(f"Erro no resgate: {e}")
 
     # --- ABA 4: HISTÓRICO GERAL ---
     with aba_historico:
