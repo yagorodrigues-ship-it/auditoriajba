@@ -19,7 +19,7 @@ def carregar_inventarios():
     if os.path.exists(DB_INVENTARIOS):
         with open(DB_INVENTARIOS, 'r') as f: return json.load(f)
     return {
-        '#2 - 2194 teste (Aberto)': {
+        '#2 - 2194 teste': {
             'status': 'Aberto', 'data_fechamento': None, 'acuracidade': 0.0, 'obs': 'Teste de bipagem dinâmica',
             'timestamp_criacao': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         }
@@ -67,9 +67,7 @@ def carregar_estoques_master():
 def salvar_estoques_master(dados):
     with open(DB_ESTOQUES_MASTER, 'w') as f: json.dump(dados, f, indent=4)
 
-# -----------------------------------------------------------------------------
-# INSTANCIAÇÃO DAS VARIÁVEIS DE SESSÃO DO STREAMLIT
-# -----------------------------------------------------------------------------
+# Inicializações controladas no Session State
 if 'inventarios' not in st.session_state: st.session_state.inventarios = carregar_inventarios()
 if 'base_produtos' not in st.session_state: st.session_state.base_produtos = pd.DataFrame()
 if 'contagens' not in st.session_state: st.session_state.contagens = carregar_contagens()
@@ -78,7 +76,7 @@ if 'pagina_atual_hist' not in st.session_state: st.session_state.pagina_atual_hi
 if 'limpar_bipe' not in st.session_state: st.session_state.limpar_bipe = False
 if 'modo_auditoria_ativo' not in st.session_state: st.session_state.modo_auditoria_ativo = False
 
-# 🔥 SEGURANÇA MÁXIMA ANTES DA LINHA 133: Força a criação das colunas novas no cache ativo do navegador
+# Ajuste automático de compatibilidade de colunas no cache de sessão
 for col_nova in ['Supervisor_Qtd', 'Supervisor_Etiqueta', 'Supervisor_Endereco', 'Origem_Contagem']:
     if col_nova not in st.session_state.contagens.columns:
         st.session_state.contagens[col_nova] = None
@@ -128,7 +126,7 @@ with st.sidebar:
         nova_obs = st.text_area("Observações Iniciais")
         if st.button("Salvar Novo Inventário", use_container_width=True):
             if novo_id:
-                chave_nova = f"{novo_id} (Aberto)"
+                chave_nova = f"{novo_id}"
                 st.session_state.inventarios[chave_nova] = {
                     'status': 'Aberto', 'data_fechamento': None, 'acuracidade': 100.0, 'obs': nova_obs,
                     'timestamp_criacao': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
@@ -139,10 +137,15 @@ with st.sidebar:
 
     st.subheader("📂 Selecione o Inventário Ativo")
     inventarios_ordenados = sorted(st.session_state.inventarios.items(), key=lambda item: item[1].get('timestamp_criacao', ''), reverse=True)
-    lista_invs_nomes = [item[0] for item in inventarios_ordenados]
-    inv_ativo = st.selectbox("Inventário em andamento:", lista_invs_nomes, index=0) if lista_invs_nomes else None
+    
+    # Exibe dinamicamente o status real ao lado do nome do Dropdown
+    lista_invs_nomes = [f"{item[0]} ({item[1]['status']})" for item in inventarios_ordenados]
+    inv_ativo_bruto = st.selectbox("Inventário em andamento:", lista_invs_nomes, index=0) if lista_invs_nomes else None
+    
+    # Isola o nome real limpo da chave para buscar no banco
+    inv_ativo = inv_ativo_bruto.split(" (")[0] if inv_ativo_bruto else None
 
-    # Linha 133 Corrigida Definitivamente (Garantido que colunas existem no state)
+    # Filtra contagens da rotina do almoxarife
     contagens_atuais = pd.DataFrame()
     if inv_ativo and not st.session_state.contagens.empty:
         contagens_atuais = st.session_state.contagens[
@@ -163,7 +166,7 @@ with st.sidebar:
         it_contados = sum(1 for _, row in st.session_state.base_produtos.iterrows() if (normalizar_valor(row['Cód. Produto']), normalizar_valor(row['Lote']), normalizar_valor(row['Ativo'])) in linhas_contadas_set)
         pendencias_reais = max(0, total_linhas_base - it_contados)
     
-    # 🔒 OPÇÃO DE FECHAMENTO DISPONÍVEL NA ABA LATERAL PARA OS ALMOXARIFES
+    # 🔒 OPÇÃO DE FECHAMENTO DINÂMICO NA BARRA LATERAL
     if inv_ativo:
         st.write("---")
         st.caption("🔒 Fechamento de Inventário (Almoxarife)")
@@ -384,7 +387,6 @@ with aba3:
                         st.success("Ajuste efetuado!")
                         st.rerun()
 
-        # 🎯 INVENTÁRIO ESPECÍFICO DE ACURACIDADE (ALIMENTA A TELA DIRETAMENTE)
         with col_inventario_acuracidade:
             st.write("### 🎯 2. Inventário de Auditoria de Acuracidade")
             st.markdown("""
@@ -495,7 +497,7 @@ with aba5:
     st.dataframe(df_freq_final.style.map(destacar_critico, subset=['Status de Criticidade']), use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------------
-# ABA 6: HISTÓRICO GERAL
+# ABA 6: HISTÓRICO GERAL (RESOLVIDO TÍTULO FIXO DE ABERTO)
 # -----------------------------------------------------------------------------
 with aba6:
     st.header("🗄️ Histórico Permanente de Inventários")
@@ -510,14 +512,19 @@ with aba6:
     inventarios_pagina = inventarios_totais[inicio_idx:inicio_idx + itens_por_pagina]
     
     for inv, info in inventarios_pagina:
+        # 🔥 SOLUÇÃO CORRETA: Atribuição de cor de bolinha e texto baseados no status dinâmico real
         status_cor = "🟢" if info['status'] == "Aberto" else "🔴"
+        
         with st.expander(f"{status_cor} {inv} | Status: {info['status']}"):
             st.write(f"**Notas:** {info['obs']}")
             if info['data_fechamento']: st.write(f"**Fechado em:** {info['data_fechamento']} | **Acuracidade Apurada:** {info.get('acuracidade', 100.0):.1f}%")
             
             dados_historicos_inv = st.session_state.contagens[st.session_state.contagens['Inventario'] == inv]
             if not dados_historicos_inv.empty:
-                st.dataframe(dados_historicos_inv, use_container_width=True, hide_index=True)
+                # Ocultar colunas técnicas desnecessárias no relatório visual consolidado
+                colunas_view = [c for c in dados_historicos_inv.columns if c not in ['Supervisor_Qtd', 'Supervisor_Etiqueta', 'Supervisor_Endereco', 'Origem_Contagem']]
+                st.dataframe(dados_historicos_inv[colunas_view], use_container_width=True, hide_index=True)
+                
                 csv_dados = dados_historicos_inv.to_csv(index=False).encode('utf-8')
                 st.download_button("📥 Exportar Dados Completos (CSV)", data=csv_dados, file_name=f"Relatorio_{inv.replace(' ', '_')}.csv", mime="text/csv", key=f"dl_{inv}")
             else: st.caption("Nenhum lançamento físico associado.")
