@@ -30,6 +30,10 @@ if 'frequencia_estoques' not in st.session_state:
         {"Estoque": "Depósito de Químicos", "Ultima_Contagem": "15/03/2026", "Dias_Sem_Contar": 108, "Frequencia_Exigida": "Trimestral (90 dias)", "Status": "CRÍTICO"}
     ])
 
+# Criar uma chave de reset para contornar a limitação do text_input key
+if 'limpar_bipe' not in st.session_state:
+    st.session_state.limpar_bipe = False
+
 # Estilos CSS
 st.markdown("""
     <style>
@@ -141,7 +145,7 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
 ])
 
 # -----------------------------------------------------------------------------
-# ABA 1: TELA DE BIPAGEM COM RESET AUTOMÁTICO E TRAVA DE DUPLICIDADE
+# ABA 1: TELA DE BIPAGEM ATUALIZADA (SEM ERRO DE CONFLITO DE CHAVE)
 # -----------------------------------------------------------------------------
 with aba1:
     if st.session_state.base_produtos.empty:
@@ -149,7 +153,15 @@ with aba1:
     else:
         st.header(f"🎥 Tela de Bipagem Dinâmica")
         
-        texto_bipado_bruto = st.text_input("👉 BIPAR CÓDIGO DO MATERIAL:", key="bipador_input")
+        # Logica de Reset Seguro do Componente:
+        # Se a flag limpar_bipe for ativada pelo submit, usamos um valor padrão nulo temporário.
+        val_padrao_input = ""
+        if st.session_state.limpar_bipe:
+            st.session_state.limpar_bipe = False
+            # Trocar o valor interno sem quebrar o componente usando javascript interno/recarga limpa
+            st.rerun()
+            
+        texto_bipado_bruto = st.text_input("👉 BIPAR CÓDIGO DO MATERIAL:", value=val_padrao_input, key="bipador_input")
         
         if texto_bipado_bruto:
             bip_limpo = str(texto_bipado_bruto).strip()
@@ -192,7 +204,7 @@ with aba1:
                 if len(linhas_pendentes) == 0:
                     st.success("🎉 Todas as variações de Lote/Ativo deste produto já foram contabilizadas!")
                     if st.button("Limpar Tela para Próximo Bipe"):
-                        st.session_state.bipador_input = ""
+                        st.session_state.limpar_bipe = True
                         st.rerun()
                 else:
                     st.markdown(f"""
@@ -267,8 +279,8 @@ with aba1:
                             }
                             st.session_state.contagens = pd.concat([st.session_state.contagens, pd.DataFrame([nova_contagem])], ignore_index=True)
                             
-                            # Reseta o input do bipe para apagar as descrições da tela
-                            st.session_state.bipador_input = ""
+                            # Método limpo e seguro de reset: Aciona a flag em vez de atribuir valor direto à chave restrita
+                            st.session_state.limpar_bipe = True
                             st.toast(f"Sucesso! Item adicionado.", icon="🚀")
                             st.rerun()
             else:
