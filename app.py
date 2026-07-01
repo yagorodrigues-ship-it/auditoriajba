@@ -149,7 +149,6 @@ with aba1:
     else:
         st.header(f"🎥 Tela de Bipagem Dinâmica")
         
-        # Campo para o leitor de código de barras
         texto_bipado_bruto = st.text_input("👉 BIPAR CÓDIGO DO MATERIAL:", key="bipador_input")
         
         if texto_bipado_bruto:
@@ -172,9 +171,9 @@ with aba1:
             if not linhas_produto.empty:
                 desc_produto = linhas_produto.iloc[0]['Desc. Produto']
                 id_estoque_fisico = linhas_produto.iloc[0]['Id. Estoq. Físico']
-                desc_estoque_fisico = líneas_produto.iloc[0]['Desc. Estoque Físico']
+                desc_estoque_fisico = linhas_produto.iloc[0]['Desc. Estoque Físico']
                 
-                # Filtrar estritamente o que ainda NÃO foi contado para remover do Dropdown em tempo real
+                # Filtrar estritamente o que ainda NÃO foi contado para remover do Dropdown
                 linhas_pendentes = []
                 for idx, row in linhas_produto.iterrows():
                     foi_contado = False
@@ -190,7 +189,6 @@ with aba1:
                     if not foi_contado:
                         linhas_pendentes.append(row)
                 
-                # Se tudo já foi bipado, exibe mensagem e não renderiza formulários antigos
                 if len(linhas_pendentes) == 0:
                     st.success("🎉 Todas as variações de Lote/Ativo deste produto já foram contabilizadas!")
                     if st.button("Limpar Tela para Próximo Bipe"):
@@ -269,7 +267,7 @@ with aba1:
                             }
                             st.session_state.contagens = pd.concat([st.session_state.contagens, pd.DataFrame([nova_contagem])], ignore_index=True)
                             
-                            # 🔥 ESSENCIAL: Reseta o input do bipe para apagar a descrição e deixar pronto para o próximo código
+                            # Reseta o input do bipe para apagar as descrições da tela
                             st.session_state.bipador_input = ""
                             st.toast(f"Sucesso! Item adicionado.", icon="🚀")
                             st.rerun()
@@ -279,7 +277,6 @@ with aba1:
         st.write("---")
         st.write("### 📜 Seus Lançamentos Concluídos neste Inventário")
         
-        # Filtrar exibição final para conter apenas as colunas estruturadas, evitando colunas fantasmas duplicadas
         if not contagens_atuais.empty:
             st.dataframe(contagens_atuais[[
                 'Inventario', 'Cód. Produto', 'Desc. Produto', 'Id. Estoq. Físico', 'Desc. Estoque Físico',
