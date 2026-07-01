@@ -92,7 +92,7 @@ if 'lista_estoques_fixos' not in st.session_state:
 if 'limpar_bipe' not in st.session_state: st.session_state.limpar_bipe = False
 
 # -----------------------------------------------------------------------------
-# ESTILOS E COMPONENTES VISUAIS CUSTOMIZADOS (Círculos Coloridos KPI)
+# ESTILOS E COMPONENTES VISUAIS CUSTOMIZADOS
 # -----------------------------------------------------------------------------
 st.markdown("""
     <style>
@@ -132,7 +132,7 @@ with st.sidebar:
     
     st.write("---")
     
-    # Criar Novo Inventário
+    # 1. Opção que abre o inventário (Criar)
     with st.expander("➕ Criar Novo Inventário", expanded=False):
         novo_id = st.text_input("ID / Nome do Inventário", placeholder="Ex: #3 - Almoxarifado")
         nova_obs = st.text_area("Observações Iniciais")
@@ -149,8 +149,52 @@ with st.sidebar:
     lista_invs = list(st.session_state.inventarios.keys())
     inv_ativo = st.selectbox("Inventário em andamento:", lista_invs, index=0)
     
+    # -----------------------------------------------------------------------------
+    # MOVEU PARA CÁ: FECHAMENTO CORPORATIVO DO INVENTÁRIO (Embaixo da seleção)
+    # -----------------------------------------------------------------------------
     st.write("---")
+    st.caption("🔒 Fechamento Corporativo do Inventário")
     
+    # Pré-carregar dados para calcular pendências reais na barra lateral
+    contagens_atuais = st.session_state.contagens[st.session_state.contagens['Inventario'] == inv_ativo]
+    linhas_contadas_set = set()
+    if not contagens_atuais.empty:
+        for idx, r in contagens_atuais.iterrows():
+            linhas_contadas_set.add((normalizar_valor(r['Cód. Produto']), normalizar_valor(r['Lote']), normalizar_valor(r['Ativo'])))
+            
+    total_linhas_base = len(st.session_state.base_produtos)
+    it_contados = 0
+    if total_linhas_base > 0:
+        for idx, row in st.session_state.base_produtos.iterrows():
+            chave_row = (normalizar_valor(row['Cód. Produto']), normalizar_valor(row['Lote']), normalizar_valor(row['Ativo']))
+            if chave_row in linhas_contadas_set: it_contados += 1
+                
+    pendencias_reais = max(0, total_linhas_base - it_contados)
+    
+    if st.session_state.inventarios[inv_ativo]['status'] == 'Fechado':
+        st.error("🔒 Este inventário já está FECHADO.")
+    else:
+        if pendencias_reais > 0:
+            st.warning(f"Existem ainda {pendencias_reais} pendências.")
+            senha_supervisor = st.text_input("Senha do Supervisor para forçar fechar:", type="password", key="senha_lateral")
+            if st.button("Forçar Fechamento", use_container_width=True):
+                if senha_supervisor == "admin123":
+                    st.session_state.inventarios[inv_ativo]['status'] = 'Fechado'
+                    st.session_state.inventarios[inv_ativo]['data_fechamento'] = datetime.now().strftime('%d/%m/%Y %H:%M')
+                    salvar_inventarios(st.session_state.inventarios)
+                    st.success("Fechado pelo Supervisor!")
+                    st.rerun()
+                else:
+                    st.error("Senha inválida!")
+        else:
+            if st.button("Finalizar Inventário (100% Concluído)", type="primary", use_container_width=True):
+                st.session_state.inventarios[inv_ativo]['status'] = 'Fechado'
+                st.session_state.inventarios[inv_ativo]['data_fechamento'] = datetime.now().strftime('%d/%m/%Y %H:%M')
+                salvar_inventarios(st.session_state.inventarios)
+                st.success("Fechado com sucesso!")
+                st.rerun()
+                
+    st.write("---")
     st.subheader("📁 Carregar Planilha Base")
     uploaded_file = st.file_uploader("Arraste ou selecione o arquivo (.xlsx, .csv)", type=["xlsx", "csv"])
     
@@ -177,22 +221,6 @@ with st.sidebar:
 
     st.write("---")
     
-    contagens_atuais = st.session_state.contagens[st.session_state.contagens['Inventario'] == inv_ativo]
-    
-    linhas_contadas_set = set()
-    if not contagens_atuais.empty:
-        for idx, r in contagens_atuais.iterrows():
-            linhas_contadas_set.add((normalizar_valor(r['Cód. Produto']), normalizar_valor(r['Lote']), normalizar_valor(r['Ativo'])))
-            
-    total_linhas_base = len(st.session_state.base_produtos)
-    it_contados = 0
-    if total_linhas_base > 0:
-        for idx, row in st.session_state.base_produtos.iterrows():
-            chave_row = (normalizar_valor(row['Cód. Produto']), normalizar_valor(row['Lote']), normalizar_valor(row['Ativo']))
-            if chave_row in linhas_contadas_set: it_contados += 1
-                
-    pendencias_reais = max(0, total_linhas_base - it_contados)
-    
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-title">📋 Linhas Totais na Base</div>
@@ -213,7 +241,7 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
 ])
 
 # -----------------------------------------------------------------------------
-# ABA 1: CONTAGEM E TRANCA DE ENCERRAMENTO
+# ABA 1: TELA DE BIPAGEM DINÂMICA
 # -----------------------------------------------------------------------------
 with aba1:
     if st.session_state.base_produtos.empty:
@@ -240,7 +268,7 @@ with aba1:
             
             if linhas_produto.empty:
                 linhas_produto = st.session_state.base_produtos[st.session_state.base_produtos['Cód. Produto'].astype(str) == bip_limpo]
-                if not linhas_produto.empty: codigo_verdadeiro_encontrado = bip_limpo
+                if not lines_produto.empty: codigo_verdadeiro_encontrado = bip_limpo
 
             if not linhas_produto.empty:
                 desc_produto = linhas_produto.iloc[0]['Desc. Produto']
@@ -321,29 +349,6 @@ with aba1:
         st.write("### 📜 Seus Lançamentos Concluídos")
         if not contagens_atuais.empty:
             st.dataframe(contagens_atuais[['Cód. Produto', 'Desc. Produto', 'Id. Estoq. Físico', 'Lote', 'Ativo', 'Quantidade_Contada', 'Saldo_Sistemico', 'Status']], use_container_width=True)
-        
-        # FECHAMENTO DE INVENTÁRIO (Nova Regra de Segurança)
-        st.write("---")
-        st.subheader("🔒 Fechamento Corporativo do Inventário")
-        if pendencias_reais > 0:
-            st.error(f"Existem ainda `{pendencias_reais}` pendências na planilha base.")
-            # Exige senha do supervisor para fechar incompleto
-            senha_supervisor = st.text_input("Apenas o SUPERVISOR pode fechar inventários incompletos. Digite a credencial de liberação:", type="password")
-            if st.button("Forçar Fechamento por Auditoria"):
-                if senha_supervisor == "admin123": # Credencial padrão configurável
-                    st.session_state.inventarios[inv_ativo]['status'] = 'Fechado'
-                    st.session_state.inventarios[inv_ativo]['data_fechamento'] = datetime.now().strftime('%d/%m/%Y %H:%M')
-                    salvar_inventarios(st.session_state.inventarios)
-                    st.success("Inventário fechado com sucesso pelo Supervisor!")
-                    st.rerun()
-                else: st.error("Credencial incorreta!")
-        else:
-            if st.button("Finalizar e Fechar Total (100% Contabilizado)", type="primary"):
-                st.session_state.inventarios[inv_ativo]['status'] = 'Fechado'
-                st.session_state.inventarios[inv_ativo]['data_fechamento'] = datetime.now().strftime('%d/%m/%Y %H:%M')
-                salvar_inventarios(st.session_state.inventarios)
-                st.success("Inventário fechado com 100% de cobertura!")
-                st.rerun()
 
 # -----------------------------------------------------------------------------
 # ABA 2: BASE DE ESTOQUE COMPLETA EM TEMPO REAL
@@ -393,7 +398,6 @@ with aba3:
         with col_sup2:
             st.write("</br>", unsafe_allow_html=True)
             if st.button("Gravar 2ª Contagem e Atualizar Saldo", use_container_width=True):
-                # Localizar índice global e reajustar quantidade e status
                 idx = st.session_state.contagens[
                     (st.session_state.contagens['Inventario'] == inv_ativo) & 
                     (st.session_state.contagens['Desc. Produto'] == item_recontar)
@@ -414,12 +418,10 @@ with aba4:
         total_linhas_contadas = len(contagens_atuais)
         taxa = (corretos / total_linhas_contadas) * 100
         
-        # Identificar cor do anel
         if taxa >= 95.0: classe_circulo = "circle-green"
         elif taxa >= 85.0: classe_circulo = "circle-yellow"
         else: classe_circulo = "circle-red"
         
-        # Renderização do Bloco de KPI idêntico ao solicitado
         st.markdown(f"""
         <div class="kpi-container">
             <div class="{classe_circulo}">{taxa:.1f}%</div>
@@ -430,7 +432,6 @@ with aba4:
         </div>
         """, unsafe_allow_html=True)
         
-        # Mostrar o ID do estoque avaliado
         id_est_visualizar = contagens_atuais.iloc[0]['Id. Estoq. Físico']
         desc_est_visualizar = contagens_atuais.iloc[0]['Desc. Estoque Físico']
         st.info(f"📍 **Estoque em Análise:** {id_est_visualizar} - {desc_est_visualizar}")
@@ -438,7 +439,7 @@ with aba4:
         st.info("Nenhum item lançado neste inventário para processamento de acuracidade.")
 
 # -----------------------------------------------------------------------------
-# ABA 5: FREQUÊNCIA DE ESTOQUES JBA (Tabela Fixa Atualizada)
+# ABA 5: FREQUÊNCIA DE ESTOQUES JBA (RESOLVIDO ERRO MAP/APPLYMAP)
 # -----------------------------------------------------------------------------
 with aba5:
     st.header("🕒 Frequência e Janela Crítica de Contagem")
@@ -466,7 +467,8 @@ with aba5:
         color = 'red' if '⚠️' in str(val) else 'green'
         return f'color: {color}; font-weight: bold;'
         
-    st.dataframe(df_freq_final.style.applymap(destacar_critico, subset=['Status de Criticidade']), use_container_width=True, hide_index=True)
+    # 🔥 SOLUÇÃO: Mudança de .applymap para .map para compatibilidade com versões novas do Pandas
+    st.dataframe(df_freq_final.style.map(destacar_critico, subset=['Status de Criticidade']), use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------------
 # ABA 6: HISTÓRICO DE ARQUIVO (Eterno e Exportável)
