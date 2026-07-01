@@ -18,7 +18,6 @@ def carregar_inventarios():
     if os.path.exists(DB_INVENTARIOS):
         with open(DB_INVENTARIOS, 'r') as f:
             return json.load(f)
-    # Estrutura inicial padrão caso o arquivo não exista
     return {
         '#2 - 2194 teste (Aberto)': {
             'status': 'Aberto', 
@@ -58,7 +57,8 @@ if 'pagina_atual_hist' not in st.session_state:
     st.session_state.pagina_atual_hist = 1
 
 # Lista completa de estoques físicos JBA com dados simulados de acuracidade prévia
-if 'lista_estoques_fixos' not in st.session_state:
+# Atualizamos a verificação para redefinir caso falte o parâmetro novo
+if 'lista_estoques_fixos' not in st.session_state or not isinstance(st.session_state.lista_estoques_fixos[0], dict) or 'Acuracidade_Previa' not in st.session_state.lista_estoques_fixos[0]:
     st.session_state.lista_estoques_fixos = [
         {"Id. Estoq. Físico": 1077, "Desc. Estoque Físico": "JBA - CLASSE D", "Ultima_Contagem": "15/06/2026", "Acuracidade_Previa": 98.2},
         {"Id. Estoq. Físico": 1078, "Desc. Estoque Físico": "JBA - COPA E COZINHA", "Ultima_Contagem": "10/06/2026", "Acuracidade_Previa": 100.0},
@@ -129,7 +129,6 @@ def normalizar_valor(val):
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.subheader("👤 Operador Ativo")
-    # Perfil injetado automaticamente pelo sistema de autenticação ou mock fixado
     operador_atual = "Administrador Tel"
     st.markdown(f"**{operador_atual}**")
     
@@ -160,7 +159,6 @@ with st.sidebar:
                 st.rerun()
 
     st.subheader("📂 Selecione o Inventário Ativo")
-    # Garante a ordenação dos mais novos no topo pela data de criação
     inventarios_ordenados = sorted(
         st.session_state.inventarios.items(),
         key=lambda item: item[1].get('timestamp_criacao', ''),
@@ -173,7 +171,7 @@ with st.sidebar:
     else:
         inv_ativo = None
 
-    # Cálculo dinâmico de Pendências Reais da Planilha Base
+    # Calculation of remaining items
     contagens_atuais = st.session_state.contagens[st.session_state.contagens['Inventario'] == inv_ativo] if inv_ativo else pd.DataFrame()
     linhas_contadas_set = set()
     if not contagens_atuais.empty:
@@ -190,9 +188,7 @@ with st.sidebar:
                 
     pendencias_reais = max(0, total_linhas_base - it_contados)
     
-    # -----------------------------------------------------------------------------
-    # CONTROLADOR DE FECHAMENTO AUTOMÁTICO BASEADO EM PERFIL (SEM DIGITAÇÃO DE SENHA)
-    # -----------------------------------------------------------------------------
+    # CONTROLADOR DE FECHAMENTO AUTOMÁTICO
     if inv_ativo:
         st.write("---")
         st.caption("🔒 Fechamento Corporativo do Inventário")
@@ -203,7 +199,6 @@ with st.sidebar:
             if pendencias_reais > 0:
                 st.warning(f"Existem ainda {pendencias_reais} pendências na planilha.")
                 
-                # Validação automática inteligente baseada no perfil ativo
                 if operador_atual == "Administrador Tel":
                     st.info("🔓 Perfil Administrador detectado. Fechamento forçado liberado automaticamente.")
                     if st.button("Forçar Fechamento", use_container_width=True, type="primary"):
@@ -215,7 +210,6 @@ with st.sidebar:
                 else:
                     st.error("🔒 Apenas o Administrador pode forçar o fechamento com pendências em aberto.")
             else:
-                # 100% Contabilizado: Qualquer operador (Almoxarifes) pode fechar livremente
                 st.success("✨ Tudo pronto! 100% do estoque foi auditado.")
                 if st.button("Finalizar Inventário (100% Concluído)", type="primary", use_container_width=True):
                     st.session_state.inventarios[inv_ativo]['status'] = 'Fechado'
@@ -298,7 +292,7 @@ with aba1:
                     codigo_verdadeiro_encontrado = cod_base_str
                     break
             
-            if linhas_produto.empty:
+            if lines_produto.empty:
                 linhas_produto = st.session_state.base_produtos[st.session_state.base_produtos['Cód. Produto'].astype(str) == bip_limpo]
                 if not linhas_produto.empty: 
                     codigo_verdadeiro_encontrado = bip_limpo
@@ -454,28 +448,27 @@ with aba3:
                 st.rerun()
 
 # -----------------------------------------------------------------------------
-# ABA 4: RELATÓRIO DE ACURACIDADE VISUALMENTE APERFEIÇOADO
+# ABA 4: RELATÓRIO DE ACURACIDADE (RESOLVIDO KEYERROR COM SEGURANÇA)
 # -----------------------------------------------------------------------------
 with aba4:
     st.header("📈 Painel de Acuracidade Geral e Setorial")
     st.write("Acompanhe o nível de assertividade e confiabilidade de cada um dos Almoxarifados JBA:")
     
-    # Grid de Layout dos Cartões de Estoque
     st.markdown('<div class="acuracidade-container">', unsafe_allow_html=True)
     
     for est in st.session_state.lista_estoques_fixos:
         id_est = est['Id. Estoq. Físico']
         nome_est = est['Desc. Estoque Físico']
         
-        # Se for o estoque atualmente sendo contado, calcula em tempo real
+        # Se for o estoque sendo contado no inventário aberto, calcula em tempo real
         if inv_ativo and not contagens_atuais.empty and int(contagens_atuais.iloc[0].get('Id. Estoq. Físico', 0)) == id_est:
             corretos = (contagens_atuais['Quantidade_Contada'] == contagens_atuais['Saldo_Sistemico']).sum()
             total_linhas_contadas = len(contagens_atuais)
             taxa_acuracidade = (corretos / total_linhas_contadas) * 100 if total_linhas_contadas > 0 else 100.0
         else:
-            taxa_acuracidade = est['Acuracidade_Previa']
+            # 🛡️ SOLUÇÃO SEGURO: Uso de .get() para evitar KeyError caso o cache do navegador possua chaves antigas
+            taxa_acuracidade = est.get('Acuracidade_Previa', 100.0)
             
-        # Determinação da cor da TAG com base na acuracidade corporativa
         if taxa_acuracidade >= 95.0:
             classe_tag = "acuracidade-tag-green"
         elif taxa_acuracidade >= 85.0:
@@ -483,7 +476,6 @@ with aba4:
         else:
             classe_tag = "acuracidade-tag-red"
             
-        # Bloco HTML renderizado do cartão individual
         st.markdown(f"""
         <div class="acuracidade-card">
             <div class="acuracidade-info">
@@ -534,7 +526,6 @@ with aba6:
     st.header("🗄️ Histórico Permanente de Inventários")
     st.write("Pasta de auditoria permanente dos dados armazenados fisicamente.")
     
-    # 1. Recupera e Ordena (Garante que os últimos criados/modificados fiquem sempre em cima)
     inventarios_totais = sorted(
         st.session_state.inventarios.items(),
         key=lambda item: item[1].get('timestamp_criacao', ''),
@@ -548,12 +539,10 @@ with aba6:
     if st.session_state.pagina_atual_hist > paginas_totais:
         st.session_state.pagina_atual_hist = paginas_totais
 
-    # Fatiamento da lista para exibição da página ativa
     inicio_idx = (st.session_state.pagina_atual_hist - 1) * itens_por_pagina
     fim_idx = inicio_idx + itens_por_pagina
     inventarios_pagina = inventarios_totais[inicio_idx:fim_idx]
     
-    # Renderização dos Inventários em formato de Pasta Expansível
     for inv, info in inventarios_pagina:
         status_cor = "🟢" if info['status'] == "Aberto" else "🔴"
         with st.expander(f"{status_cor} {inv} | Status atual: {info['status']}"):
@@ -566,7 +555,6 @@ with aba6:
             if not dados_historicos_inv.empty:
                 st.dataframe(dados_historicos_inv, use_container_width=True, hide_index=True)
                 
-                # Opção de Exportar Dados para CSV
                 csv_dados = dados_historicos_inv.to_csv(index=False).encode('utf-8')
                 st.download_button(
                     label="📥 Exportar Dados Completos (CSV)",
@@ -578,13 +566,10 @@ with aba6:
             else:
                 st.caption("Nenhum lançamento físico associado a esta pasta.")
                 
-            # Trava de Segurança de Exclusão: Somente visível e executável pelo ADM
             if operador_atual == "Administrador Tel":
                 st.write("</br>", unsafe_allow_html=True)
                 if st.button(f"🗑️ Deletar Pasta Permanente: {inv}", key=f"del_{inv}", type="secondary"):
-                    # Remove o inventário das pastas de controle
                     del st.session_state.inventarios[inv]
-                    # Limpa os lançamentos desse inventário no banco de contagens
                     st.session_state.contagens = st.session_state.contagens[st.session_state.contagens['Inventario'] != inv]
                     
                     salvar_inventarios(st.session_state.inventarios)
@@ -592,7 +577,6 @@ with aba6:
                     st.toast(f"Pasta {inv} excluída permanentemente pelo Administrador.", icon="🗑️")
                     st.rerun()
 
-    # 2. Barra de Controle de Paginação (Exibida caso existam mais de 15 pastas)
     if paginas_totais > 1:
         st.write("---")
         col_pag1, col_pag2, col_pag3 = st.columns([1, 2, 1])
