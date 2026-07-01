@@ -20,8 +20,8 @@ if 'base_produtos' not in st.session_state:
 
 if 'contagens' not in st.session_state:
     st.session_state.contagens = pd.DataFrame(columns=[
-        'Inventario', 'Cód. Produto', 'Descricao', 'Lote', 'Serial', 'Dt_Vencto', 'Complemento', 'Ativo', 
-        'Quantidade_Contada', 'Saldo_Sistemico', 'Status'
+        'Inventario', 'Cód. Produto', 'Desc. Produto', 'Id. Estoq. Físico', 'Desc. Estoque Físico',
+        'Lote', 'Serial', 'Dt_Vencto', 'Complemento', 'Ativo', 'Quantidade_Contada', 'Saldo_Sistemico', 'Status'
     ])
 
 if 'frequencia_estoques' not in st.session_state:
@@ -37,6 +37,7 @@ st.markdown("""
     .metric-title { font-size: 12px; font-weight: bold; text-transform: uppercase; opacity: 0.8; }
     .metric-value { font-size: 32px; font-weight: bold; margin-top: 5px; }
     .alerta-obrigatorio { background-color: #fff3cd; color: #856404; padding: 10px; border-radius: 5px; border-left: 5px solid #ffc107; margin-bottom: 15px; font-weight: bold; }
+    .info-estoque { background-color: #f0f2f6; padding: 12px; border-radius: 5px; margin-bottom: 10px; border-left: 5px solid #1c83e1; }
     </style>
 """, unsafe_allow_html=True)
 
@@ -72,14 +73,21 @@ with st.sidebar:
             # Padronizar nomes de colunas eliminando espaços extras
             df_upload.columns = [str(c).strip() for c in df_upload.columns]
             
-            # Se a planilha veio com a coluna antiga "Codigo", renomeia para o novo padrão solicitado
-            if 'Codigo' in df_upload.columns and 'Cód. Produto' not in df_upload.columns:
-                df_upload.rename(columns={'Codigo': 'Cód. Produto'}, inplace=True)
+            # Ajuste de compatibilidade caso as colunas venham com nomes parecidos
+            mapeamento_nomes = {
+                'Codigo': 'Cód. Produto',
+                'Descricao': 'Desc. Produto',
+                'Id. Estoque Fisico': 'Id. Estoq. Físico',
+                'Id. Estoque Físico': 'Id. Estoq. Físico',
+                'Desc. Estoque Fisico': 'Desc. Estoque Físico'
+            }
+            df_upload.rename(columns=mapeamento_nomes, inplace=True)
             
-            # Garantir existência das colunas críticas
-            for col_obrigatoria in ['Lote', 'Ativo', 'Qtd Estoque', 'Cód. Produto', 'Descricao']:
-                if col_obrigatoria not in df_upload.columns:
-                    df_upload[col_obrigatoria] = None
+            # Garantir existência de todas as colunas críticas solicitadas
+            colunas_obrigatorias = ['Lote', 'Ativo', 'Qtd Estoque', 'Cód. Produto', 'Desc. Produto', 'Id. Estoq. Físico', 'Desc. Estoque Físico']
+            for col in colunas_obrigatorias:
+                if col not in df_upload.columns:
+                    df_upload[col] = None
             
             st.session_state.base_produtos = df_upload
             st.toast("Planilha carregada com sucesso!", icon="✅")
@@ -88,10 +96,10 @@ with st.sidebar:
 
     st.write("---")
     
-    # FILTRAGEM GLOBAL DE CONTAGENS (Evita o NameError entre as abas)
+    # FILTRAGEM GLOBAL DE CONTAGENS
     contagens_atuais = st.session_state.contagens[st.session_state.contagens['Inventario'] == inv_ativo]
     
-    # Contagem de pendências dinâmicas
+    # Calcular pendências reais
     linhas_contadas_set = set()
     if not contagens_atuais.empty:
         for idx, r in contagens_atuais.iterrows():
@@ -101,7 +109,6 @@ with st.sidebar:
     it_contados = len(linhas_contadas_set)
     pendencias_reais = max(0, total_linhas_base - it_contados)
     
-    # Métricas Visuais da Lateral
     st.markdown(f"""
     <div class="metric-card">
         <div class="metric-title">📋 Linhas Totais na Base</div>
@@ -128,7 +135,7 @@ aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
 ])
 
 # -----------------------------------------------------------------------------
-# ABA 1: TELA DE BIPAGEM INTELIGENTE (ATUALIZADA)
+# ABA 1: TELA DE BIPAGEM COM AS NOVAS COLUNAS SOLICITADAS
 # -----------------------------------------------------------------------------
 with aba1:
     if st.session_state.base_produtos.empty:
@@ -136,38 +143,43 @@ with aba1:
     else:
         st.header(f"🎥 Tela de Bipagem Dinâmica")
         
-        # Recebe qualquer texto do leitor de código (Mesmo com prefixos como "2197 - TEEI1397Z")
         texto_bipado_bruto = st.text_input("👉 BIPAR CÓDIGO DO MATERIAL:", key="bipador_input")
         
         if texto_bipado_bruto:
-            # Limpeza do texto bruto tirando os espaços das pontas
             bip_limpo = str(texto_bipado_bruto).strip()
             
-            # Algoritmo de busca por varredura/contensão inteligente
-            # Varre a planilha procurando qual "Cód. Produto" está contido no texto que o scanner leu
             linhas_produto = pd.DataFrame()
             codigo_verdadeiro_encontrado = None
             
+            # Motor de busca por contensão de texto (limpa o prefixo do estoque se vier grudado no bipe)
             for cod_base in st.session_state.base_produtos['Cód. Produto'].dropna().unique():
                 cod_base_str = str(cod_base).strip()
-                # Verifica se o código da planilha faz parte do texto do bipe
                 if cod_base_str in bip_limpo:
                     linhas_produto = st.session_state.base_produtos[st.session_state.base_produtos['Cód. Produto'].astype(str).str.strip() == cod_base_str]
                     codigo_verdadeiro_encontrado = cod_base_str
                     break
             
-            # Se a busca inteligente por texto falhar, tenta uma busca exata direta preventiva
             if linhas_produto.empty:
                 linhas_produto = st.session_state.base_produtos[st.session_state.base_produtos['Cód. Produto'].astype(str) == bip_limpo]
                 if not linhas_produto.empty:
                     codigo_verdadeiro_encontrado = bip_limpo
 
-            # Fluxo de processamento caso encontre o produto
             if not linhas_produto.empty:
-                descricao_item = linhas_produto.iloc[0]['Descricao']
-                st.info(f"📦 **Item Identificado:** {descricao_item} (Identificado por: `{codigo_verdadeiro_encontrado}`)")
+                # Resgatar as novas informações solicitadas da primeira linha correspondente
+                desc_produto = linhas_produto.iloc[0]['Desc. Produto']
+                id_estoque_fisico = linhas_produto.iloc[0]['Id. Estoq. Físico']
+                desc_estoque_fisico = linhas_produto.iloc[0]['Desc. Estoque Físico']
                 
-                # Filtrar sub-itens pendentes
+                # Container visual contendo a descrição do item, id do estoque e descrição do estoque
+                st.markdown(f"""
+                <div class="info-estoque">
+                    📦 <b>Item Identificado:</b> {desc_produto} (Código: <code>{codigo_verdadeiro_encontrado}</code>)<br>
+                    📍 <b>ID Estoque Físico:</b> {id_estoque_fisico if id_estoque_fisico else 'Não informado'}<br>
+                    🏢 <b>Descrição do Estoque:</b> {desc_estoque_fisico if desc_estoque_fisico else 'Não informado'}
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Filtrar sub-itens que ainda não foram computados
                 linhas_pendentes = []
                 for idx, row in linhas_produto.iterrows():
                     foi_contado = False
@@ -184,28 +196,51 @@ with aba1:
                         linhas_pendentes.append(row)
                 
                 if len(linhas_pendentes) == 0:
-                    st.success("🎉 Todas as variações (Lotes/Ativos) deste item já foram totalmente contabilizadas!")
+                    st.success("🎉 Todas as variações de Lote/Ativo deste produto já foram contabilizadas!")
                 else:
                     df_pendentes = pd.DataFrame(linhas_pendentes)
                     
-                    tem_ativo_valores = df_pendentes['Ativo'].notna().any() and (df_pendentes['Ativo'] != '').any()
-                    tem_lote_valores = df_pendentes['Lote'].notna().any() and (df_pendentes['Lote'] != '').any()
+                    # Identificar se há dados válidos de lote ou ativo pendentes
+                    tem_ativo_valores = df_pendentes['Ativo'].notna().any() and (df_pendentes['Ativo'] != '').any() and (df_pendentes['Ativo'].astype(str) != 'nan').any()
+                    tem_lote_valores = df_pendentes['Lote'].notna().any() and (df_pendentes['Lote'] != '').any() and (df_pendentes['Lote'].astype(str) != 'nan').any()
                     
                     with st.form("validacao_contagem", clear_on_submit=True):
                         
                         if tem_ativo_valores:
                             st.markdown('<div class="alerta-obrigatorio">⚠️ ATENÇÃO: Este item possui controle por ATIVO. Selecione qual ativo está conferindo:</div>', unsafe_allow_html=True)
+                            
+                            # Formatação para remover o ".0" de números inteiros flutuantes
                             lista_ativos = df_pendentes['Ativo'].dropna().unique()
-                            ativo_selecionado = st.selectbox("Selecione o número do ATIVO obrigatório:", lista_ativos)
+                            lista_ativos_limpos = [str(int(a)) if str(a).endswith('.0') else str(a) for a in lista_ativos]
+                            
+                            ativo_selecionado_str = st.selectbox("Selecione o número do ATIVO obrigatório:", lista_ativos_limpos)
                             lote_selecionado = None
-                            linha_selecionada = df_pendentes[df_pendentes['Ativo'] == ativo_selecionado].iloc[0]
+                            
+                            # Achar a linha correta correspondente mapeando de volta
+                            linha_selecionada = None
+                            for idx, row in df_pendentes.iterrows():
+                                check_str = str(int(row['Ativo'])) if str(row['Ativo']).endswith('.0') else str(row['Ativo'])
+                                if check_str == ativo_selecionado_str:
+                                    linha_selecionada = row
+                                    break
+                            ativo_selecionado = linha_selecionada['Ativo']
                         
                         elif tem_lote_valores:
-                            st.markdown('<div class="alerta-obrigatorio">⚠️ ATENÇÃO: Este item possui controle por LOTE. Selecione o lote que está conferindo:</div>', unsafe_allow_html=True)
+                            st.markdown('<div class="alerta-violacao alert-obrigatorio">⚠️ ATENÇÃO: Este item possui controle por LOTE. Selecione o lote correspondente:</div>', unsafe_allow_html=True)
+                            
                             lista_lotes = df_pendentes['Lote'].dropna().unique()
-                            lote_selecionado = st.selectbox("Selecione o LOTE correspondente:", lista_lotes)
+                            lista_lotes_limpos = [str(int(l)) if str(l).endswith('.0') else str(l) for l in lista_lotes]
+                            
+                            lote_selecionado_str = st.selectbox("Selecione o LOTE correspondente:", lista_lotes_limpos)
                             ativo_selecionado = None
-                            linha_selecionada = df_pendentes[df_pendentes['Lote'] == lote_selecionado].iloc[0]
+                            
+                            linha_selecionada = None
+                            for idx, row in df_pendentes.iterrows():
+                                check_str = str(int(row['Lote'])) if str(row['Lote']).endswith('.0') else str(row['Lote'])
+                                if check_str == lote_selecionado_str:
+                                    linha_selecionada = row
+                                    break
+                            lote_selecionado = linha_selecionada['Lote']
                         
                         else:
                             st.write("📝 **Item Comum** (Sem exigência de Lote ou Ativo diferenciado).")
@@ -225,7 +260,9 @@ with aba1:
                             nova_contagem = {
                                 'Inventario': inv_ativo,
                                 'Cód. Produto': codigo_verdadeiro_encontrado,
-                                'Descricao': descricao_item,
+                                'Desc. Produto': desc_produto,
+                                'Id. Estoq. Físico': id_estoque_fisico,
+                                'Desc. Estoque Físico': desc_estoque_fisico,
                                 'Lote': lote_selecionado if lote_selecionado else linha_selecionada.get('Lote', None),
                                 'Serial': linha_selecionada.get('Serial', None),
                                 'Dt_Vencto': linha_selecionada.get('Dt. Vencto', None),
@@ -250,7 +287,7 @@ with aba1:
 # -----------------------------------------------------------------------------
 with aba2:
     st.header("📄 Base de Estoque Carregada")
-    st.write("Abaixo consta a lista completa dos itens da sua planilha mapeados pela coluna 'Cód. Produto'.")
+    st.write("Lista completa contendo as colunas de identificação e descrições de estoque atualizadas em tempo real.")
     
     if st.session_state.base_produtos.empty:
         st.info("Aguardando upload da planilha base na barra lateral para exibir a lista completa de estoque.")
@@ -291,12 +328,12 @@ with aba2:
         if filtro_status:
             df_visualizacao = df_visualizacao[df_visualizacao['Status Contagem'].isin(filtro_status)]
         if busca_texto:
-            df_visualizacao = df_visualizacao[df_visualizacao['Descricao'].astype(str).str.contains(busca_texto, case=False, na=False)]
+            df_visualizacao = df_visualizacao[df_visualizacao['Desc. Produto'].astype(str).str.contains(busca_texto, case=False, na=False)]
             
         st.dataframe(df_visualizacao, use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------------
-# OUTRAS ABAS (Mantendo consistência de dados com a coluna Cód. Produto)
+# DEMAIS ABAS DE CONTROLE (Mantendo sincronia dos dados)
 # -----------------------------------------------------------------------------
 with aba3:
     st.header("🕵️‍♂️ Painel de Auditoria do Supervisor")
@@ -308,7 +345,7 @@ with aba3:
         st.success("🎉 Nenhuma divergência encontrada no momento!")
     else:
         st.warning(f"Atenção: {len(df_divergentes)} linhas apresentam divergência de saldo.")
-        st.dataframe(df_divergentes[['Cód. Produto', 'Descricao', 'Lote', 'Ativo', 'Saldo_Sistemico', 'Quantidade_Contada', 'Status']], use_container_width=True)
+        st.dataframe(df_divergentes[['Cód. Produto', 'Desc. Produto', 'Id. Estoq. Físico', 'Desc. Estoque Físico', 'Lote', 'Ativo', 'Saldo_Sistemico', 'Quantidade_Contada']], use_container_width=True)
 
 with aba4:
     st.header("📈 Relatório de Acuracidade Geral")
