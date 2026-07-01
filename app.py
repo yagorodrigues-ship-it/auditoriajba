@@ -29,7 +29,13 @@ def salvar_inventarios(dados):
     with open(DB_INVENTARIOS, 'w') as f: json.dump(dados, f, indent=4)
 
 def carregar_contagens():
-    if os.path.exists(DB_CONTAGENS): return pd.read_csv(DB_CONTAGENS)
+    if os.path.exists(DB_CONTAGENS): 
+        df = pd.read_csv(DB_CONTAGENS)
+        # Forçar criação das colunas novas caso o arquivo CSV seja antigo
+        for col in ['Supervisor_Qtd', 'Supervisor_Etiqueta', 'Supervisor_Endereco']:
+            if col not in df.columns:
+                df[col] = None
+        return df
     return pd.DataFrame(columns=[
         'Inventario', 'Cód. Produto', 'Desc. Produto', 'Id. Estoq. Físico', 'Desc. Estoque Físico',
         'Lote', 'Serial', 'Dt_Vencto', 'Complemento', 'Ativo', 'Quantidade_Contada', 'Saldo_Sistemico', 'Status',
@@ -41,8 +47,7 @@ def salvar_contagens(df): df.to_csv(DB_CONTAGENS, index=False)
 def carregar_estoques_master():
     if os.path.exists(DB_ESTOQUES_MASTER):
         with open(DB_ESTOQUES_MASTER, 'r') as f: return json.load(f)
-    # Tabela estática enviada inicializada por padrão
-    inicial = [
+    return [
         {"Id. Estoq. Físico": 1077, "Desc. Estoque Físico": "JBA - CLASSE D", "Ultima_Contagem": "15/06/2026", "Acuracidade_Previa": 98.2},
         {"Id. Estoq. Físico": 1078, "Desc. Estoque Físico": "JBA - COPA E COZINHA", "Ultima_Contagem": "10/06/2026", "Acuracidade_Previa": 100.0},
         {"Id. Estoq. Físico": 1080, "Desc. Estoque Físico": "JBA - DADOS - CLIENTE", "Ultima_Contagem": "28/06/2026", "Acuracidade_Previa": 92.4},
@@ -55,12 +60,11 @@ def carregar_estoques_master():
         {"Id. Estoq. Físico": 1102, "Desc. Estoque Físico": "1385 - LA JBA - CLIENTE", "Ultima_Contagem": "20/06/2026", "Acuracidade_Previa": 94.0},
         {"Id. Estoq. Físico": 2194, "Desc. Estoque Físico": "JBA - KITS FERRAMENTAL - DEVOLUCAO", "Ultima_Contagem": "10/06/2026", "Acuracidade_Previa": 85.7}
     ]
-    return inicial
 
 def salvar_estoques_master(dados):
     with open(DB_ESTOQUES_MASTER, 'w') as f: json.dump(dados, f, indent=4)
 
-# Inicializações globais
+# Inicializações de controle
 if 'inventarios' not in st.session_state: st.session_state.inventarios = carregar_inventarios()
 if 'base_produtos' not in st.session_state: st.session_state.base_produtos = pd.DataFrame()
 if 'contagens' not in st.session_state: st.session_state.contagens = carregar_contagens()
@@ -68,9 +72,10 @@ if 'lista_estoques_fixos' not in st.session_state: st.session_state.lista_estoqu
 if 'pagina_atual_hist' not in st.session_state: st.session_state.pagina_atual_hist = 1
 if 'limpar_bipe' not in st.session_state: st.session_state.limpar_bipe = False
 
-# -----------------------------------------------------------------------------
-# CONFIGURAÇÕES DE CSS CUSTOMIZADO
-# -----------------------------------------------------------------------------
+# Controle para ativar o formulário do Supervisor em tela
+if 'modo_auditoria_ativo' not in st.session_state: st.session_state.modo_auditoria_ativo = False
+
+# Estilos CSS
 st.markdown("""
     <style>
     .metric-card { background-color: #1a2436; padding: 20px; border-radius: 10px; color: white; margin-bottom: 15px; border-left: 5px solid #2e66ff; }
@@ -97,7 +102,7 @@ def normalizar_valor(val):
     return v_str
 
 # -----------------------------------------------------------------------------
-# 2. BARRA LATERAL (Sidebar - Fluxo de Encerramento)
+# BARRA LATERAL (Sidebar)
 # -----------------------------------------------------------------------------
 with st.sidebar:
     st.subheader("👤 Operador Ativo")
@@ -129,7 +134,6 @@ with st.sidebar:
     lista_invs_nomes = [item[0] for item in inventarios_ordenados]
     inv_ativo = st.selectbox("Inventário em andamento:", lista_invs_nomes, index=0) if lista_invs_nomes else None
 
-    # Cruzamento dinâmico de dados da planilha carregada
     contagens_atuais = st.session_state.contagens[st.session_state.contagens['Inventario'] == inv_ativo] if inv_ativo else pd.DataFrame()
     linhas_contadas_set = set()
     if not contagens_atuais.empty:
@@ -137,10 +141,9 @@ with st.sidebar:
             linhas_contadas_set.add((normalizar_valor(r['Cód. Produto']), normalizar_valor(r['Lote']), normalizar_valor(r['Ativo'])))
             
     total_linhas_base = len(st.session_state.base_produtos)
-    it_contados = sum(1 for _, row in st.session_state.base_produtos.iterrows() if (normalizar_valor(row['Cód. Produto']), normalizar_valor(row['Lote']), normalizar_valor(row['Ativo'])) in linhas_contadas_set)
+    it_contados = sum(1 for _, row in st.session_state.base_produtos.iterrows() if (normalizar_valor(row['Cód. Produto']), normalizar_valor(row['Lote']), normalizar_valor(row['Ativo'])) in lines_contadas_set)
     pendencias_reais = max(0, total_linhas_base - it_contados)
     
-    # GATILHO DE FECHAMENTO COM ATUALIZAÇÃO DA FREQUÊNCIA E ACURACIDADE
     if inv_ativo:
         st.write("---")
         st.caption("🔒 Fechamento Corporativo do Inventário")
@@ -152,23 +155,21 @@ with st.sidebar:
             if pendencias_reais > 0:
                 st.warning(f"Existem ainda {pendencias_reais} pendências na planilha.")
                 if operador_atual == "Administrador Tel":
-                    st.info("🔓 Perfil Administrador detectado. Liberação autorizada.")
+                    st.info("🔓 Perfil Administrador detectado.")
                     pode_fechar = st.button("Forçar Fechamento", use_container_width=True, type="primary")
             else:
                 st.success("✨ Tudo pronto! 100% do estoque auditado.")
                 pode_fechar = st.button("Finalizar Inventário (100% Concluído)", type="primary", use_container_width=True)
             
             if pode_fechar:
-                # 📊 CALCULAR MÉTRICAS FINAIS NO MOMENTO DO FECHAMENTO EXCLUSIVAMENTE
                 dt_atual_str = datetime.now().strftime('%d/%m/%Y')
                 id_estoque_alvo = None
                 
                 if not contagens_atuais.empty:
                     id_estoque_alvo = int(contagens_atuais.iloc[0].get('Id. Estoq. Físico', 0))
-                    
-                    # Cálculo de Acuracidade Geral Combinado (Itens corretos Almoxarife + Trava Supervisor)
                     linhas_corretas = 0
                     for idx, row in contagens_atuais.iterrows():
+                        # Validação de assertividade (Quantidade Física == Saldo Sistema E conformidades do supervisor)
                         bateu_qtd = row['Quantidade_Contada'] == row['Saldo_Sistemico']
                         etiqueta_ok = str(row.get('Supervisor_Etiqueta', 'Sim')) == 'Sim'
                         endereco_ok = str(row.get('Supervisor_Endereco', 'Sim')) == 'Sim'
@@ -180,13 +181,11 @@ with st.sidebar:
                 else:
                     acuracidade_final_calculada = 100.0
                 
-                # Atualiza o status do inventário
                 st.session_state.inventarios[inv_ativo]['status'] = 'Fechado'
                 st.session_state.inventarios[inv_ativo]['data_fechamento'] = datetime.now().strftime('%d/%m/%Y %H:%M')
                 st.session_state.inventarios[inv_ativo]['acuracidade'] = acuracidade_final_calculada
                 salvar_inventarios(st.session_state.inventarios)
                 
-                # 🕒 ATUALIZAÇÃO DA TABELA MASTER DE FREQUÊNCIA E ACURACIDADE DOS ESTOQUES
                 if id_estoque_alvo:
                     for est in st.session_state.lista_estoques_fixos:
                         if est['Id. Estoq. Físico'] == id_estoque_alvo:
@@ -195,7 +194,7 @@ with st.sidebar:
                             break
                     salvar_estoques_master(st.session_state.lista_estoques_fixos)
                     
-                st.success("Inventário Encerrado! Painéis de Acuracidade e Frequência atualizados.")
+                st.success("Inventário Encerrado!")
                 st.rerun()
                 
     st.write("---")
@@ -296,14 +295,14 @@ with aba1:
                         if tem_ativo_valores:
                             st.markdown('<div class="alerta-obrigatorio">⚠️ ATENÇÃO: Este item possui controle por ATIVO. Selecione qual ativo está conferindo:</div>', unsafe_allow_html=True)
                             lista_ativos_limpos = df_pendentes['Ativo'].dropna().apply(normalizar_valor).unique()
-                            ativo_selecionado_str = st.selectbox("Selecione o número do ATIVO obrigatório (Apenas Pendentes):", lista_ativos_limpos)
+                            ativo_selecionado_str = st.selectbox("Selecione o número do ATIVO obrigatório:", lista_ativos_limpos)
                             lote_selecionado = None
                             linha_selecionada = next(row for idx, row in df_pendentes.iterrows() if normalizar_valor(row['Ativo']) == ativo_selecionado_str)
                             ativo_selecionado = linha_selecionada['Ativo']
                         elif tem_lote_valores:
                             st.markdown('<div class="alerta-obrigatorio">⚠️ ATENÇÃO: Este item possui controle por LOTE. Selecione o lote correspondente:</div>', unsafe_allow_html=True)
                             lista_lotes_limpos = df_pendentes['Lote'].dropna().apply(normalizar_valor).unique()
-                            lote_selecionado_str = st.selectbox("Selecione o LOTE correspondente (Apenas Pendentes):", lista_lotes_limpos)
+                            lote_selecionado_str = st.selectbox("Selecione o LOTE correspondente:", lista_lotes_limpos)
                             ativo_selecionado = None
                             linha_selecionada = next(row for idx, row in df_pendentes.iterrows() if normalizar_valor(row['Lote']) == lote_selecionado_str)
                             lote_selecionado = linha_selecionada['Lote']
@@ -363,59 +362,77 @@ with aba2:
         st.dataframe(df_visualizacao, use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------------
-# ABA 3: PAINEL SUPERVISOR (AUDITORIA AVANÇADA POR AMOSTRAGEM, ETIQUETA E ENDEREÇO)
+# ABA 3: PAINEL SUPERVISOR (INICIA EM BRANCO E ABRE COM BOTÃO INTERNO)
 # -----------------------------------------------------------------------------
 with aba3:
     st.header("🕵️‍♂️ Painel de Auditoria e Controle do Supervisor")
     
-    # Seção 1: Abrir Contagem Independente (Amostragem com relevância na acuracidade)
-    st.subheader("📋 Iniciar Auditoria por Amostragem")
-    st.write("Audite os itens individualmente para alimentar e validar os critérios de etiquetagem e endereçamento das instalações.")
-    
-    if contagens_atuais.empty:
-        st.info("Nenhum item foi bipado pelos almoxarifes neste inventário ainda.")
+    if operador_atual != "Administrador Tel":
+        st.error("🔒 Acesso restrito apenas ao Perfil de Supervisor/Administrador.")
+    elif contagens_atuais.empty:
+        st.info("Nenhum item foi bipado na aba de contagens para este inventário ainda. Painel em branco.")
     else:
-        with st.form("auditoria_supervisor_form", clear_on_submit=True):
-            item_amostra = st.selectbox("Selecione o Item para Auditar/Validar:", contagens_atuais['Desc. Produto'].unique())
-            
-            col_s1, col_s2, col_s3 = st.columns(3)
-            with col_s1:
-                qtd_sup_real = st.number_input("Quantidade Real Apurada (Supervisor):", min_value=0, step=1)
-            with col_s2:
-                tem_etiqueta = st.selectbox("O material possui Etiqueta de Identificação?", ["Sim", "Não"])
-            with col_s3:
-                tem_endereco = st.selectbox("O material está no Endereçamento correto?", ["Sim", "Não"])
-                
-            gravar_auditoria = st.form_submit_button("💾 Validar Parâmetros e Atualizar Acuracidade")
-            
-            if gravar_auditoria:
-                # Localizar o índice correspondente
-                idx_global = st.session_state.contagens[(st.session_state.contagens['Inventario'] == inv_ativo) & (st.session_state.contagens['Desc. Produto'] == item_amostra)].index
-                
-                # Salva os critérios estritamente dentro da tabela de lançamentos
-                st.session_state.contagens.loc[idx_global, 'Quantidade_Contada'] = qtd_sup_real
-                st.session_state.contagens.loc[idx_global, 'Supervisor_Etiqueta'] = tem_etiqueta
-                st.session_state.contagens.loc[idx_global, 'Supervisor_Endereco'] = tem_endereco
-                st.session_state.contagens.loc[idx_global, 'Status'] = 'Ajustado em Auditoria'
-                
-                salvar_contagens(st.session_state.contagens)
-                st.success(f"Auditoria para '{item_amostra}' gravada com sucesso! Impacto computado para o fechamento.")
+        # Seção para o Supervisor decidir abrir uma nova contagem/auditoria por amostragem
+        st.write("### 🛠️ Gestão de Qualidade Física")
+        
+        if not st.session_state.modo_auditoria_ativo:
+            st.info("ℹ️ O painel de auditoria por amostragem está fechado. Clique no botão abaixo para iniciar uma nova rodada de verificação.")
+            if st.button("▶️ Iniciar Nova Auditoria de Supervisor", type="primary"):
+                st.session_state.modo_auditoria_ativo = True
                 st.rerun()
+        else:
+            if st.button("🛑 Fechar Painel de Auditoria (Limpar Tela)"):
+                st.session_state.modo_auditoria_ativo = False
+                st.rerun()
+                
+            st.write("---")
+            st.subheader("📋 Iniciar Auditoria por Amostragem")
+            st.write("Audite os itens individualmente. Os parâmetros de etiqueta e endereçamento alteram a acuracidade da tela ao lado após o fechamento.")
+            
+            with st.form("auditoria_supervisor_form", clear_on_submit=True):
+                item_amostra = st.selectbox("Selecione o Item para Auditar/Validar:", contagens_atuais['Desc. Produto'].unique())
+                
+                col_s1, col_s2, col_s3 = st.columns(3)
+                with col_s1:
+                    qtd_sup_real = st.number_input("Quantidade Real Apurada (Supervisor):", min_value=0, step=1)
+                with col_s2:
+                    tem_etiqueta = st.selectbox("O material possui Etiqueta de Identificação?", ["Sim", "Não"])
+                with col_s3:
+                    tem_endereco = st.selectbox("O material está no Endereçamento correto?", ["Sim", "Não"])
+                    
+                gravar_auditoria = st.form_submit_button("💾 Validar Parâmetros e Atualizar Acuracidade")
+                
+                if gravar_auditoria:
+                    idx_global = st.session_state.contagens[(st.session_state.contagens['Inventario'] == inv_ativo) & (st.session_state.contagens['Desc. Produto'] == item_amostra)].index
+                    
+                    st.session_state.contagens.loc[idx_global, 'Quantidade_Contada'] = qtd_sup_real
+                    st.session_state.contagens.loc[idx_global, 'Supervisor_Etiqueta'] = tem_etiqueta
+                    st.session_state.contagens.loc[idx_global, 'Supervisor_Endereco'] = tem_endereco
+                    st.session_state.contagens.loc[idx_global, 'Status'] = 'Auditado por Supervisor'
+                    
+                    salvar_contagens(st.session_state.contagens)
+                    st.success(f"Auditoria para '{item_amostra}' gravada com sucesso!")
+                    st.rerun()
 
-    # Seção 2: Monitor de Divergências Atuais do Almoxarife
-    st.write("---")
-    st.subheader("⚠️ Divergências Atuais de Saldo (Almoxarife)")
-    df_divergentes = contagens_atuais[contagens_atuais['Quantidade_Contada'] != contagens_atuais['Saldo_Sistemico']]
-    
-    if df_divergentes.empty: st.success("🎉 Nenhuma divergência de saldo pendente!")
-    else: st.dataframe(df_divergentes[['Cód. Produto', 'Desc. Produto', 'Lote', 'Ativo', 'Saldo_Sistemico', 'Quantidade_Contada', 'Supervisor_Etiqueta', 'Supervisor_Endereco']], use_container_width=True, hide_index=True)
+        # Monitor de Divergências Atuais (Com Trava de Segurança Contra KeyError)
+        st.write("---")
+        st.subheader("⚠️ Divergências Atuais de Saldo (Almoxarife)")
+        df_divergentes = contagens_atuais[contagens_atuais['Quantidade_Contada'] != contagens_atuais['Saldo_Sistemico']]
+        
+        if df_divergentes.empty: 
+            st.success("🎉 Nenhuma divergência de saldo pendente!")
+        else: 
+            # 🛡️ SOLUÇÃO SEGURO: Filtragem de colunas dinâmica baseada no que realmente existe para mitigar KeyError de CSVs antigos
+            colunas_desejadas = ['Cód. Produto', 'Desc. Produto', 'Lote', 'Ativo', 'Saldo_Sistemico', 'Quantidade_Contada', 'Supervisor_Etiqueta', 'Supervisor_Endereco', 'Status']
+            colunas_validas = [c for c in colunas_desejadas if c in df_divergentes.columns]
+            st.dataframe(df_divergentes[colunas_validas], use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------------
-# ABA 4: RELATÓRIO DE ACURACIDADE (ATUALIZAÇÃO EXCLUSIVA NO FECHAMENTO)
+# ABA 4: RELATÓRIO DE ACURACIDADE
 # -----------------------------------------------------------------------------
 with aba4:
     st.header("📈 Painel de Acuracidade Geral e Setorial")
-    st.write("Acompanhe o nível de assertividade e confiabilidade. **Nota:** Os índices só mudam após o fechamento completo do inventário.")
+    st.write("Acompanhe o nível de assertividade. **Nota:** Os índices só mudam após o fechamento completo do inventário.")
     
     st.markdown('<div class="acuracidade-container">', unsafe_allow_html=True)
     for est in st.session_state.lista_estoques_fixos:
@@ -438,7 +455,7 @@ with aba4:
     st.markdown('</div>', unsafe_allow_html=True)
 
 # -----------------------------------------------------------------------------
-# ABA 5: FREQUÊNCIA DE ESTOQUES JBA (ATUALIZAÇÃO EXCLUSIVA NO FECHAMENTO)
+# ABA 5: FREQUÊNCIA DE ESTOQUES JBA
 # -----------------------------------------------------------------------------
 with aba5:
     st.header("🕒 Frequência e Janela Crítica de Contagem")
@@ -465,7 +482,7 @@ with aba5:
     st.dataframe(df_freq_final.style.map(destacar_critico, subset=['Status de Criticidade']), use_container_width=True, hide_index=True)
 
 # -----------------------------------------------------------------------------
-# ABA 6: HISTÓRICO GERAL (ORDENAÇÃO NOVA NO TOPO, EXCLUSÃO ADM E PAGINAÇÃO)
+# ABA 6: HISTÓRICO GERAL
 # -----------------------------------------------------------------------------
 with aba6:
     st.header("🗄️ Histórico Permanente de Inventários")
