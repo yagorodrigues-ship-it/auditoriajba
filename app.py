@@ -270,7 +270,6 @@ else:
             cursor_db = conn.cursor()
             cursor_db.execute("DELETE FROM itens_base_inventario WHERE inventario_id = ?", (id_limpo_gravar,))
             
-            # --- LOCALIZADOR DINÂMICO GARANTIDO (NOME OU POSIÇÃO) ---
             def resgatar_coluna(termos, index_padrao, proibir=None):
                 for t in termos:
                     for col in df_upload_temp.columns:
@@ -569,11 +568,36 @@ else:
         filtro_status = st.multiselect("Filtrar por Status", ["🟢 Bom (Atualizado)", "🟡 Atenção (Aviso: +1 semana)", "🔴 CRÍTICO (Necessita contar urgente: +2 semanas)"], default=["🟢 Bom (Atualizado)", "🟡 Atenção (Aviso: +1 semana)", "🔴 CRÍTICO (Necessita contar urgente: +2 semanas)"])
         st.dataframe(df_painel_final[df_painel_final["Status de Criticidade"].isin(filtro_status)], use_container_width=True, hide_index=True)
 
-    # --- ABA 6: PLANILHA DA BASE DE ESTOQUE ---
+    # --- ABA 6: PLANILHA DA BASE DE ESTOQUE (CRUZAMENTO EM TEMPO REAL) ---
     with aba_base_estoque:
         st.title("📄 Base de Dados Importada do Inventário")
         if st.session_state.base_sistema is not None:
-            st.dataframe(st.session_state.base_sistema, use_container_width=True, hide_index=True)
+            id_limpo_b = id_inventario_atual.replace("#", "").strip() if id_inventario_atual else ""
+            
+            # Resgata lançamentos efetuados nesta pasta para cruzar dados
+            df_contados_db = pd.read_sql_query("SELECT cod_produto, lote, ativo, qtd_contada FROM contagens WHERE inventario_id = ?", conn, params=(id_limpo_b,))
+            
+            # Clona a base para aplicar as colunas extras de auditoria visual
+            df_exibicao_base = st.session_state.base_sistema.copy()
+            
+            if not df_contados_db.empty:
+                # Agrupa a quantidade total bipada por chave única de material
+                grouped_contas = df_contados_db.groupby(['cod_produto', 'lote', 'ativo'])['qtd_contada'].sum().reset_index()
+                
+                # Mescla as contagens para exibir na listagem
+                df_exibicao_base = df_exibicao_base.merge(
+                    grouped_contas, 
+                    on=['cod_produto', 'lote', 'ativo'], 
+                    how='left'
+                )
+                df_exibicao_base['qtd_contada'] = df_exibicao_base['qtd_contada'].fillna(0).astype(int)
+                df_exibicao_base['Contabilizado'] = df_exibicao_base['qtd_contada'].apply(lambda x: '🟢 Sim' if x > 0 else '❌ Não')
+                df_exibicao_base = df_exibicao_base.rename(columns={'qtd_contada': 'qtd_lancada'})
+            else:
+                df_exibicao_base['qtd_lancada'] = 0
+                df_exibicao_base['Contabilizado'] = '❌ Não'
+                
+            st.dataframe(df_exibicao_base, use_container_width=True, hide_index=True)
         else:
             st.info("Nenhuma planilha base foi importada para esta pasta operacional até o momento.")
 
