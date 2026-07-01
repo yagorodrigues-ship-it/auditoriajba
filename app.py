@@ -11,7 +11,6 @@ st.set_page_config(page_title="Contagem de Estoque Físico - JBA", layout="wide"
 
 # --- BANCO DE DADOS PERMANENTE E FIXO (SQLITE) ---
 def conectar_banco():
-    # Garantia de caminho absoluto persistente para evitar perda de dados no ambiente de nuvem
     caminho_banco = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'banco_inventario.db') if '__file__' in locals() else 'banco_inventario.db'
     conn = sqlite3.connect(caminho_banco, check_same_thread=False)
     return conn
@@ -20,7 +19,6 @@ def inicializar_banco():
     conn = conectar_banco()
     cursor = conn.cursor()
     
-    # Tabela de usuários/colaboradores
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS usuarios (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -31,7 +29,6 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de inventários gerais (funcionários)
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios (
             id TEXT PRIMARY KEY,
@@ -41,7 +38,6 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de backup persistente para os itens carregados de cada inventário
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS itens_base_inventario (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +53,6 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de inventários exclusivos do Supervisor
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS inventarios_supervisor (
             id TEXT PRIMARY KEY,
@@ -67,7 +62,6 @@ def inicializar_banco():
         )
     """)
     
-    # Tabela de contagens dos funcionários
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS contagens (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -89,7 +83,6 @@ def inicializar_banco():
         )
     """)
 
-    # Tabela de Auditorias do Supervisor
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS auditorias_supervisor (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,7 +103,6 @@ def inicializar_banco():
         )
     """)
     
-    # --- MIGRACAO AUTOMATICA ---
     try:
         cursor.execute("PRAGMA table_info(contagens)")
         colunas_existentes = [coluna[1] for coluna in cursor.fetchall()]
@@ -128,7 +120,6 @@ def inicializar_banco():
     except Exception as e:
         pass
 
-    # Criar administrador padrão
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         cursor.execute("""
@@ -141,7 +132,6 @@ def inicializar_banco():
 
 inicializar_banco()
 
-# --- CARREGAMENTO SEGURO DOS INVENTÁRIOS ---
 conn_init = conectar_banco()
 try:
     df_inventarios = pd.read_sql_query("SELECT * FROM inventarios ORDER BY data DESC, id DESC", conn_init)
@@ -154,14 +144,12 @@ except:
     df_inventarios_sup = pd.DataFrame(columns=['id', 'nome', 'data', 'status'])
 conn_init.close()
 
-# --- FUNÇÃO AUXILIAR PARA EXPORTAR EXCEL ---
 def converter_para_excel(df):
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
         df.to_excel(writer, index=False, sheet_name='Relatorio')
     return output.getvalue()
 
-# --- ESTILIZAÇÃO PERSONALIZADA ---
 st.markdown("""
     <style>
     div.stButton > button:first-child[kind="primary"] {
@@ -238,7 +226,6 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# --- GERENCIAMENTO DE ESTADO ---
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'base_sistema' not in st.session_state:
@@ -261,7 +248,6 @@ if 'contador_reset_sup' not in st.session_state:
 if 'ultimo_item_sucesso' not in st.session_state:
     st.session_state.ultimo_item_sucesso = ""
 
-# Estados de paginação independentes
 if 'pagina_historico' not in st.session_state:
     st.session_state.pagina_historico = 0
 if 'pagina_historico_sup' not in st.session_state:
@@ -270,7 +256,6 @@ if 'pagina_historico_sup' not in st.session_state:
 def limpar_documento(doc):
     return str(doc).strip().replace(".", "").replace("-", "").replace("/", "")
 
-# --- RECOVERY URL PARAMETERS ---
 query_params = st.query_params
 if "recuperar" in query_params and "token" in query_params:
     st.title("🔑 Redefinição de Senha Seguro JBA")
@@ -301,7 +286,6 @@ if "recuperar" in query_params and "token" in query_params:
                     st.success("🎉 Senha atualizada com sucesso! Pode fazer o login na tela principal.")
     st.stop()
 
-# --- TELA DE ACESSO ---
 if not st.session_state.logged_in:
     conn = conectar_banco()
     if st.session_state.tela_acesso == "login":
@@ -394,7 +378,6 @@ if not st.session_state.logged_in:
             st.rerun()
     conn.close()
 
-# --- TELA LOGADA DO SISTEMA ---
 else:
     conn = conectar_banco()
     
@@ -407,7 +390,6 @@ else:
     
     id_inventario_atual_inicial = df_inventarios.iloc[0]['id'].replace('#','') if not df_inventarios.empty else ""
 
-    # SIDEBAR
     with st.sidebar:
         st.write(f"👤 **Operador Ativo:** {st.session_state.operador}")
         
@@ -432,7 +414,6 @@ else:
             id_inventario_atual = " – " in inventario_selected and inventario_selected.split(" – ")[0] or None
             inventario_selected_obj = df_inventarios[df_inventarios['id'] == id_inventario_atual].iloc[0]
 
-        # RECONSTRUÇÃO DA BASE DE SALDO PERSISTENTE VINCULADA AO BANCO DE DADOS E À PASTA ATUAL
         if id_inventario_atual:
             id_pasta_limpo_base = id_inventario_atual.replace("#", "")
             df_base_persistida = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, unid_medida, qtd_estoque, id_estoque_fisico, lote, ativo FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_pasta_limpo_base,))
@@ -502,7 +483,6 @@ else:
                     conn.commit()
                     st.rerun()
 
-        # TRAVA DE FECHAMENTO ADAPTADA
         if inventario_selected_obj is not None and inventario_selected_obj['status'] in ["Aberto", "2a Contagem"]:
             id_pasta_limpo = id_inventario_atual.replace('#', '')
             pode_fechar = False
@@ -510,11 +490,13 @@ else:
 
             if st.session_state.base_sistema is not None:
                 if inventario_selected_obj['status'] == "Aberto":
-                    df_c_verif = pd.read_sql_query("SELECT cod_produto FROM contagens WHERE inventario_id = ?", conn, params=(id_pasta_limpo,))
-                    lista_contados_set = set(df_c_verif['cod_produto'].astype(str).str.upper().str.strip().tolist())
+                    df_c_verif = pd.read_sql_query("SELECT cod_produto, ativo FROM contagens WHERE inventario_id = ?", conn, params=(id_pasta_limpo,))
+                    # Verificação baseada no par (Código + Ativo) para precisão milimétrica
+                    lista_contados_set = set(zip(df_c_verif['cod_produto'].astype(str).str.upper().str.strip(), df_c_verif['ativo'].astype(str).str.upper().str.strip()))
                     for idx, r_base in st.session_state.base_sistema.iterrows():
                         cod_b = str(r_base['cod_produto']).upper().strip()
-                        if cod_b not in lista_contados_set:
+                        ativo_b = str(r_base['ativo']).upper().strip() if pd.notna(r_base['ativo']) else ""
+                        if (cod_b, ativo_b) not in lista_contados_set:
                             itens_esquecidos_lista.append(cod_b)
                     if len(itens_esquecidos_lista) == 0:
                         pode_fechar = True
@@ -547,7 +529,6 @@ else:
                         conn.commit()
                         st.rerun()
 
-        # PROGRESSO LATERAL
         total_itens_base, total_contados, total_pendentes, progresso = 0, 0, 0, 0.0
         if st.session_state.base_sistema is not None and id_inventario_atual is not None:
             total_itens_base = len(st.session_state.base_sistema)
@@ -599,7 +580,6 @@ else:
                 codigo_rastreio = busca_limpa.split(" - ")[-1].strip() if " - " in busca_limpa else busca_limpa
                 id_pasta_limpo = id_inventario_atual.replace("#", "")
                 
-                # TRAVA AMOSTRAGEM AJUSTADA PARA USAR AS COLUNAS PERSISTIDAS NO BANCO
                 item_autorizado = True
                 if inventario_selected_obj['status'] == "2a Contagem":
                     df_permitidos = pd.read_sql_query("SELECT id FROM contagens WHERE inventario_id = ? AND cod_produto = ? AND fase_contagem = '2a Contagem'", conn, params=(id_pasta_limpo, codigo_rastreio))
@@ -612,7 +592,7 @@ else:
                     itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_rastreio]
                     
                     if not itens_filtrados.empty:
-                        # Puxar lançamentos já existentes para este material na pasta para remover duplicidades de seleção
+                        # Carrega os itens já contados baseando-se em lote e ativo para remover da seleção
                         df_ja_contados = pd.read_sql_query("SELECT lote, ativo FROM contagens WHERE inventario_id = ?", conn, params=(id_pasta_limpo,))
                         lotes_ja_contados = set(df_ja_contados['lote'].astype(str).str.strip().tolist())
                         ativos_ja_contados = set(df_ja_contados['ativo'].astype(str).str.strip().tolist())
@@ -633,13 +613,12 @@ else:
 
                         ativo_selecionado = ""
                         if len(ativos_disponiveis) > 1:
-                            st.info("🔢 Múltiplos números de ativos identificados para este lote. Selecione o correspondente:")
+                            st.info("🔢 Múltiplos números de ativos identificados. Selecione o correspondente:")
                             ativo_selecionado = st.selectbox("👇 SELECIONE O ATIVO PARA CONTAGEM:", ativos_disponiveis, key="ativo_selector_bip")
                             item_especifico = linhas_filtradas_por_lote[linhas_filtradas_por_lote['ativo'].astype(str).str.strip() == ativo_selecionado].iloc[0]
                         else:
                             if not linhas_filtradas_por_lote.empty:
                                 item_especifico = linhas_filtradas_por_lote.iloc[0]
-                                # Captura e preenche automaticamente a numeração do ativo cadastrado no material
                                 ativo_selecionado = str(item_especifico['ativo']).strip() if 'ativo' in item_especifico and pd.notna(item_especifico['ativo']) and str(item_especifico['ativo']).lower() != 'nan' else ""
                             else:
                                 item_especifico = itens_filtrados.iloc[0]
@@ -788,7 +767,6 @@ else:
 
             st.markdown("---")
 
-            # --- SEÇÃO 2: CONTROLE DE QUALIDADE AMOSTRAL ---
             st.subheader("📁 Controle de Auditoria Própria e Amostral do Supervisor")
             
             if df_inventarios_sup.empty:
@@ -1120,18 +1098,19 @@ else:
                                 st.write("**📋 Itens Efetivamente Contados:**")
                                 st.dataframe(df_hist_inv[ordem_colunas_print], use_container_width=True, hide_index=True)
                                 
-                            # LISTA DE ESQUECIDOS EXTRAÍDA DIRETAMENTE DO BANCO DE DADOS DA PASTA SELECIONADA
-                            df_base_local_proc = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_inv_proc,))
+                            df_base_local_proc = pd.read_sql_query("SELECT cod_produto, desc_produto, desc_estoque_fisico, ativo FROM itens_base_inventario WHERE inventario_id = ?", conn, params=(id_inv_proc,))
                             if not df_base_local_proc.empty:
-                                set_contados_global = set(df_hist_inv['cod_produto'].astype(str).str.upper().str.strip().tolist())
+                                set_contados_global = set(zip(df_hist_inv['cod_produto'].astype(str).str.upper().str.strip(), df_hist_inv['ativo'].astype(str).str.upper().str.strip()))
                                 esquecidos_linhas = []
                                 for _, row_b in df_base_local_proc.iterrows():
                                     c_atual = str(row_b['cod_produto']).upper().strip()
-                                    if c_atual not in set_contados_global:
+                                    a_atual = str(row_b['ativo']).upper().strip() if pd.notna(row_b['ativo']) else ""
+                                    if (c_atual, a_atual) not in set_contados_global:
                                         esquecidos_linhas.append({
                                             "Código Produto": c_atual,
                                             "Descrição Produto": row_b['desc_produto'],
-                                            "Localização Prevista": row_b['desc_estoque_fisico']
+                                            "Localização Prevista": row_b['desc_estoque_fisico'],
+                                            "Ativo": a_atual
                                         })
                                 
                                 st.write("---")
@@ -1171,21 +1150,29 @@ else:
             st.subheader("📄 Espelho Base de Saldo do Upload")
             
             if id_inventario_atual:
-                df_lancados_reais = pd.read_sql_query("SELECT cod_produto, operador FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
-                mapa_contados = dict(zip(df_lancados_reais['cod_produto'].astype(str).str.upper().str.strip(), df_lancados_reais['operador']))
+                # Modificado para coletar o código do produto E o ativo para validação cruzada individual
+                df_lancados_reais = pd.read_sql_query("SELECT cod_produto, ativo, operador FROM contagens WHERE inventario_id = ?", conn, params=(id_inventario_atual.replace('#',''),))
+                # Criar um mapeamento baseado na chave composta (Código + Ativo)
+                mapa_contados = {}
+                for _, row_l in df_lancados_reais.iterrows():
+                    chave_comp = f"{str(row_l['cod_produto']).upper().strip()}_{str(row_l['ativo']).upper().strip()}"
+                    mapa_contados[chave_comp] = row_l['operador']
             else:
                 mapa_contados = {}
             
-            def calcular_status_linha(linha_cod):
-                cod_chave = str(linha_cod).upper().strip()
-                if cod_chave in mapa_contados:
-                    return f"🟩 Contabilizado por ({mapa_contados[cod_chave]})"
+            def calcular_status_linha(linha):
+                cod_chave = str(linha['cod_produto']).upper().strip()
+                at_chave = str(linha['ativo']).upper().strip() if pd.notna(linha['ativo']) else ""
+                chave_busca = f"{cod_chave}_{at_chave}"
+                if chave_busca in mapa_contados:
+                    return f"🟩 Contabilizado por ({mapa_contados[chave_busca]})"
                 return "🟥 Não Contado"
                 
             df_base_visual = st.session_state.base_sistema.copy()
-            df_base_visual["Status de Contagem"] = df_base_visual['cod_produto'].apply(calcular_status_linha)
+            df_base_visual["Status de Contagem"] = df_base_visual.apply(calcular_status_linha, axis=1)
             
-            colunas_ordenadas = ["Status de Contagem"] + [col for col in df_base_visual.columns if col != "Status de Contagem"]
+            # --- CORREÇÃO DA ORDEM DAS COLUNAS PARA TRAZER O ATIVO E O LOTE NA LISTAGEM ---
+            colunas_ordenadas = ["Status de Contagem", "cod_produto", "desc_produto", "desc_estoque_fisico", "unid_medida", "qtd_estoque", "id_estoque_fisico", "lote", "ativo"]
             st.dataframe(df_base_visual[colunas_ordenadas], use_container_width=True, hide_index=True)
         else:
             st.info("Nenhuma base carregada na barra lateral.")
