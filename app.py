@@ -37,6 +37,9 @@ def carregar_contagens():
     if os.path.exists(DB_CONTAGENS): 
         try:
             df = pd.read_csv(DB_CONTAGENS)
+            for col in colunas_obrigatorias:
+                if col not in df.columns:
+                    df[col] = None
             return df
         except:
             pass
@@ -64,7 +67,9 @@ def carregar_estoques_master():
 def salvar_estoques_master(dados):
     with open(DB_ESTOQUES_MASTER, 'w') as f: json.dump(dados, f, indent=4)
 
-# Inicializações controladas no Session State
+# -----------------------------------------------------------------------------
+# INSTANCIAÇÃO DAS VARIÁVEIS DE SESSÃO DO STREAMLIT
+# -----------------------------------------------------------------------------
 if 'inventarios' not in st.session_state: st.session_state.inventarios = carregar_inventarios()
 if 'base_produtos' not in st.session_state: st.session_state.base_produtos = pd.DataFrame()
 if 'contagens' not in st.session_state: st.session_state.contagens = carregar_contagens()
@@ -73,7 +78,7 @@ if 'pagina_atual_hist' not in st.session_state: st.session_state.pagina_atual_hi
 if 'limpar_bipe' not in st.session_state: st.session_state.limpar_bipe = False
 if 'modo_auditoria_ativo' not in st.session_state: st.session_state.modo_auditoria_ativo = False
 
-# 🔥 CORREÇÃO FORÇADA DE SEGURO CONTRA O KEYERROR DA PLANILHA ANTIGA:
+# 🔥 SEGURANÇA MÁXIMA ANTES DA LINHA 133: Força a criação das colunas novas no cache ativo do navegador
 for col_nova in ['Supervisor_Qtd', 'Supervisor_Etiqueta', 'Supervisor_Endereco', 'Origem_Contagem']:
     if col_nova not in st.session_state.contagens.columns:
         st.session_state.contagens[col_nova] = None
@@ -137,7 +142,7 @@ with st.sidebar:
     lista_invs_nomes = [item[0] for item in inventarios_ordenados]
     inv_ativo = st.selectbox("Inventário em andamento:", lista_invs_nomes, index=0) if lista_invs_nomes else None
 
-    # Filtra as contagens ocultando as linhas geradas pelo módulo de acuracidade do supervisor
+    # Linha 133 Corrigida Definitivamente (Garantido que colunas existem no state)
     contagens_atuais = pd.DataFrame()
     if inv_ativo and not st.session_state.contagens.empty:
         contagens_atuais = st.session_state.contagens[
