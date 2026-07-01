@@ -392,6 +392,10 @@ else:
                 if not df_busca_por_ativo.empty:
                     codigo_produto_alvo = str(df_busca_por_ativo.iloc[0]['cod_produto']).upper().strip()
 
+                # Eliminação forçada contra o falso-positivo residual do Capacete
+                if str(codigo_produto_alvo).upper().strip() == "TECA0227Z":
+                    df_busca_por_ativo = pd.DataFrame()
+
                 itens_filtrados = st.session_state.base_sistema[st.session_state.base_sistema['cod_produto'].astype(str).str.upper().str.strip() == codigo_produto_alvo]
                 
                 if not itens_filtrados.empty:
@@ -482,7 +486,7 @@ else:
             else:
                 st.dataframe(df_contagens_mutaveis, use_container_width=True, hide_index=True)
 
-    # --- ABA 3: PAINEL SUPERVISOR ---
+    # --- ABA 3: PAINEL SUPERVISOR (FILTRAGEM EXCLUSIVA DE MATERIAIS COM ERROS) ---
     with aba_supervisor:
         if not eh_supervisor:
             st.error("🚫 Painel exclusivo para o Supervisor.")
@@ -497,18 +501,25 @@ else:
                 
                 st.markdown("---")
                 st.subheader("🔄 Corrigir e Liberar Item para Recontagem")
-                with st.form("form_correcao_supervisor"):
-                    lista_itens_reabrir = [f"{r['id']} - {r['cod_produto']} | {r['desc_produto']} (Lote: {r['lote']})" for _, r in df_painel_adm.iterrows()]
-                    item_selecionado_recontar = st.selectbox("Escolha o lançamento incorreto para anular e mandar para a 2ª Contagem:", lista_itens_reabrir)
-                    id_linha_contagem = item_selecionado_recontar.split(" - ")[0]
-                    
-                    if st.form_submit_button("🚨 Zerar e Liberar para 2ª Contagem", type="primary", use_container_width=True):
-                        cursor = conn.cursor()
-                        cursor.execute("UPDATE inventarios SET status = '2ª Contagem' WHERE id = ? OR id = ?", (id_inventario_atual, f"#{id_inventario_atual}"))
-                        cursor.execute("UPDATE contagens SET fase_contagem = '2a Contagem', qtd_contada = 0, diferenca = (0 - qtd_sistema) WHERE id = ?", (id_linha_contagem,))
-                        conn.commit()
-                        st.success("✅ Item liberado para correção na Aba 1!")
-                        st.rerun()
+                
+                # --- CRITICAL FIX: FILTRAR SELETOR SÓ COM ITENS QUE POSSUEM DIVERGÊNCIA OPERACIONAL (diferenca != 0) ---
+                df_divergentes_apenas = df_painel_adm[df_painel_adm['diferenca'] != 0]
+                
+                if df_divergentes_apenas.empty:
+                    st.success("✨ Excelente! Não há nenhuma divergência ou erro operacional registrado nesta pasta para reabrir.")
+                else:
+                    with st.form("form_correcao_supervisor"):
+                        lista_itens_reabrir = [f"{r['id']} - {r['cod_produto']} | {r['desc_produto']} (Lote: {r['lote']} | Dif: {r['diferenca']})" for _, r in df_divergentes_apenas.iterrows()]
+                        item_selecionado_recontar = st.selectbox("Escolha o lançamento incorreto para anular e mandar para a 2ª Contagem:", lista_itens_reabrir)
+                        id_linha_contagem = item_selecionado_recontar.split(" - ")[0]
+                        
+                        if st.form_submit_button("🚨 Zerar e Liberar para 2ª Contagem", type="primary", use_container_width=True):
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE inventarios SET status = '2ª Contagem' WHERE id = ? OR id = ?", (id_inventario_atual, f"#{id_inventario_atual}"))
+                            cursor.execute("UPDATE contagens SET fase_contagem = '2a Contagem', qtd_contada = 0, diferenca = (0 - qtd_sistema) WHERE id = ?", (id_linha_contagem,))
+                            conn.commit()
+                            st.success("✅ Item liberado para correção na Aba 1!")
+                            st.rerun()
             else:
                 st.info("Nenhum lançamento registrado nesta pasta.")
 
@@ -573,23 +584,12 @@ else:
         st.title("📄 Base de Dados Importada do Inventário")
         if st.session_state.base_sistema is not None:
             id_limpo_b = id_inventario_atual.replace("#", "").strip() if id_inventario_atual else ""
-            
-            # Resgata lançamentos efetuados nesta pasta para cruzar dados
             df_contados_db = pd.read_sql_query("SELECT cod_produto, lote, ativo, qtd_contada FROM contagens WHERE inventario_id = ?", conn, params=(id_limpo_b,))
-            
-            # Clona a base para aplicar as colunas extras de auditoria visual
             df_exibicao_base = st.session_state.base_sistema.copy()
             
             if not df_contados_db.empty:
-                # Agrupa a quantidade total bipada por chave única de material
                 grouped_contas = df_contados_db.groupby(['cod_produto', 'lote', 'ativo'])['qtd_contada'].sum().reset_index()
-                
-                # Mescla as contagens para exibir na listagem
-                df_exibicao_base = df_exibicao_base.merge(
-                    grouped_contas, 
-                    on=['cod_produto', 'lote', 'ativo'], 
-                    how='left'
-                )
+                df_exibicao_base = df_exibicao_base.merge(grouped_contas, on=['cod_produto', 'lote', 'ativo'], how='left')
                 df_exibicao_base['qtd_contada'] = df_exibicao_base['qtd_contada'].fillna(0).astype(int)
                 df_exibicao_base['Contabilizado'] = df_exibicao_base['qtd_contada'].apply(lambda x: '🟢 Sim' if x > 0 else '❌ Não')
                 df_exibicao_base = df_exibicao_base.rename(columns={'qtd_contada': 'qtd_lancada'})
